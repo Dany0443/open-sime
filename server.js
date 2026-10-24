@@ -2485,7 +2485,10 @@ function createApp() {
     next();
   });
   app.use("/api", (_req, res, next) => {
-    res.set("Cache-Control", "no-store");
+    res.set({
+      "Cache-Control": "no-store",
+      "Content-Type": "application/json; charset=utf-8",
+    });
     next();
   });
   app.use(express.json({ limit: "4kb" }));
@@ -2728,8 +2731,23 @@ function createApp() {
     });
   });
 
-  app.get("/", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
-  app.use("/public", express.static(path.join(ROOT, "public"), { index: false, dotfiles: "ignore" }));
+  app.get("/", (_req, res) => {
+    res.set("Content-Type", "text/html; charset=utf-8");
+    res.sendFile(path.join(ROOT, "index.html"));
+  });
+  app.use(
+    "/public",
+    express.static(path.join(ROOT, "public"), {
+      index: false,
+      dotfiles: "ignore",
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith(".js")) res.set("Content-Type", "application/javascript; charset=utf-8");
+        else if (filePath.endsWith(".css")) res.set("Content-Type", "text/css; charset=utf-8");
+        else if (filePath.endsWith(".html")) res.set("Content-Type", "text/html; charset=utf-8");
+        else if (filePath.endsWith(".json")) res.set("Content-Type", "application/json; charset=utf-8");
+      },
+    })
+  );
 
   app.use((err, _req, res, _next) => {
     if (err?.type === "entity.parse.failed" || err?.type === "entity.too.large") {
