@@ -2457,8 +2457,15 @@ function createApp() {
   });
   dataRoute(app, "teachers", TTL.teachers, async (client, student, req) => {
     const hit = req.session.students[student.id];
-    if (hit?.data?.teachers?.length && Date.now() - hit.cachedAt < TTL.teachers) return { teachers: hit.data.teachers };
-    return { teachers: await client.getTeachers(student.id) };
+    if (hit?.teachersDetailed && Date.now() - hit.teachersDetailedAt < TTL.teachers) {
+      return { teachers: hit.teachersDetailed };
+    }
+    const teachers = await client.getTeachers(student.id);
+    if (hit) {
+      hit.teachersDetailed = teachers;
+      hit.teachersDetailedAt = Date.now();
+    }
+    return { teachers };
   });
   dataRoute(app, "grades", TTL.grades, async (client, student) => ({ grades: await client.getLatestGrades(student.id) }));
   dataRoute(app, "catalog", TTL.catalog, (client, student) => client.getCatalog(student.id));
@@ -2466,10 +2473,18 @@ function createApp() {
   dataRoute(app, "homework", TTL.homework, async (client, student) => ({ homework: await client.getHomework(student.id) }));
   dataRoute(app, "absences", TTL.absences, async (client, student, req) => {
     const hit = req.session.students[student.id];
-    if (hit?.absente && Date.now() - hit.cachedAt < TTL.absences) return hit.absente;
+    if (hit?.absenteDetailed && Date.now() - hit.absenteDetailedAt < TTL.absences) {
+      return hit.absenteDetailed;
+    }
     const summary = await client.getAbsenceSummary(student.id);
     const records = await client.getAbsenceRecords(student.id);
-    return buildSemesterAbsences(summary, records);
+    const detailed = buildSemesterAbsences(summary, records);
+    detailed.detail = true;
+    if (hit) {
+      hit.absenteDetailed = detailed;
+      hit.absenteDetailedAt = Date.now();
+    }
+    return detailed;
   });
   dataRoute(app, "schedule", TTL.schedule, (client, student, req) => client.getWeek(student.id, req.query.date || todayChisinau()), {
     keyFor: (req) => weekStart(req.query.date || todayChisinau()),

@@ -942,6 +942,9 @@ function selectDay(iso) {
   state.day = iso;
   updateDaySwitch();
   renderLessons();
+  if (state.tab === "timetable" && state.token) {
+    loadTabData("timetable");
+  }
 }
 
 function stepDay(delta) {
@@ -1337,6 +1340,104 @@ function buildNav() {
   }
 }
 
+const tabLoadedAt = new Map();
+const tabInFlight = new Map();
+
+const TAB_TTLS = {
+  marks: 120_000,
+  timetable: 60_000,
+  absences: 120_000,
+  homework: 60_000,
+  profile: 15 * 60_000,
+};
+
+async function loadTabData(tabId, { force = false } = {}) {
+  if (!state.token || !tabId || tabId === "home") return;
+  const student = (state.data && state.data.student && state.data.student.id) || "";
+  const subKey = tabId === "timetable" ? `${tabId}:${student}:${state.day || todayIso()}` : `${tabId}:${student}`;
+  const now = Date.now();
+  const lastLoaded = tabLoadedAt.get(subKey) || 0;
+  const ttl = TAB_TTLS[tabId] || 60_000;
+
+  if (!force && lastLoaded && now - lastLoaded < ttl) {
+    return;
+  }
+  if (tabInFlight.has(subKey)) {
+    return tabInFlight.get(subKey);
+  }
+
+  const promise = (async () => {
+    try {
+      const q = student ? `?student=${encodeURIComponent(student)}` : "";
+      if (tabId === "marks") {
+        const res = await api(`/api/catalog${q}`);
+        if (res && res.data) {
+          if (!state.data) state.data = {};
+          state.data.catalog = res.data;
+          state.data.reusita = res.data;
+          modelSource = null;
+          if (state.tab === "marks") renderMarks();
+        }
+      } else if (tabId === "timetable") {
+        const d = state.day || todayIso();
+        const schedQ = `?date=${encodeURIComponent(d)}${student ? `&student=${encodeURIComponent(student)}` : ""}`;
+        const res = await api(`/api/schedule${schedQ}`);
+        if (res && res.data) {
+          if (!state.data) state.data = {};
+          state.data.schedule = res.data;
+          state.data.orar = res.data;
+          modelSource = null;
+          if (state.tab === "timetable") {
+            buildDaySwitch();
+            renderLessons();
+          }
+        }
+      } else if (tabId === "absences") {
+        const res = await api(`/api/absences${q}`);
+        if (res && res.data) {
+          if (!state.data) state.data = {};
+          state.data.absente = res.data;
+          state.data.absences = res.data;
+          modelSource = null;
+          if (state.tab === "absences") renderAbsences();
+        }
+      } else if (tabId === "profile") {
+        const [teachersRes, profileRes] = await Promise.allSettled([
+          api(`/api/teachers${q}`),
+          api(`/api/profile${q}`),
+        ]);
+        if (!state.data) state.data = {};
+        if (teachersRes.status === "fulfilled" && teachersRes.value && teachersRes.value.data) {
+          state.data.teachers = teachersRes.value.data.teachers || teachersRes.value.data;
+        }
+        if (profileRes.status === "fulfilled" && profileRes.value && profileRes.value.data) {
+          state.data.metadata = profileRes.value.data.metadata || profileRes.value.data;
+        }
+        modelSource = null;
+        if (state.tab === "profile") renderProfile();
+      } else if (tabId === "homework") {
+        const res = await api(`/api/homework${q}`);
+        if (res && res.data) {
+          if (!state.data) state.data = {};
+          state.data.homework = res.data.homework || res.data;
+          modelSource = null;
+          if (state.tab === "homework") renderHomework();
+        }
+      }
+      tabLoadedAt.set(subKey, Date.now());
+    } catch (err) {
+      if (!state.data) {
+        toast(describeError(err, "data"));
+      }
+    } finally {
+      tabInFlight.delete(subKey);
+    }
+  })();
+
+  tabInFlight.set(subKey, promise);
+  return promise;
+}
+
 function setTab(id) {
   const tab = TABS.find((t) => t.id === id) || TABS[0];
   state.tab = tab.id;
@@ -1351,6 +1452,9 @@ function setTab(id) {
   document.title = tab.title + " - open-sime";
   if (tab.id === "timetable") renderLessons();
   window.scrollTo(0, 0);
+  if (state.token) {
+    loadTabData(tab.id);
+  }
 }
 
 const colorQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -1473,6 +1577,8 @@ function endSession(message) {
   store.del(KEYS.token);
   store.del(KEYS.data);
   store.del(KEYS.sync);
+  tabLoadedAt.clear();
+  tabInFlight.clear();
   window.clearTimeout(cooldownTimer);
   showAuth(message);
 }
@@ -1514,7 +1620,11 @@ async function refresh({ force = false, background = false } = {}) {
     if (!Array.isArray(res.data.students) && Array.isArray(res.students)) res.data.students = res.students;
     setData(res.data, Date.now() - ageMs);
     render();
-    if (force) state.cooldownUntil = Date.now() + SYNC_COOLDOWN_MS;
+    if (force) {
+      state.cooldownUntil = Date.now() + SYNC_COOLDOWN_MS;
+      tabLoadedAt.clear();
+      if (state.tab && state.tab !== "home") loadTabData(state.tab, { force: true });
+    }
   } catch (err) {
     if (seq !== state.seq) return;
     if (err instanceof ApiError && err.status === 401) {
@@ -1560,9 +1670,11 @@ async function switchStudent(id) {
     state.switching = null;
     state.stale = Boolean(res.cache && res.cache.stale);
     state.offline = false;
+    tabLoadedAt.clear();
     if (!Array.isArray(res.data.students) && Array.isArray(res.students)) res.data.students = res.students;
     setData(res.data, Date.now() - ageMs);
     render();
+    if (state.tab && state.tab !== "home") loadTabData(state.tab, { force: true });
   } catch (err) {
     if (seq !== state.seq) return;
     state.switching = null;
