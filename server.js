@@ -2372,6 +2372,7 @@ function createApp() {
         }
       });
       return res.json({
+        role: req.session.role,
         studentId: result.data.student?.id || studentId,
         student: result.data.student,
         students: result.data.students,
@@ -2397,6 +2398,7 @@ function createApp() {
 
       if (!force && hit && now - hit.at < TTL.overview) {
         return res.json({
+          role: req.session.role,
           data: hit.data,
           student: hit.data.student,
           students: hit.data.students,
@@ -2437,6 +2439,7 @@ function createApp() {
       });
 
       return res.json({
+        role: req.session.role,
         data: result.data,
         student: result.data.student,
         students: result.data.students,

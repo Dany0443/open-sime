@@ -1187,21 +1187,29 @@ function renderProfile() {
 
 function renderStudents() {
   const host = $("student-list");
+  if (!host) return;
+  const strip = host.closest(".student-strip");
   const list = Array.from(new Map(state.students.map((s) => [String(s.id), s])).values());
+  const multiple = list.length > 1 && state.role !== "student";
+
+  if (!multiple) {
+    if (strip) strip.hidden = true;
+    host.replaceChildren();
+    return;
+  }
+  if (strip) strip.hidden = false;
   if (!list.length) {
     host.replaceChildren(h("div", { class: "skeleton student-skel", "aria-hidden": "true" }));
     return;
   }
   const hadFocus = host.contains(document.activeElement);
   const currentId = state.switching || (state.data && state.data.student && state.data.student.id) || "";
-  const multiple = list.length > 1 && state.role !== "student";
   const nodes = list.map((s, i) => {
-    const active = !multiple || String(s.id) === String(currentId);
+    const active = String(s.id) === String(currentId);
     const body = [
       avatar(s, i, "sm"),
       h("span", { class: "student-text" }, h("span", { class: "student-name", text: toTitleCase(s.fullName || "Elev") }), s.className ? h("span", { class: "student-class", text: s.className }) : null),
     ];
-    if (!multiple) return h("div", { class: "student-chip is-active is-static" }, body);
     return h(
       "button",
       {
@@ -1423,9 +1431,9 @@ async function onLogin(event) {
     if (!res || !res.token || !res.data) throw new ApiError("bad response", 502, 0);
     state.seq += 1;
     state.token = res.token;
+    state.role = res.role || role;
     store.set(KEYS.token, res.token);
-    store.set(KEYS.role, role);
-    state.role = role;
+    store.set(KEYS.role, state.role);
     if ($("remember-me").checked) store.set(KEYS.creds, JSON.stringify({ username, password, role })); else store.del(KEYS.creds);
     const payload = res.data;
     if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students;
@@ -1495,6 +1503,10 @@ async function refresh({ force = false, background = false } = {}) {
   try {
     const res = await api("/api/overview" + (query.length ? "?" + query.join("&") : ""));
     if (seq !== state.seq || !res || !res.data) return;
+    if (res.role) {
+      state.role = res.role;
+      store.set(KEYS.role, res.role);
+    }
     const ageMs = ((res.cache && num(res.cache.ageSeconds)) || 0) * 1000;
     state.stale = Boolean(res.cache && res.cache.stale);
     state.offline = false;
@@ -1536,6 +1548,10 @@ async function switchStudent(id) {
   try {
     const res = await api("/api/student/switch", { method: "POST", body: { studentId: String(id) } });
     if (seq !== state.seq || !res || !res.data) return;
+    if (res.role) {
+      state.role = res.role;
+      store.set(KEYS.role, res.role);
+    }
     if (res.token) {
       state.token = res.token;
       store.set(KEYS.token, res.token);
