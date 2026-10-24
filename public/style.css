@@ -1824,6 +1824,78 @@ ul, ol {
   overflow-wrap: anywhere;
 }
 
+.abs-reconciliation-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--shape-lg);
+  background: var(--surface-container-high);
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  margin-bottom: 16px;
+}
+
+.abs-reconciliation-note .icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  fill: var(--primary);
+}
+
+.abs-section {
+  margin-bottom: 24px;
+}
+
+.abs-subject-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.abs-subject-card {
+  border-radius: var(--shape-lg);
+  background: var(--surface-container);
+  overflow: hidden;
+  transition: background var(--trans-fast);
+}
+
+.abs-subject-summary {
+  display: block;
+  cursor: pointer;
+  padding: 12px 16px;
+  user-select: none;
+}
+
+.abs-subject-summary::-webkit-details-marker {
+  display: none;
+}
+
+.abs-subject-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.abs-subject-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.abs-subject-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.abs-subject-list {
+  padding: 0 12px 12px 12px;
+}
+
 .profile-card {
   display: flex;
   flex-wrap: wrap;

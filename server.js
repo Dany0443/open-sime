@@ -2070,7 +2070,10 @@ class SimeClient {
       const today = todayChisinau();
       const year = Number(today.slice(0, 4));
       const startYear = Number(today.slice(5, 7)) >= 9 ? year : year - 1;
-      return absenceRecords(await this.calendarRange(studentId, `${startYear}-09-01`, today));
+      const calEntries = await this.calendarRange(studentId, `${startYear}-09-01`, today);
+      const page = await this.loadStudent(studentId);
+      const htmlRecords = extractHtmlAbsenceRecords(page.$, today);
+      return [...absenceRecords(calEntries), ...htmlRecords];
     });
   }
 

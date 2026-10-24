@@ -1078,7 +1078,12 @@ function renderAbsences() {
     return;
   }
   const sem = absenceSemester(m, state.semester);
-  stats.replaceChildren(stat("Total", String(sem.total), "primary"), stat("Motivate", String(sem.motivate), "success"), stat("Nemotivate", String(sem.nemotivate), "error"));
+  stats.replaceChildren(
+    stat("Total", String(sem.total), "primary"),
+    stat("Motivate", String(sem.motivate), "success"),
+    stat("Nemotivate", String(sem.nemotivate), "error")
+  );
+
   if (!sem.records.length) {
     list.replaceChildren(
       sem.total > 0
@@ -1087,7 +1092,80 @@ function renderAbsences() {
     );
     return;
   }
-  list.replaceChildren(h("ul", { class: "abs-ul" }, sem.records.map(absenceRow)));
+
+  const sections = [];
+
+  // Reconciliation note if portal summary exceeds detailed records
+  const missingCount = sem.total - sem.records.length;
+  if (missingCount > 0) {
+    sections.push(
+      h(
+        "div",
+        { class: "abs-reconciliation-note", role: "note" },
+        icon("info"),
+        h("p", {
+          text: "Portalul raportează " + sem.total + " absențe în Semestrul " + state.semester + ", dintre care " + sem.records.length + " au detalii pe ore. Pentru restul de " + missingCount + (missingCount === 1 ? " absență" : " absențe") + ", detaliile nu sunt publicate în orar."
+        })
+      )
+    );
+  }
+
+  // Per-subject summary (collapsible dates)
+  const bySubject = new Map();
+  for (const r of sem.records) {
+    const subj = r.subject || r.discipline || "Disciplină";
+    if (!bySubject.has(subj)) bySubject.set(subj, []);
+    bySubject.get(subj).push(r);
+  }
+
+  if (bySubject.size > 0) {
+    const subjectCards = Array.from(bySubject.entries()).map(([subj, records]) => {
+      const motCount = records.filter((r) => r.status === "motivat").length;
+      const nemotCount = records.filter((r) => r.status === "nemotivat").length;
+      return h(
+        "details",
+        { class: "abs-subject-card" },
+        h(
+          "summary",
+          { class: "abs-subject-summary" },
+          h(
+            "div",
+            { class: "abs-subject-header" },
+            h("span", { class: "abs-subject-title", text: toTitleCase(subj) }),
+            h(
+              "div",
+              { class: "abs-subject-badges" },
+              chip(records.length + (records.length === 1 ? " absență" : " absențe"), "neutral"),
+              nemotCount ? chip(nemotCount + " nemotivate", "error") : null,
+              motCount ? chip(motCount + " motivate", "success") : null
+            )
+          )
+        ),
+        h("ul", { class: "abs-ul abs-subject-list" }, records.map(absenceRow))
+      );
+    });
+
+    sections.push(
+      h(
+        "section",
+        { class: "abs-section", "aria-label": "Absențe pe discipline" },
+        h("h3", { class: "section-title", text: "Pe discipline" }),
+        h("div", { class: "abs-subject-grid" }, subjectCards)
+      )
+    );
+  }
+
+  // Chronological list
+  sections.push(
+    h(
+      "section",
+      { class: "abs-section", "aria-label": "Toate absențele" },
+      h("h3", { class: "section-title", text: "Cronologic" }),
+      h("ul", { class: "abs-ul" }, sem.records.map(absenceRow))
+    )
+  );
+
+  list.replaceChildren(...sections);
 }
 
 // rendering: homework
