@@ -1441,20 +1441,8 @@ const firefoxProfile = (major, platform) => ({
   hints: {},
 });
 
-const FINGERPRINTS = [
-  chromeProfile(131, "Linux", 'Not_A Brand";v="24'),
-  chromeProfile(131, "Windows", 'Not_A Brand";v="24'),
-  chromeProfile(130, "Linux", 'Not?A_Brand";v="99'),
-  chromeProfile(130, "Windows", 'Not?A_Brand";v="99'),
-  chromeProfile(129, "Windows", 'Not=A?Brand";v="8'),
-  firefoxProfile(133, "Linux"),
-  firefoxProfile(132, "Windows"),
-];
-
-// A browser identity stays constant for a session; it is rotated between sessions
-function pickFingerprint(random = Math.random) {
-  return FINGERPRINTS[Math.floor(random() * FINGERPRINTS.length)];
-}
+// One fixed, modern, browser-like profile per process
+const BROWSER_PROFILE = Object.freeze(chromeProfile(131, "Linux", 'Not_A Brand";v="24'));
 
 // kind "navigate" for page loads, "xhr" for APEX ajax and login submissions
 function fingerprintHeaders(fp, { kind = "navigate", hasReferer = false } = {}) {
@@ -1562,7 +1550,7 @@ function decodeBody(bytes, contentType) {
 }
 
 class SimeHttp {
-  constructor({ gate = new RateGate(), fingerprint = pickFingerprint(), breaker: br = globalBreaker, globalBreaker: gBr = globalBreaker, cookies = new Map() } = {}) {
+  constructor({ gate = new RateGate(), fingerprint = BROWSER_PROFILE, breaker: br = globalBreaker, globalBreaker: gBr = globalBreaker, cookies = new Map() } = {}) {
     this.gate = gate;
     this.fingerprint = fingerprint;
     this.breaker = br;
@@ -1858,6 +1846,21 @@ async function executeHandshake(cookieJar = new Map(), { username = "", password
 }
 
 // client
+
+function extractPageFlowInfo(input) {
+  if (!input) return { flowId: FLOW_ID, flowStepId: FLOW_STEP_ID };
+  try {
+    const $ = typeof input === "function" ? input : cheerio.load(input);
+    const flowId = $("#pFlowId").val() || $('input[name="p_flow_id"]').val() || FLOW_ID;
+    const flowStepId = $("#pFlowStepId").val() || $('input[name="p_flow_step_id"]').val() || FLOW_STEP_ID;
+    return {
+      flowId: String(flowId || FLOW_ID).trim(),
+      flowStepId: String(flowStepId || FLOW_STEP_ID).trim(),
+    };
+  } catch {
+    return { flowId: FLOW_ID, flowStepId: FLOW_STEP_ID };
+  }
+}
 
 class SimeClient {
   constructor(username, password, role, { http, auth } = {}) {
@@ -2165,6 +2168,7 @@ class SimeClient {
     if (!(student && checksum && salt && sessionId)) {
       throw new SimeParseError("Dashboard page lacks the items required for APEX requests");
     }
+    const { flowId, flowStepId } = extractPageFlowInfo(page?.$ || page?.html);
     const payload = {
       salt,
       pageItems: {
@@ -2178,8 +2182,8 @@ class SimeClient {
       kind: "xhr",
       gated: false,
       data: {
-        p_flow_id: FLOW_ID,
-        p_flow_step_id: FLOW_STEP_ID,
+        p_flow_id: flowId,
+        p_flow_step_id: flowStepId,
         p_instance: sessionId,
         p_request: `PLUGIN=${ajaxId}`,
         p_json: JSON.stringify(payload),
@@ -2471,17 +2475,92 @@ function dataRoute(app, name, ttl, build, { keyFor = () => "", validate = () => 
   });
 }
 
+function scrubLog(input) {
+  if (input === null || input === undefined) return input;
+  if (typeof input === "string") {
+    return input
+      .replace(/"(password|p_t02|token|secret|pSalt|pPageSubmissionId)":\s*"[^"]*"/gi, '"$1":"[REDACTED]"')
+      .replace(/\b(password|p_t02|pPassword)=[^&\s]+/gi, "$1=[REDACTED]")
+      .replace(/\bBearer\s+[A-Za-z0-9_\-\.]+/gi, "Bearer [REDACTED]")
+      .replace(/\b(cookie|set-cookie):\s*[^;\r\n]+/gi, "$1: [REDACTED]")
+      .replace(/\b(cs|checksum)=[A-Za-z0-9_\-]+/gi, "$1=[REDACTED]")
+      .replace(/\b(pSalt|pPageSubmissionId)=[0-9]+/gi, "$1=[REDACTED]");
+  }
+  if (Array.isArray(input)) {
+    return input.map(scrubLog);
+  }
+  if (typeof input === "object") {
+    const sensitiveKeys = new Set([
+      "password", "p_t02", "token", "secret", "psalt", "ppagesubmissionId",
+      "cookie", "cookies", "set-cookie", "checksum", "cs", "rawpassword",
+    ]);
+    const out = {};
+    for (const [k, v] of Object.entries(input)) {
+      if (sensitiveKeys.has(k.toLowerCase())) {
+        out[k] = "[REDACTED]";
+      } else {
+        out[k] = scrubLog(v);
+      }
+    }
+    return out;
+  }
+  return input;
+}
+
+function deriveRememberKey(secret) {
+  return crypto.createHash("sha256").update(String(secret)).digest();
+}
+
+function encryptRememberToken(data, secret) {
+  if (!secret) return null;
+  try {
+    const key = deriveRememberKey(secret);
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    const plaintext = Buffer.from(JSON.stringify(data), "utf-8");
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString("base64url")}.${tag.toString("base64url")}.${ciphertext.toString("base64url")}`;
+  } catch {
+    return null;
+  }
+}
+
+function decryptRememberToken(token, secret) {
+  if (!secret || !token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const key = deriveRememberKey(secret);
+    const iv = Buffer.from(parts[0], "base64url");
+    const tag = Buffer.from(parts[1], "base64url");
+    const ciphertext = Buffer.from(parts[2], "base64url");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return JSON.parse(decrypted.toString("utf-8"));
+  } catch {
+    return null;
+  }
+}
+
 function createApp() {
   const app = express();
   app.disable("x-powered-by");
 
-  app.use((_req, res, next) => {
-    res.set({
+  app.use((req, res, next) => {
+    const headers = {
       "Content-Security-Policy":
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
       "Referrer-Policy": "no-referrer",
-    });
+    };
+    const isSecure = req.secure || req.get("x-forwarded-proto") === "https";
+    if (isSecure) {
+      headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    }
+    res.set(headers);
     next();
   });
   app.use("/api", (_req, res, next) => {
@@ -2493,8 +2572,14 @@ function createApp() {
   });
   app.use(express.json({ limit: "4kb" }));
 
+  app.get("/api/auth/config", (_req, res) => {
+    res.json({
+      rememberMeAvailable: Boolean(process.env.SIME_REMEMBER_SECRET),
+    });
+  });
+
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password, role } = req.body ?? {};
+    const { username, password, role, rememberMe } = req.body ?? {};
     if (typeof username !== "string" || typeof password !== "string" || !username || !password || username.length > 128 || password.length > 256) {
       return res.status(400).json(makeErrorPayload("INVALID_REQUEST", "Username and password are required"));
     }
@@ -2537,6 +2622,69 @@ function createApp() {
       const record = storeStudentSessionState(session, studentId, data);
       const token = crypto.randomBytes(32).toString("base64url");
       sessions.set(token, session);
+
+      if (rememberMe && process.env.SIME_REMEMBER_SECRET) {
+        const encrypted = encryptRememberToken({ username, password, role: normalizedRole }, process.env.SIME_REMEMBER_SECRET);
+        if (encrypted) {
+          const isSecure = req.secure || req.get("x-forwarded-proto") === "https";
+          const secureFlag = isSecure ? "; Secure" : "";
+          res.setHeader("Set-Cookie", `sime_remember=${encodeURIComponent(encrypted)}; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=${30 * 24 * 3600}${secureFlag}`);
+        }
+      }
+
+      return res.json({ token, role: normalizedRole, student: record.data.student, students: record.data.students, data: record.data });
+    } catch (err) {
+      return sendError(res, err, null);
+    }
+  });
+
+  app.post("/api/auth/resume", async (req, res) => {
+    const secret = process.env.SIME_REMEMBER_SECRET;
+    if (!secret) {
+      return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Remember-me is not configured"));
+    }
+    const cookieHeader = req.headers.cookie;
+    let rememberToken = null;
+    if (cookieHeader) {
+      for (const part of cookieHeader.split(";")) {
+        const [k, ...v] = part.trim().split("=");
+        if (k === "sime_remember") {
+          rememberToken = decodeURIComponent(v.join("="));
+          break;
+        }
+      }
+    }
+    if (!rememberToken) {
+      return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "No remember token"));
+    }
+    const creds = decryptRememberToken(rememberToken, secret);
+    if (!creds || !creds.username || !creds.password) {
+      return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Invalid remember token"));
+    }
+    const normalizedRole = creds.role === "student" ? "student" : "parent";
+    const client = new SimeClient(creds.username, creds.password, normalizedRole);
+    try {
+      const loginResult = await client.loginAndParsePortal();
+      if (!loginResult) {
+        return res.status(401).json(makeErrorPayload("PORTAL_LOGIN_REJECTED", "Remembered credentials were rejected"));
+      }
+      const { data } = loginResult;
+      const now = Date.now();
+      const studentId = data.student?.id || "";
+      const session = {
+        client,
+        role: normalizedRole,
+        lastUsed: now,
+        lastSyncAt: now,
+        defaultStudentId: studentId,
+        students: {},
+        studentList: data.students || [],
+        cache: new Map(),
+        chain: Promise.resolve(),
+      };
+      const record = storeStudentSessionState(session, studentId, data);
+      const token = crypto.randomBytes(32).toString("base64url");
+      sessions.set(token, session);
       return res.json({ token, role: normalizedRole, student: record.data.student, students: record.data.students, data: record.data });
     } catch (err) {
       return sendError(res, err, null);
@@ -2545,6 +2693,7 @@ function createApp() {
 
   app.post("/api/auth/logout", requireSession, (req, res) => {
     sessions.delete(req.token);
+    res.setHeader("Set-Cookie", "sime_remember=; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=0");
     res.status(204).end();
   });
 
@@ -2777,7 +2926,6 @@ export {
   CircuitBreaker,
   executeHandshake,
   fingerprintHeaders,
-  FINGERPRINTS,
   formatSwitchUrl,
   inferAbsenceSemester,
   inspectParserHealth,
@@ -2790,7 +2938,11 @@ export {
   parseRecentGrades,
   parseSemesterReport,
   parseStudentMetadata,
-  pickFingerprint,
+  BROWSER_PROFILE,
+  extractPageFlowInfo,
+  scrubLog,
+  encryptRememberToken,
+  decryptRememberToken,
   RateGate,
   requireSimeUrl,
   resolveSimeUrl,

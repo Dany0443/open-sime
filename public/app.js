@@ -8,15 +8,14 @@ const KEYS = {
   theme: "open-sime.theme",
   role: "open-sime.role",
   tab: "open-sime.tab",
-  creds: "open_sime_creds",
 };
 const TICK_MS = 30000;
 const SYNC_COOLDOWN_MS = 30000;
 const STALE_AFTER_MS = 5 * 60000;
 const DAY_MS = 86400000;
-const THEMES = ["light", "dark"];
-const THEME_LABELS = { light: "automată", light: "luminoasă", dark: "întunecată" };
-const THEME_ICONS = { light: "contrast", light: "light_mode", dark: "dark_mode" };
+const THEMES = ["system", "light", "dark"];
+const THEME_LABELS = { system: "automată", light: "luminoasă", dark: "întunecată" };
+const THEME_ICONS = { system: "contrast", light: "light_mode", dark: "dark_mode" };
 
 const TABS = [
   { id: "home", label: "Acasă", title: "Acasă", icon: "home" },
@@ -398,17 +397,6 @@ function toast(text) {
 }
 
 // network
-
-async function silentLogin() {
-  let creds;
-  try { creds = JSON.parse(store.get(KEYS.creds) || ""); } catch { creds = null; }
-  if (!creds || !creds.username || !creds.password) return false;
-  const res = await api("/api/auth/login", { method: "POST", body: { username: creds.username, password: creds.password, role: creds.role || "parent" }, auth: false, retry: false });
-  if (!res || !res.token || !res.data) return false;
-  state.token = res.token; state.role = res.role || creds.role || "parent"; store.set(KEYS.token, res.token); store.set(KEYS.role, state.role);
-  const payload = res.data; if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students; setData(payload, Date.now());
-  return true;
-}
 
 async function apiFetch(path, init) {
   return fetch(path, init);
@@ -1486,8 +1474,9 @@ function scheduleCooldown() {
 
 function renderTheme() {
   const btn = $("theme-btn");
-  const label = "Temă " + THEME_LABELS[state.theme] + ". Schimbă tema.";
-  setIcon(btn, THEME_ICONS[state.theme]);
+  if (!btn) return;
+  const label = "Temă " + (THEME_LABELS[state.theme] || "automată") + ". Schimbă tema.";
+  setIcon(btn, THEME_ICONS[state.theme] || "contrast");
   btn.setAttribute("aria-label", label);
   btn.title = label;
 }
@@ -1665,9 +1654,16 @@ function setTab(id) {
 
 const colorQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
+function getEffectiveTheme() {
+  if (state.theme === "system") {
+    return colorQuery.matches ? "dark" : "light";
+  }
+  return state.theme === "dark" ? "dark" : "light";
+}
+
 function applyTheme() {
-  const dark = state.theme === "dark";
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const effective = getEffectiveTheme();
+  document.documentElement.dataset.theme = effective;
   const color = window.getComputedStyle(document.documentElement).getPropertyValue("--surface").trim();
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && color) meta.setAttribute("content", color);
@@ -1675,7 +1671,8 @@ function applyTheme() {
 }
 
 function cycleTheme() {
-  state.theme = state.theme === "dark" ? "light" : "dark";
+  const idx = THEMES.indexOf(state.theme);
+  state.theme = THEMES[(idx + 1) % THEMES.length];
   store.set(KEYS.theme, state.theme);
   applyTheme();
 }
@@ -1737,14 +1734,15 @@ async function onLogin(event) {
   }
   setAuthBusy(true);
   try {
-    const res = await api("/api/auth/login", { method: "POST", body: { username, password, role }, auth: false });
+    const rememberMe = Boolean($("remember-me")?.checked);
+    const res = await api("/api/auth/login", { method: "POST", body: { username, password, role, rememberMe }, auth: false });
     if (!res || !res.token || !res.data) throw new ApiError("bad response", 502, 0);
     state.seq += 1;
     state.token = res.token;
     state.role = res.role || role;
     store.set(KEYS.token, res.token);
     store.set(KEYS.role, state.role);
-    if ($("remember-me").checked) store.set(KEYS.creds, JSON.stringify({ username, password, role })); else store.del(KEYS.creds);
+    store.del("open_sime_creds");
     const payload = res.data;
     if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students;
     state.error = "";
@@ -1933,15 +1931,25 @@ function bindEvents() {
 }
 
 function boot() {
+  store.del("open_sime_creds");
   const savedTheme = store.get(KEYS.theme);
-  state.theme = THEMES.includes(savedTheme) ? savedTheme : (colorQuery.matches ? "dark" : "light");
-  document.documentElement.dataset.theme = state.theme === "dark" ? "dark" : "light";
+  state.theme = THEMES.includes(savedTheme) ? savedTheme : "system";
 
   for (const el of document.querySelectorAll("[data-icon]")) el.prepend(icon(el.dataset.icon));
   for (const el of document.querySelectorAll("[data-cookie]")) el.appendChild(cookieSvg("deco-shape"));
   applyTheme();
   buildNav();
   bindEvents();
+
+  api("/api/auth/config", { auth: false, retry: false })
+    .then((cfg) => {
+      const row = document.querySelector(".remember-row");
+      if (row) row.hidden = !cfg?.rememberMeAvailable;
+    })
+    .catch(() => {
+      const row = document.querySelector(".remember-row");
+      if (row) row.hidden = true;
+    });
 
   if (store.get(KEYS.role) === "parent") $("role-parent").checked = true;
   state.today = todayIso();
@@ -1958,8 +1966,24 @@ function boot() {
     render();
     refresh({ background: true });
   } else {
-    const creds = store.get(KEYS.creds);
-    if (creds) silentLogin().then(() => { showShell(); setTab(state.tab); render(); }).catch(() => showAuth("")); else showAuth("");
+    api("/api/auth/resume", { method: "POST", auth: false, retry: false })
+      .then((res) => {
+        if (!res || !res.token || !res.data) throw new Error("no session");
+        state.seq += 1;
+        state.token = res.token;
+        state.role = res.role || "student";
+        store.set(KEYS.token, res.token);
+        store.set(KEYS.role, state.role);
+        const payload = res.data;
+        if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students;
+        setData(payload, Date.now());
+        showShell();
+        setTab(state.tab);
+        render();
+      })
+      .catch(() => {
+        showAuth("");
+      });
   }
   window.setInterval(tick, TICK_MS);
 }

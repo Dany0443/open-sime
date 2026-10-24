@@ -21,7 +21,7 @@ import {
   parseRecentGrades,
   parseSemesterReport,
   parseStudentMetadata,
-  pickFingerprint,
+  BROWSER_PROFILE,
   requireSimeUrl,
   resolveSimeUrl,
   sessions,
@@ -165,7 +165,7 @@ test("URL guard", () => {
 });
 
 test("browser fingerprint headers and rate gate with jitter", async () => {
-  const fp = pickFingerprint(() => 0);
+  const fp = BROWSER_PROFILE;
   const navHeaders = fingerprintHeaders(fp, { kind: "navigate", hasReferer: false });
   assert.ok(navHeaders["User-Agent"].includes("Chrome/"));
   assert.ok(navHeaders["Sec-CH-UA"].includes("Chromium"));
