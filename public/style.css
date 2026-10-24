@@ -2220,10 +2220,54 @@ ul, ol {
   }
 }
 .marks-table-surface { overflow-x: auto; background: var(--surface-container-low); border-radius: var(--shape-lg); border: 1px solid var(--outline-variant); }
-.marks-table { width: 100%; min-width: 860px; border-collapse: collapse; text-align: left; }
+.marks-table { width: 100%; min-width: 600px; border-collapse: collapse; text-align: left; }
 .marks-table th { position: sticky; top: 0; z-index: 1; padding: 12px 16px; background: var(--surface-container-high); color: var(--on-surface-variant); font-size: .75rem; font-weight: 700; white-space: nowrap; }
 .marks-table td { padding: 12px 16px; border-top: 1px solid var(--outline-variant); vertical-align: middle; }
 .marks-table tbody tr:nth-child(even) { background: var(--surface-container); }
 .marks-table .subject-name { font-size: 1rem; font-weight: 700; }
 .grade-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.score.is-thesis {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  min-width: 44px;
+  padding: 0 8px;
+  outline: 2px solid var(--tertiary);
+  outline-offset: 1px;
+}
+
+.thesis-tag {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--tertiary);
+  letter-spacing: 0.04em;
+}
+
+.marks-cards-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 840px) {
+  .marks-cards-surface {
+    display: none !important;
+  }
+  .marks-table-surface {
+    display: block !important;
+  }
+}
+
+@media (max-width: 839px) {
+  .marks-table-surface {
+    display: none !important;
+  }
+  .marks-cards-surface {
+    display: flex !important;
+  }
+}
+
 .remember-row { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); font-size: .875rem; }

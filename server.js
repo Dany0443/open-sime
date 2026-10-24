@@ -488,7 +488,14 @@ function parseMarkCell($, cell) {
     const value = toFloat(text);
     if (!(value > 0 && value <= 10)) continue;
     const raw = ["title", "data-date", "data-title", "aria-label"].map((k) => leaf.attribs[k]).find(Boolean) || leaf.parent?.attribs?.title;
-    marks.push({ value, date: parseFullDate(raw) });
+    const isThesis = Boolean(
+      (leaf.attribs?.class && /tez[aă]/i.test(leaf.attribs.class)) ||
+      (raw && /tez[aă]/i.test(raw)) ||
+      (leaf.parent?.attribs?.class && /tez[aă]/i.test(leaf.parent.attribs.class))
+    );
+    const entry = { value, date: parseFullDate(raw) };
+    if (isThesis) entry.isThesis = true;
+    marks.push(entry);
   }
   if (marks.length) return marks;
   for (const token of textOf(cell, " ").match(/\d+(?:\.\d+)?/g) || []) {
@@ -508,11 +515,18 @@ function parseSemesterReportFromRoot($, root) {
     const subject = textOf(disc);
     if (!subject) return;
     const evals = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION", "EVALUATION" /* UNVERIFIED */, "NOTE" /* UNVERIFIED */, "MARKS" /* UNVERIFIED */]));
+    const tezaTd = tds.find((td) => headerHas($, td, ["TEZA" /* UNVERIFIED */, "NOTA_TEZA" /* UNVERIFIED */, "THESIS" /* UNVERIFIED */]));
     const avg = tds.find((td) => headerHas($, td, ["MED_SEM" /* UNVERIFIED */, "MEDIA_SEM" /* UNVERIFIED */, "MEDIA" /* UNVERIFIED */]));
     const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR", "CADRU" /* UNVERIFIED */, "TEACHER" /* UNVERIFIED */]));
+    const parsedMarks = evals ? parseMarkCell($, evals) : [];
+    if (tezaTd) {
+      const tezaMarks = parseMarkCell($, tezaTd);
+      for (const tm of tezaMarks) tm.isThesis = true;
+      parsedMarks.push(...tezaMarks);
+    }
     result.set(subject, {
       subject,
-      marks: evals ? parseMarkCell($, evals) : [],
+      marks: parsedMarks,
       semesterAverage: avg ? toFloat(textOf(avg)) : null,
       teacher: teacherTd ? textOf(teacherTd) || null : null,
     });
@@ -547,22 +561,36 @@ function parseCombinedReportFromRoot($, root, annualMap = new Map()) {
     }
 
     const evals1 = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION_1" /* UNVERIFIED */, "EVAL_SEM1" /* UNVERIFIED */, "NOTE_SEM1" /* UNVERIFIED */, "SEM1_NOTE" /* UNVERIFIED */]));
+    const teza1 = tds.find((td) => headerHas($, td, ["TEZA_SEM1" /* UNVERIFIED */, "TEZA1" /* UNVERIFIED */, "NOTA_TEZA1" /* UNVERIFIED */]));
     const evals2 = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION_2" /* UNVERIFIED */, "EVAL_SEM2" /* UNVERIFIED */, "NOTE_SEM2" /* UNVERIFIED */, "SEM2_NOTE" /* UNVERIFIED */]));
+    const teza2 = tds.find((td) => headerHas($, td, ["TEZA_SEM2" /* UNVERIFIED */, "TEZA2" /* UNVERIFIED */, "NOTA_TEZA2" /* UNVERIFIED */]));
     const avg1 = tds.find((td) => headerHas($, td, ["MED_SEM1" /* UNVERIFIED */, "MED_SEM_1" /* UNVERIFIED */, "MEDIA_SEM1" /* UNVERIFIED */, "SEM1_MED" /* UNVERIFIED */]));
     const avg2 = tds.find((td) => headerHas($, td, ["MED_SEM2" /* UNVERIFIED */, "MED_SEM_2" /* UNVERIFIED */, "MEDIA_SEM2" /* UNVERIFIED */, "SEM2_MED" /* UNVERIFIED */]));
 
-    if (evals1 || avg1) {
+    if (evals1 || avg1 || teza1) {
+      const m1 = evals1 ? parseMarkCell($, evals1) : [];
+      if (teza1) {
+        const tm1 = parseMarkCell($, teza1);
+        for (const m of tm1) m.isThesis = true;
+        m1.push(...tm1);
+      }
       sem1.set(subject, {
         subject,
-        marks: evals1 ? parseMarkCell($, evals1) : [],
+        marks: m1,
         semesterAverage: avg1 ? toFloat(textOf(avg1)) : null,
         teacher,
       });
     }
-    if (evals2 || avg2) {
+    if (evals2 || avg2 || teza2) {
+      const m2 = evals2 ? parseMarkCell($, evals2) : [];
+      if (teza2) {
+        const tm2 = parseMarkCell($, teza2);
+        for (const m of tm2) m.isThesis = true;
+        m2.push(...tm2);
+      }
       sem2.set(subject, {
         subject,
-        marks: evals2 ? parseMarkCell($, evals2) : [],
+        marks: m2,
         semesterAverage: avg2 ? toFloat(textOf(avg2)) : null,
         teacher,
       });
@@ -603,7 +631,13 @@ function buildCatalog(reports, annualMap = new Map()) {
     const sem2 = s.semesters.find((x) => x.semester === 2) || null;
     const sem1Average = sem1 ? (sem1.officialAverage ?? sem1.average ?? null) : null;
     const sem2Average = sem2 ? (sem2.officialAverage ?? sem2.average ?? null) : null;
-    const markDetails = s.semesters.flatMap((x) => x.marks.map((m) => ({ value: m.value, date: m.date, semester: x.semester })));
+    const markDetails = s.semesters.flatMap((x) =>
+      x.marks.map((m) => {
+        const d = { value: m.value, date: m.date, semester: x.semester };
+        if (m.isThesis) d.isThesis = true;
+        return d;
+      })
+    );
     const marks = markDetails.map((m) => m.value);
     const official = s.semesters.map((x) => x.officialAverage).filter((v) => v !== null);
     const computedAverage = marks.length ? mean(marks) : mean(official);

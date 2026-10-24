@@ -307,9 +307,20 @@ function textButton(label, onClick) {
   return h("button", { type: "button", class: "text-btn", on: { click: onClick } }, label);
 }
 
-function score(value, size, date) {
-  const label = "Nota " + fmtMark(value) + (date ? ", " + shortDate(date) : "");
-  return h("span", { class: "score score-" + size + " " + bandOf(value), role: "img", "aria-label": label, title: label }, fmtMark(value));
+function score(value, size, date, isThesis = false) {
+  const dateStr = date ? (longDate(date) || shortDate(date)) : "";
+  const label = (isThesis ? "Teză: " : "Nota ") + fmtMark(value) + (dateStr ? " (" + dateStr + ")" : "");
+  return h(
+    "span",
+    {
+      class: "score score-" + size + " " + bandOf(value) + (isThesis ? " is-thesis" : ""),
+      role: "img",
+      "aria-label": label,
+      title: label,
+    },
+    isThesis ? h("span", { class: "thesis-tag", text: "Teză" }) : null,
+    fmtMark(value)
+  );
 }
 
 function avgBadge(value) {
@@ -548,23 +559,23 @@ function markGroups(subject) {
   if (!details.length && Array.isArray(subject.semesters)) {
     details = [];
     for (const sem of subject.semesters) {
-      for (const mk of Array.isArray(sem.marks) ? sem.marks : []) details.push({ value: mk.value, date: mk.date, semester: sem.semester });
+      for (const mk of Array.isArray(sem.marks) ? sem.marks : []) details.push({ value: mk.value, date: mk.date, isThesis: Boolean(mk.isThesis), semester: sem.semester });
     }
   }
-  if (!details.length && Array.isArray(subject.marks)) details = subject.marks.map((value) => ({ value, date: null, semester: 0 }));
+  if (!details.length && Array.isArray(subject.marks)) details = subject.marks.map((value) => ({ value, date: null, isThesis: false, semester: 0 }));
   const groups = new Map();
   for (const d of details) {
     const value = num(d && d.value);
     if (value == null) continue;
     const key = d.semester === 1 || d.semester === 2 ? d.semester : 0;
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({ value, date: validIso(d.date) ? d.date : null });
+    groups.get(key).push({ value, date: validIso(d.date) ? d.date : null, isThesis: Boolean(d.isThesis) });
   }
   const out = [];
   for (const key of [1, 2, 0]) {
     const marks = groups.get(key);
     if (!marks) continue;
-    if (marks.every((mk) => mk.date)) marks.sort((a, b) => a.date.localeCompare(b.date));
+    marks.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     out.push({ semester: key, marks });
   }
   return out;
@@ -866,19 +877,29 @@ function markGroupBlock(group) {
     h(
       "ul",
       { class: "marks" },
-      group.marks.map((mk) => h("li", { class: "mark" }, score(mk.value, "md", mk.date), mk.date ? h("time", { class: "mark-date", datetime: mk.date, text: shortDate(mk.date) }) : null))
+      group.marks.map((mk) =>
+        h(
+          "li",
+          { class: "mark" },
+          score(mk.value, "md", mk.date, mk.isThesis),
+          mk.date ? h("time", { class: "mark-date", datetime: mk.date, text: shortDate(mk.date) }) : null
+        )
+      )
     )
   );
 }
 
 function subjectCard(s) {
-  const annual = num(s.annualAverage) ?? num(s.average);
   const groups = markGroups(s);
   return h(
     "article",
     { class: "subject" },
-    h("header", null, h("h3", { class: "subject-name", text: s.subject || s.discipline || "Disciplină" }), s.teacher ? h("p", { class: "subject-teacher", text: s.teacher }) : null),
-    h("div", { class: "avg-row" }, avgTile("Semestrul 1", num(s.sem1Average)), avgTile("Semestrul 2", num(s.sem2Average)), annualTile(annual)),
+    h(
+      "header",
+      null,
+      h("h3", { class: "subject-name", text: toTitleCase(s.subject || s.discipline || "Disciplină") }),
+      s.teacher ? h("p", { class: "subject-teacher", text: s.teacher }) : null
+    ),
     groups.length ? h("div", { class: "mark-groups" }, groups.map(markGroupBlock)) : h("p", { class: "muted", text: "Nu există note încă." })
   );
 }
@@ -888,17 +909,72 @@ function renderMarks() {
   const summary = $("marks-summary");
   const list = $("marks-list");
   const m = model();
-  if (!m) { summary.replaceChildren(); list.replaceChildren(pending(260)); return; }
-  summary.replaceChildren(stat("Media general?", fmtAvg(m.averages.general ?? m.averages.annual), "primary"), stat("Semestrul 1", fmtAvg(m.averages.sem1), "neutral"), stat("Semestrul 2", fmtAvg(m.averages.sem2), "neutral"));
-  if (!m.subjects.length) { list.replaceChildren(emptyState("Nicio disciplin? ?nc?", "Notele apar aici dup? prima sincronizare cu portalul.")); return; }
-  const head = h("thead", null, h("tr", null, ...["Disciplin?", "Semestrul 1: Note", "Medie Sem. 1", "Semestrul 2: Note", "Medie Sem. 2", "Medie Anual?"].map((x) => h("th", { scope: "col", text: x }))));
+  if (!m) {
+    if (summary) summary.replaceChildren();
+    list.replaceChildren(pending(260));
+    return;
+  }
+  // Remove all averages from Reușita tab
+  if (summary) summary.replaceChildren();
+
+  if (!m.subjects.length) {
+    list.replaceChildren(emptyState("Nicio disciplină încă", "Notele apar aici după sincronizarea cu portalul."));
+    return;
+  }
+
+  const head = h(
+    "thead",
+    null,
+    h(
+      "tr",
+      null,
+      h("th", { scope: "col", text: "Disciplină" }),
+      h("th", { scope: "col", text: "Semestrul 1: Note" }),
+      h("th", { scope: "col", text: "Semestrul 2: Note" })
+    )
+  );
+
   const rows = m.subjects.map((subject) => {
-    const groups = markGroups(subject); const sem = (n) => groups.find((g) => g.semester === n);
-    const pills = (g) => g ? h("div", { class: "grade-pills" }, g.marks.map((mk) => score(mk.value, "md", mk.date))) : h("span", { class: "muted", text: "-" });
-    const annual = num(subject.annualAverage) ?? num(subject.average);
-    return h("tr", null, marksCell(h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || "Disciplin?") })), marksCell(pills(sem(1))), marksCell(avgBadge(num(subject.sem1Average))), marksCell(pills(sem(2))), marksCell(avgBadge(num(subject.sem2Average))), marksCell(avgBadge(annual)));
+    const groups = markGroups(subject);
+    const sem = (n) => groups.find((g) => g.semester === n);
+    const pills = (g) =>
+      g && g.marks.length
+        ? h(
+            "div",
+            { class: "grade-pills" },
+            g.marks.map((mk) => score(mk.value, "md", mk.date, mk.isThesis))
+          )
+        : h("span", { class: "muted", text: "-" });
+
+    return h(
+      "tr",
+      null,
+      marksCell(
+        h(
+          "div",
+          null,
+          h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || "Disciplină") }),
+          subject.teacher ? h("div", { class: "subject-teacher muted", text: subject.teacher }) : null
+        )
+      ),
+      marksCell(pills(sem(1))),
+      marksCell(pills(sem(2)))
+    );
   });
-  list.replaceChildren(h("div", { class: "marks-table-surface" }, h("table", { class: "marks-table" }, head, h("tbody", null, rows))));
+
+  const tableSurface = h(
+    "div",
+    { class: "marks-table-surface" },
+    h("table", { class: "marks-table" }, head, h("tbody", null, rows))
+  );
+
+  const cardsSurface = h(
+    "div",
+    { class: "marks-cards-surface" },
+    m.subjects.map(subjectCard)
+  );
+
+  list.replaceChildren(tableSurface, cardsSurface);
 }
 
 // rendering: timetable
