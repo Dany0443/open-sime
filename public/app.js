@@ -107,10 +107,11 @@ const store = {
 };
 
 class ApiError extends Error {
-  constructor(message, status, wait) {
+  constructor(message, status, wait = 0, code = null) {
     super(message);
     this.status = status;
     this.wait = wait || 0;
+    this.code = code;
   }
 }
 
@@ -356,12 +357,8 @@ async function silentLogin() {
   return true;
 }
 
-async function apiFetch(path, init, retry = true) {
-  const res = await fetch(path, init);
-  if (res.status === 401 && retry && init.auth !== false) {
-    try { if (await silentLogin()) { init.headers.Authorization = "Bearer " + state.token; return apiFetch(path, init, false); } } catch {}
-  }
-  return res;
+async function apiFetch(path, init) {
+  return fetch(path, init);
 }
 
 async function api(path, options = {}) {
@@ -374,9 +371,9 @@ async function api(path, options = {}) {
   }
   let res;
   try {
-    res = await apiFetch(path, init, options.retry !== false);
+    res = await apiFetch(path, init);
   } catch {
-    throw new ApiError("network", 0, 0);
+    throw new ApiError("Serverul nu răspunde. Verifică conexiunea.", 0, 0);
   }
   if (res.status === 204) return null;
   let payload = null;
@@ -386,13 +383,42 @@ async function api(path, options = {}) {
     payload = null;
   }
   if (!res.ok) {
-    throw new ApiError((payload && payload.error) || "request failed", res.status, Number(payload && payload.waitSeconds) || 0);
+    const errObj = payload && typeof payload.error === "object" ? payload.error : null;
+    const code = errObj?.code || null;
+    const message = errObj?.message || (typeof payload?.error === "string" ? payload.error : "Cerere eșuată");
+    const wait = Number(errObj?.retryAfter || payload?.waitSeconds) || 0;
+    if (code === "APP_SESSION_INVALID" || (res.status === 401 && options.auth !== false && path !== "/api/auth/login")) {
+      endSession("Sesiunea a expirat. Autentifică-te din nou.");
+    }
+    throw new ApiError(message, res.status, wait, code);
   }
   return payload;
 }
 
 function describeError(err, context) {
   if (!(err instanceof ApiError)) return "A apărut o eroare neașteptată.";
+  if (err.code) {
+    switch (err.code) {
+      case "APP_SESSION_INVALID":
+        return "Sesiunea a expirat. Autentifică-te din nou.";
+      case "PORTAL_LOGIN_REJECTED":
+        return "Numele de utilizator sau parola sunt incorecte.";
+      case "PORTAL_UNEXPECTED_PAGE":
+        return err.message || "Portalul a returnat o pagină neașteptată.";
+      case "PORTAL_FORBIDDEN":
+        return "Acces interzis de portalul școlii (posibil blocare de securitate).";
+      case "PORTAL_NOT_FOUND":
+        return "Pagina solicitată nu a fost găsită pe portalul școlii.";
+      case "PORTAL_THROTTLED":
+        return "Portalul limitează cererile. Reîncearcă peste " + waitText(err.wait || 60) + ".";
+      case "PORTAL_MAINTENANCE":
+        return "Portalul școlii este în mentenanță sau temporar indisponibil.";
+      case "STUDENT_NOT_FOUND":
+        return "Elevul nu a fost găsit.";
+      default:
+        return err.message;
+    }
+  }
   switch (err.status) {
     case 0:
       return "Serverul nu răspunde. Verifică conexiunea și încearcă din nou.";
@@ -407,7 +433,7 @@ function describeError(err, context) {
     case 502:
       return "Portalul școlii nu a putut fi contactat. Reîncearcă mai târziu.";
     default:
-      return "Eroare de server. Reîncearcă mai târziu.";
+      return err.message || "Eroare de server. Reîncearcă mai târziu.";
   }
 }
 

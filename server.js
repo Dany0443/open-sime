@@ -15,11 +15,27 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 class SimeError extends Error {}
 class SimeNetworkError extends SimeError {}
 class SimeAuthError extends SimeError {}
+class SimeAppSessionError extends SimeAuthError {}
+class SimeLoginRejectedError extends SimeAuthError {}
 class SimeSessionExpiredError extends SimeAuthError {}
-class SimeRateLimitError extends SimeAuthError {
+class SimeRateLimitError extends SimeError {
   constructor(message, waitSeconds = 900) {
     super(message);
     this.waitSeconds = waitSeconds;
+  }
+}
+class SimeMaintenanceError extends SimeError {
+  constructor(message = "Portalul este în mentenanță", waitSeconds = 900) {
+    super(message);
+    this.waitSeconds = waitSeconds;
+  }
+}
+class SimeForbiddenError extends SimeError {}
+class SimeNotFoundError extends SimeError {}
+class SimeUnexpectedPageError extends SimeError {
+  constructor(message, step = null) {
+    super(message);
+    this.step = step;
   }
 }
 class SimeParseError extends SimeError {}
@@ -1307,7 +1323,17 @@ class CircuitBreaker {
   }
 }
 
-const breaker = new CircuitBreaker();
+const globalBreaker = new CircuitBreaker();
+const accountBreakers = new Map();
+
+function breakerFor(accountKey) {
+  if (!accountBreakers.has(accountKey)) {
+    accountBreakers.set(accountKey, new CircuitBreaker());
+  }
+  return accountBreakers.get(accountKey);
+}
+
+const breaker = globalBreaker;
 const gates = new Map();
 
 function gateFor(key) {
@@ -1333,10 +1359,11 @@ function decodeBody(bytes, contentType) {
 }
 
 class SimeHttp {
-  constructor({ gate = new RateGate(), fingerprint = pickFingerprint(), breaker: br = breaker, cookies = new Map() } = {}) {
+  constructor({ gate = new RateGate(), fingerprint = pickFingerprint(), breaker: br = globalBreaker, globalBreaker: gBr = globalBreaker, cookies = new Map() } = {}) {
     this.gate = gate;
     this.fingerprint = fingerprint;
     this.breaker = br;
+    this.globalBreaker = gBr;
     this.cookies = cookies;
     this.lastUrl = null;
   }
@@ -1369,10 +1396,12 @@ class SimeHttp {
     let current = requireSimeUrl(url);
     let body = data ? new URLSearchParams(data) : undefined;
     if (gated) {
+      this.globalBreaker.ensureClosed();
       this.breaker.ensureClosed();
       await this.gate.wait();
     }
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      this.globalBreaker.ensureClosed();
       this.breaker.ensureClosed();
       let res;
       try {
@@ -1405,6 +1434,7 @@ class SimeHttp {
         return { status: res.status, url: current, text };
       } catch (err) {
         if (err instanceof SimeRateLimitError) this.breaker.trip(err.waitSeconds);
+        if (err instanceof SimeMaintenanceError) this.globalBreaker.trip(err.waitSeconds);
         if (err instanceof SimeError) throw err;
         if (err?.name === "TimeoutError" || err?.name === "AbortError") throw new SimeNetworkError("Request timed out");
         throw new SimeNetworkError("Network error");
@@ -1415,9 +1445,12 @@ class SimeHttp {
 
   raiseForStatus(res) {
     const s = res.status;
-    if (s === 429 || s === 503) throw new SimeRateLimitError(`HTTP ${s} from agenda.sime.md`, retryAfter(res.headers));
-    if ([401, 403, 404, 440].includes(s)) throw new SimeSessionExpiredError(`HTTP ${s} from agenda.sime.md`);
-    if (s >= 400) throw new SimeNetworkError(`HTTP ${s} from agenda.sime.md`);
+    if (s === 429) throw new SimeRateLimitError(`HTTP 429 de la agenda.sime.md`, retryAfter(res.headers));
+    if (s === 503) throw new SimeMaintenanceError(`HTTP 503 de la agenda.sime.md`, retryAfter(res.headers));
+    if (s === 403) throw new SimeForbiddenError(`HTTP 403 de la agenda.sime.md`);
+    if (s === 404) throw new SimeNotFoundError(`HTTP 404 de la agenda.sime.md`);
+    if (s === 401 || s === 440) throw new SimeSessionExpiredError(`HTTP ${s} de la agenda.sime.md`);
+    if (s >= 400) throw new SimeNetworkError(`HTTP ${s} de la agenda.sime.md`);
   }
 
   async readBody(res) {
@@ -1625,13 +1658,15 @@ async function executeHandshake(cookieJar = new Map(), { username = "", password
 
 class SimeClient {
   constructor(username, password, role, { http, auth } = {}) {
-    this.http = http || new SimeHttp({ gate: gateFor(sha(username.toLowerCase())) });
-    this.auth = auth || new SimeAuth(username, password, role, this.http.breaker);
+    const accKey = sha(username.toLowerCase());
+    const br = breakerFor(accKey);
+    this.http = http || new SimeHttp({ gate: gateFor(accKey), breaker: br, globalBreaker });
+    this.auth = auth || new SimeAuth(username, password, role, br);
     this.studentUrls = new Map();
     this.knownStudents = new Map();
     this.portalIds = new Set();
     this.pages = new Map();
-    this.lastRenewal = 0;
+    this.reloginFlight = null;
   }
 
   resetSession() {
@@ -1640,6 +1675,20 @@ class SimeClient {
     this.portalIds.clear();
     this.pages.clear();
     this.http.clearCookies();
+  }
+
+  async relogin() {
+    if (!this.reloginFlight) {
+      this.reloginFlight = (async () => {
+        try {
+          this.resetSession();
+          await this.executeHandshake(this.http.cookies);
+        } finally {
+          this.reloginFlight = null;
+        }
+      })();
+    }
+    return this.reloginFlight;
   }
 
   async executeHandshake(cookieJar = this.http.cookies) {
@@ -1752,16 +1801,14 @@ class SimeClient {
     return this.auth.portalUrl;
   }
 
-  // Exactly one re-login per expiry; a second expiry within a minute of a renewal is final
+  // Single-flight re-login on expiry, retrying once silently
   async withRetry(operation) {
     try {
       return await operation();
     } catch (err) {
       if (!(err instanceof SimeSessionExpiredError)) throw err;
-      if (Date.now() - this.lastRenewal < RENEWAL_MIN_GAP_MS) throw err;
-      this.lastRenewal = Date.now();
-      this.resetSession();
-      return operation();
+      await this.relogin();
+      return await operation();
     }
   }
 
@@ -1771,12 +1818,15 @@ class SimeClient {
     const resp = await this.http.request("GET", url, { gated });
     const $ = cheerio.load(resp.text);
     const pathname = new URL(resp.url).pathname.toLowerCase();
-    if (!isDashboard($) || pathname.endsWith("/public") || pathname.includes("login")) {
+    if (pathname.endsWith("/public") || pathname.includes("login")) {
+      throw new SimeSessionExpiredError("Portal session expired (redirected to public or login)");
+    }
+    if (!isDashboard($)) {
       if (MAINTENANCE_RE.test(textOf($("body")[0] || $.root()[0], " ").slice(0, 2000))) {
-        this.http.breaker.trip(DEFAULT_WAIT_SECONDS);
-        throw new SimeRateLimitError("Portal reports maintenance", DEFAULT_WAIT_SECONDS);
+        this.http.globalBreaker.trip(DEFAULT_WAIT_SECONDS);
+        throw new SimeMaintenanceError("Portal reports maintenance", DEFAULT_WAIT_SECONDS);
       }
-      throw new SimeSessionExpiredError("Portal returned a non-dashboard page");
+      throw new SimeUnexpectedPageError("Portal returned a non-dashboard page", "dashboard_fetch");
     }
     const page = { url, html: resp.text, $, fetchedAt: Date.now() };
     this.pages.set(url, page);
@@ -2125,24 +2175,66 @@ async function resolveStudent(session, requested) {
   return { student, students: data };
 }
 
+function makeErrorPayload(code, message, retryAfter = null) {
+  const payload = {
+    error: {
+      code,
+      message,
+      retryAfter,
+    },
+  };
+  if (retryAfter !== null) {
+    payload.waitSeconds = retryAfter;
+  }
+  return payload;
+}
+
 function sendError(res, err, token) {
   if (err instanceof SimeRateLimitError) {
-    res.set("Retry-After", String(err.waitSeconds));
-    return res.status(429).json({ error: err.message, waitSeconds: err.waitSeconds, failSafe: true });
+    const retryAfter = err.waitSeconds || DEFAULT_WAIT_SECONDS;
+    res.set("Retry-After", String(retryAfter));
+    return res.status(429).json(makeErrorPayload("PORTAL_THROTTLED", "Portalul școlii a limitat solicitările. Încearcă din nou mai târziu.", retryAfter));
   }
-  if (err instanceof SimeAuthError) {
+  if (err instanceof SimeMaintenanceError) {
+    const retryAfter = err.waitSeconds || DEFAULT_WAIT_SECONDS;
+    res.set("Retry-After", String(retryAfter));
+    return res.status(503).json(makeErrorPayload("PORTAL_MAINTENANCE", "Portalul școlii este în mentenanță sau temporar indisponibil.", retryAfter));
+  }
+  if (err instanceof SimeForbiddenError) {
+    return res.status(502).json(makeErrorPayload("PORTAL_FORBIDDEN", "Acces interzis de portalul școlii (posibil blocare de securitate)."));
+  }
+  if (err instanceof SimeNotFoundError) {
+    return res.status(502).json(makeErrorPayload("PORTAL_NOT_FOUND", "Pagina solicitată nu a fost găsită pe portalul școlii."));
+  }
+  if (err instanceof SimeStudentNotFoundError) {
+    return res.status(404).json(makeErrorPayload("STUDENT_NOT_FOUND", "Elevul nu a fost găsit."));
+  }
+  if (err instanceof SimeLoginRejectedError) {
+    return res.status(401).json(makeErrorPayload("PORTAL_LOGIN_REJECTED", "Numele de utilizator sau parola sunt incorecte."));
+  }
+  if (err instanceof SimeAppSessionError) {
     if (token) sessions.delete(token);
-    return res.status(401).json({ error: err.message });
+    return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Sesiunea a expirat. Autentifică-te din nou."));
   }
-  if (err instanceof SimeStudentNotFoundError) return res.status(404).json({ error: err.message });
-  if (err instanceof SimeError) return res.status(502).json({ error: err.message });
-  return res.status(500).json({ error: "Internal error" });
+  if (err instanceof SimeUnexpectedPageError) {
+    return res.status(502).json(makeErrorPayload("PORTAL_UNEXPECTED_PAGE", `Portalul a returnat o pagină neașteptată (${err.step || "necunoscut"}).`));
+  }
+  if (err instanceof SimeParseError) {
+    return res.status(502).json(makeErrorPayload("PORTAL_UNEXPECTED_PAGE", "Portalul a returnat un răspuns neașteptat."));
+  }
+  if (err instanceof SimeSessionExpiredError) {
+    return res.status(502).json(makeErrorPayload("PORTAL_UNEXPECTED_PAGE", "Sesiunea portalului nu a putut fi reînnoită."));
+  }
+  if (err instanceof SimeError) {
+    return res.status(502).json(makeErrorPayload("PORTAL_UNEXPECTED_PAGE", err.message || "Eroare la comunicarea cu portalul."));
+  }
+  return res.status(500).json(makeErrorPayload("INTERNAL_ERROR", "Eroare internă a serverului."));
 }
 
 function requireSession(req, res, next) {
   const m = /^Bearer ([A-Za-z0-9_-]{20,128})$/.exec(req.get("authorization") || "");
   const session = m ? sessions.get(m[1]) : undefined;
-  if (!session) return res.status(401).json({ error: "Not authenticated" });
+  if (!session) return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Sesiunea a expirat. Autentifică-te din nou."));
   session.lastUsed = Date.now();
   req.token = m[1];
   req.session = session;
@@ -2154,7 +2246,7 @@ function dataRoute(app, name, ttl, build, { keyFor = () => "", validate = () => 
   app.get(`/api/${name}`, requireSession, async (req, res) => {
     try {
       const problem = validate(req);
-      if (problem) return res.status(400).json({ error: problem });
+      if (problem) return res.status(400).json(makeErrorPayload("INVALID_REQUEST", problem));
       const requested = typeof req.query.student === "string" ? req.query.student.slice(0, 128) : "";
       const { student, students } = await resolveStudent(req.session, requested);
       const key = `${name}:${student.id}:${keyFor(req)}`;
@@ -2188,14 +2280,14 @@ function createApp() {
   app.post("/api/auth/login", async (req, res) => {
     const { username, password, role } = req.body ?? {};
     if (typeof username !== "string" || typeof password !== "string" || !username || !password || username.length > 128 || password.length > 256) {
-      return res.status(400).json({ error: "Username and password are required" });
+      return res.status(400).json(makeErrorPayload("INVALID_REQUEST", "Username and password are required"));
     }
     const guardKey = sha(username.toLowerCase());
     const guard = loginGuard.get(guardKey);
     if (guard && guard.until > Date.now()) {
       const waitSeconds = Math.ceil((guard.until - Date.now()) / 1000);
       res.set("Retry-After", String(waitSeconds));
-      return res.status(429).json({ error: "Login locked after repeated rejections", waitSeconds, failSafe: true });
+      return res.status(429).json(makeErrorPayload("PORTAL_THROTTLED", "Login locked after repeated rejections", waitSeconds));
     }
     const normalizedRole = role === "student" ? "student" : "parent";
     const client = new SimeClient(username, password, normalizedRole);
@@ -2209,7 +2301,7 @@ function createApp() {
           entry.rejections = 0;
         }
         loginGuard.set(guardKey, entry);
-        return res.status(401).json({ error: "Credentials were rejected" });
+        return res.status(401).json(makeErrorPayload("PORTAL_LOGIN_REJECTED", "Credentials were rejected"));
       }
       loginGuard.delete(guardKey);
       const { data } = loginResult;
@@ -2241,12 +2333,12 @@ function createApp() {
   });
 
   app.post("/api/student/switch", requireSession, async (req, res) => {
-    if (!req.session) return res.status(401).json({ error: "Not authenticated" });
-    if (req.session.role === "student" || req.session.role === "E") return res.status(400).json({ error: "Students cannot switch students" });
+    if (!req.session) return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Not authenticated"));
+    if (req.session.role === "student" || req.session.role === "E") return res.status(400).json(makeErrorPayload("INVALID_REQUEST", "Students cannot switch students"));
     const rawId = req.body?.studentId;
     const studentId = typeof rawId === "string" || typeof rawId === "number" ? String(rawId).trim().slice(0, 128) : "";
     if (!studentId) {
-      return res.status(400).json({ error: "studentId is required" });
+      return res.status(400).json(makeErrorPayload("INVALID_REQUEST", "studentId is required"));
     }
     try {
       const result = await serialize(req.session, async () => {
@@ -2410,9 +2502,9 @@ function createApp() {
 
   app.use((err, _req, res, _next) => {
     if (err?.type === "entity.parse.failed" || err?.type === "entity.too.large") {
-      return res.status(400).json({ error: "Invalid request body" });
+      return res.status(400).json(makeErrorPayload("INVALID_REQUEST", "Invalid request body"));
     }
-    return res.status(500).json({ error: "Internal error" });
+    return res.status(500).json(makeErrorPayload("INTERNAL_ERROR", "Internal error"));
   });
   return app;
 }
@@ -2454,15 +2546,21 @@ export {
   requireSimeUrl,
   resolveSimeUrl,
   sessions,
+  SimeAppSessionError,
   SimeAuth,
   SimeClient,
   SimeError,
+  SimeForbiddenError,
   SimeHttp,
+  SimeLoginRejectedError,
+  SimeMaintenanceError,
   SimeNetworkError,
+  SimeNotFoundError,
   SimeParseError,
   SimeRateLimitError,
   SimeSessionExpiredError,
   SimeStudentNotFoundError,
+  SimeUnexpectedPageError,
   studentKey,
   studentSwitchUrl,
   normalizeName,
