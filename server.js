@@ -290,6 +290,80 @@ function parseCurrentSemester($) {
   return /^[+-]?\d+$/.test(v) ? parseInt(v, 10) : null;
 }
 
+const studentKey = (id) => (typeof id === "string" || typeof id === "number" ? String(id).trim().toLowerCase() : "");
+const normalizeName = (name) => (typeof name === "string" ? name.trim().toLowerCase().replace(/\s+/g, " ") : "");
+
+function mergeStudents(baseStudent, links = []) {
+  const baseKey = studentKey(baseStudent?.id);
+  const baseName = normalizeName(baseStudent?.fullName);
+  const students = [];
+  const linkMap = new Map();
+
+  const findExistingIndex = (id, name) => {
+    const k = studentKey(id);
+    const n = normalizeName(name);
+    return students.findIndex((s) => (k && studentKey(s.id) === k) || (n && normalizeName(s.fullName) === n));
+  };
+
+  for (const link of links) {
+    const matchesBase =
+      (baseKey && studentKey(link.studentId) === baseKey) ||
+      (baseName && normalizeName(link.name) === baseName) ||
+      (Boolean(link.isCurrent) && (baseKey || baseName));
+    const canonicalId = matchesBase && baseStudent?.id ? baseStudent.id : link.studentId;
+    const displayName = (matchesBase && baseStudent?.fullName) || link.name || canonicalId;
+    const className = (matchesBase && baseStudent?.className) || null;
+    const schoolName = (matchesBase && baseStudent?.schoolName) || null;
+
+    if (link.href) {
+      linkMap.set(studentKey(canonicalId), { href: link.href, displayName });
+      if (link.studentId) {
+        linkMap.set(studentKey(link.studentId), { href: link.href, displayName });
+      }
+    }
+
+    const existingIdx = findExistingIndex(canonicalId, displayName);
+    if (existingIdx !== -1) {
+      const ex = students[existingIdx];
+      students[existingIdx] = {
+        id: ex.id || canonicalId,
+        fullName: ex.fullName || displayName,
+        className: ex.className || className,
+        schoolName: ex.schoolName || schoolName,
+      };
+    } else {
+      students.push({
+        id: canonicalId,
+        fullName: displayName,
+        className,
+        schoolName,
+      });
+    }
+  }
+
+  if (baseStudent && (baseStudent.id || baseStudent.fullName)) {
+    const existingIdx = findExistingIndex(baseStudent.id, baseStudent.fullName);
+    if (existingIdx !== -1) {
+      const ex = students[existingIdx];
+      students[existingIdx] = {
+        id: baseStudent.id || ex.id,
+        fullName: baseStudent.fullName || ex.fullName,
+        className: baseStudent.className || ex.className,
+        schoolName: baseStudent.schoolName || ex.schoolName,
+      };
+    } else {
+      students.unshift({
+        id: baseStudent.id,
+        fullName: baseStudent.fullName,
+        className: baseStudent.className || null,
+        schoolName: baseStudent.schoolName || null,
+      });
+    }
+  }
+
+  return { students, linkMap };
+}
+
 function safeUnquote(s) {
   try {
     return decodeURIComponent(s);
@@ -896,31 +970,13 @@ function parseFullPortal(html, today = todayChisinau(), { extraReports = [], ext
     className: metadata.className,
     schoolName: metadata.schoolName,
   };
-  const students = [];
-  if (links.length === 0) {
-    if (baseStudent.id || baseStudent.fullName) students.push(baseStudent);
-  } else {
-    for (const link of links) {
-      const matchesBase = Boolean(baseStudent.id && link.studentId === baseStudent.id);
-      if (matchesBase || (!baseStudent.id && (link.isCurrent || links.length === 1))) {
-        students.push({
-          id: baseStudent.id || link.studentId,
-          fullName: baseStudent.fullName || link.name,
-          className: baseStudent.className,
-          schoolName: baseStudent.schoolName,
-        });
-      } else {
-        students.push({ id: link.studentId, fullName: link.name, className: null, schoolName: null });
-      }
-    }
-    if (baseStudent.id && !students.some((s) => s.id === baseStudent.id)) {
-      students.unshift(baseStudent);
-    }
-  }
+  const { students } = mergeStudents(baseStudent, links);
+  const baseKey = studentKey(baseStudent.id);
+  const baseName = normalizeName(baseStudent.fullName);
   const student =
-    (baseStudent.id && students.find((s) => s.id === baseStudent.id)) ||
+    students.find((s) => (baseKey && studentKey(s.id) === baseKey) || (baseName && normalizeName(s.fullName) === baseName)) ||
     students.find((_s, idx) => links[idx]?.isCurrent) ||
-    (baseStudent.id || baseStudent.fullName ? baseStudent : students[0]) ||
+    students[0] ||
     baseStudent;
 
   const evalVal = getInputValue($, ITEM_LAST_EVALS);
@@ -1601,9 +1657,10 @@ class SimeClient {
 
     const data = parseFullPortal(page.html, todayChisinau(), { extraReports });
     const effectiveId = data.metadata.id || requestedStudentId || data.student?.id || "";
+    const effectiveKey = studentKey(effectiveId);
     if (effectiveId) {
       data.metadata.id = effectiveId;
-      const prev = this.knownStudents.get(effectiveId);
+      const prev = this.knownStudents.get(effectiveKey) || this.knownStudents.get(effectiveId);
       data.student = {
         id: effectiveId,
         fullName: data.metadata.fullName || prev?.fullName || data.student?.fullName || effectiveId,
@@ -1613,20 +1670,35 @@ class SimeClient {
     }
     for (const s of data.students) {
       if (!s?.id) continue;
-      const prev = this.knownStudents.get(s.id);
-      this.knownStudents.set(s.id, {
+      const k = studentKey(s.id);
+      const prev = this.knownStudents.get(k) || this.knownStudents.get(s.id);
+      const merged = {
         id: s.id,
         fullName: s.fullName || prev?.fullName || s.id,
         className: s.className || prev?.className || null,
         schoolName: s.schoolName || prev?.schoolName || null,
-      });
+      };
+      this.knownStudents.set(k, merged);
+      if (s.id !== k) this.knownStudents.set(s.id, merged);
     }
     if (data.student?.id) {
-      this.knownStudents.set(data.student.id, data.student);
+      const curK = studentKey(data.student.id);
+      this.knownStudents.set(curK, data.student);
+      if (data.student.id !== curK) this.knownStudents.set(data.student.id, data.student);
     }
-    if (this.knownStudents.size) {
-      data.students = [...this.knownStudents.values()];
+    const dedupedStudents = [];
+    for (const s of data.students) {
+      const k = studentKey(s.id);
+      const n = normalizeName(s.fullName);
+      const existing = dedupedStudents.find((x) => (k && studentKey(x.id) === k) || (n && normalizeName(x.fullName) === n));
+      if (existing) {
+        existing.className = existing.className || s.className;
+        existing.schoolName = existing.schoolName || s.schoolName;
+      } else {
+        dedupedStudents.push(s);
+      }
     }
+    data.students = dedupedStudents;
     return data;
   }
 
@@ -1707,52 +1779,34 @@ class SimeClient {
   registerStudents(page) {
     const profile = parseStudentProfile(page.$);
     const links = parseStudentLinks(page.$);
-    const students = [];
-    this.portalIds = new Set();
-    if (links.length === 0) {
-      if (profile.id) {
-        this.studentUrls.set(profile.id, page.url);
-        this.portalIds.add(profile.id);
-        this.knownStudents.set(profile.id, profile);
-      }
-      return profile.id || profile.fullName ? [profile] : [];
-    }
-    for (const link of links) {
-      let url;
+    const { students, linkMap } = mergeStudents(profile, links);
+
+    for (const [key, info] of linkMap) {
       try {
-        url = resolveSimeUrl(link.href);
+        const resolved = resolveSimeUrl(info.href);
+        this.studentUrls.set(key, resolved);
+        this.portalIds.add(key);
       } catch (err) {
         if (err instanceof SimeNetworkError) continue;
         throw err;
       }
-      this.studentUrls.set(link.studentId, url);
-      const matchesProfile = Boolean(profile.id && link.studentId === profile.id);
-      if (matchesProfile || (!profile.id && (link.isCurrent || links.length === 1))) {
-        this.portalIds.add(link.studentId);
-        if (profile.id) {
-          this.studentUrls.set(profile.id, url);
-          this.portalIds.add(profile.id);
-        }
-        const entry = {
-          id: profile.id || link.studentId,
-          fullName: profile.fullName || link.name,
-          className: profile.className,
-          schoolName: profile.schoolName,
-        };
-        this.knownStudents.set(entry.id, entry);
-        students.push(entry);
-      } else {
-        const prev = this.knownStudents.get(link.studentId);
-        const entry = {
-          id: link.studentId,
-          fullName: prev?.fullName || link.name,
-          className: prev?.className || null,
-          schoolName: prev?.schoolName || null,
-        };
-        this.knownStudents.set(entry.id, entry);
-        students.push(entry);
+    }
+
+    const curKey = studentKey(profile.id);
+    if (curKey) {
+      this.portalIds.add(curKey);
+      if (!this.studentUrls.has(curKey)) {
+        this.studentUrls.set(curKey, page.url);
       }
     }
+
+    for (const s of students) {
+      const k = studentKey(s.id);
+      this.portalIds.add(k);
+      this.knownStudents.set(k, s);
+      if (s.id !== k) this.knownStudents.set(s.id, s);
+    }
+
     return students;
   }
 
@@ -1778,9 +1832,11 @@ class SimeClient {
   }
 
   async loadStudent(studentId, { gated = false, bypassCache = false } = {}) {
-    const portal = await this.loadPortal({ gated: gated && (!studentId || this.portalIds.has(studentId)), bypassCache });
-    if (!studentId || this.portalIds.has(studentId)) return portal;
-    const url = this.studentUrls.get(studentId) || studentSwitchUrl(this.auth.sessionId, studentId);
+    const key = studentKey(studentId);
+    const isCurrent = !key || this.portalIds.has(key) || (studentId && this.portalIds.has(studentId));
+    const portal = await this.loadPortal({ gated: gated && isCurrent, bypassCache });
+    if (isCurrent) return portal;
+    const url = this.studentUrls.get(key) || (studentId ? this.studentUrls.get(studentId) : null) || studentSwitchUrl(this.auth.sessionId, studentId);
     return this.fetchDashboard(url, { gated, bypassCache });
   }
 
@@ -2349,7 +2405,9 @@ export {
   SimeAuth,
   SimeClient,
   SimeHttp,
+  studentKey,
   studentSwitchUrl,
+  normalizeName,
   unescapeJs,
   weekStart,
 };
