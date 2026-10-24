@@ -8,6 +8,11 @@ const KEYS = {
   theme: "open-sime.theme",
   role: "open-sime.role",
   tab: "open-sime.tab",
+  lang: "open-sime.lang",
+  textSize: "open-sime.text-size",
+  simpleMode: "open-sime.simple-mode",
+  contrast: "open-sime.contrast",
+  reduceMotion: "open-sime.reduce-motion",
 };
 const TICK_MS = 30000;
 const SYNC_COOLDOWN_MS = 30000;
@@ -47,6 +52,8 @@ const ICONS = {
   info: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z",
   check_circle: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z",
   school: "M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3 1 9l11 6 9-4.91V17h2V9L12 3z",
+  settings: "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z",
+  close: "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
 };
 
 const MONTHS = ["ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie"];
@@ -55,6 +62,15 @@ const WEEKDAYS = ["Luni", "Marți", "Miercuri", "Joi", "Vineri", "Sâmbătă", "
 const WEEKDAYS_SHORT = ["Lu", "Ma", "Mi", "Jo", "Vi"];
 const BAND_LABELS = { "band-top": "Excelent", "band-good": "Bine", "band-ok": "Suficient", "band-low": "Insuficient", "band-none": "Fără medie" };
 
+const SIMPLE_TAB_TITLES = {
+  home: "Acasă",
+  marks: "Notele mele",
+  timetable: "Orarul meu",
+  absences: "Cât am lipsit",
+  homework: "Ce am de învățat",
+  profile: "Despre mine",
+};
+
 const state = {
   token: null,
   data: null,
@@ -62,6 +78,11 @@ const state = {
   tab: "home",
   theme: "light",
   role: "student",
+  lang: "ro",
+  textSize: "M",
+  simpleMode: false,
+  contrast: false,
+  reduceMotion: false,
   semester: 1,
   semesterTouched: false,
   day: null,
@@ -1723,8 +1744,9 @@ function setTab(id) {
     else item.removeAttribute("aria-current");
   }
   $("profile-btn").classList.toggle("is-current", tab.id === "profile");
-  $("page-title").textContent = tab.title;
-  document.title = tab.title + " - open-sime";
+  const title = (state.simpleMode && SIMPLE_TAB_TITLES[tab.id]) ? SIMPLE_TAB_TITLES[tab.id] : tab.title;
+  $("page-title").textContent = title;
+  document.title = title + " - open-sime";
   if (tab.id === "timetable") renderLessons();
   window.scrollTo(0, 0);
   if (state.token) {
@@ -1755,6 +1777,143 @@ function cycleTheme() {
   state.theme = THEMES[(idx + 1) % THEMES.length];
   store.set(KEYS.theme, state.theme);
   applyTheme();
+}
+
+function applySettings() {
+  document.documentElement.lang = state.lang || "ro";
+  document.documentElement.dataset.textSize = state.textSize || "M";
+  document.documentElement.dataset.simpleMode = String(Boolean(state.simpleMode));
+  document.documentElement.dataset.contrast = state.contrast ? "high" : "normal";
+  document.documentElement.dataset.reduceMotion = String(Boolean(state.reduceMotion));
+
+  const langRadio = document.querySelector(`input[name="setting-lang"][value="${state.lang}"]`);
+  if (langRadio) langRadio.checked = true;
+
+  const sizeRadio = document.querySelector(`input[name="setting-text-size"][value="${state.textSize}"]`);
+  if (sizeRadio) sizeRadio.checked = true;
+
+  const themeRadio = document.querySelector(`input[name="setting-theme"][value="${state.theme}"]`);
+  if (themeRadio) themeRadio.checked = true;
+
+  const simpleCheckbox = $("setting-simple-mode");
+  if (simpleCheckbox) simpleCheckbox.checked = Boolean(state.simpleMode);
+
+  const contrastCheckbox = $("setting-contrast");
+  if (contrastCheckbox) contrastCheckbox.checked = Boolean(state.contrast);
+
+  const reduceMotionCheckbox = $("setting-reduce-motion");
+  if (reduceMotionCheckbox) reduceMotionCheckbox.checked = Boolean(state.reduceMotion);
+
+  applyTheme();
+  setTab(state.tab);
+}
+
+function initSettings() {
+  state.lang = store.get(KEYS.lang) || "ro";
+  state.textSize = store.get(KEYS.textSize) || "M";
+  state.simpleMode = store.get(KEYS.simpleMode) === "true";
+  state.contrast = store.get(KEYS.contrast) === "true";
+  state.reduceMotion = store.get(KEYS.reduceMotion) === "true";
+
+  const dialog = $("settings-dialog");
+  const openBtn = $("settings-btn");
+  const closeBtn = $("settings-close-btn");
+
+  if (openBtn && dialog) {
+    openBtn.addEventListener("click", () => {
+      if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+      } else {
+        dialog.setAttribute("open", "");
+      }
+    });
+  }
+
+  if (closeBtn && dialog) {
+    closeBtn.addEventListener("click", () => {
+      if (typeof dialog.close === "function") {
+        dialog.close();
+      } else {
+        dialog.removeAttribute("open");
+      }
+    });
+  }
+
+  if (dialog) {
+    dialog.addEventListener("click", (e) => {
+      const rect = dialog.getBoundingClientRect();
+      const inDialog =
+        rect.top <= e.clientY &&
+        e.clientY <= rect.top + rect.height &&
+        rect.left <= e.clientX &&
+        e.clientX <= rect.left + rect.width;
+      if (!inDialog) {
+        if (typeof dialog.close === "function") dialog.close();
+        else dialog.removeAttribute("open");
+      }
+    });
+  }
+
+  for (const radio of document.querySelectorAll('input[name="setting-lang"]')) {
+    radio.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        state.lang = e.target.value;
+        store.set(KEYS.lang, state.lang);
+        applySettings();
+        render();
+      }
+    });
+  }
+
+  for (const radio of document.querySelectorAll('input[name="setting-text-size"]')) {
+    radio.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        state.textSize = e.target.value;
+        store.set(KEYS.textSize, state.textSize);
+        applySettings();
+      }
+    });
+  }
+
+  for (const radio of document.querySelectorAll('input[name="setting-theme"]')) {
+    radio.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        state.theme = e.target.value;
+        store.set(KEYS.theme, state.theme);
+        applyTheme();
+      }
+    });
+  }
+
+  const simpleInput = $("setting-simple-mode");
+  if (simpleInput) {
+    simpleInput.addEventListener("change", (e) => {
+      state.simpleMode = e.target.checked;
+      store.set(KEYS.simpleMode, String(state.simpleMode));
+      applySettings();
+      render();
+    });
+  }
+
+  const contrastInput = $("setting-contrast");
+  if (contrastInput) {
+    contrastInput.addEventListener("change", (e) => {
+      state.contrast = e.target.checked;
+      store.set(KEYS.contrast, String(state.contrast));
+      applySettings();
+    });
+  }
+
+  const motionInput = $("setting-reduce-motion");
+  if (motionInput) {
+    motionInput.addEventListener("change", (e) => {
+      state.reduceMotion = e.target.checked;
+      store.set(KEYS.reduceMotion, String(state.reduceMotion));
+      applySettings();
+    });
+  }
+
+  applySettings();
 }
 
 // auth
@@ -2020,6 +2179,7 @@ function boot() {
   applyTheme();
   buildNav();
   bindEvents();
+  initSettings();
 
   api("/api/auth/config", { auth: false, retry: false })
     .then((cfg) => {

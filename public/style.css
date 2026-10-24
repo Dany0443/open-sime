@@ -297,8 +297,10 @@ ul, ol {
   display: grid;
   flex: none;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
   border-radius: 50%;
   color: var(--on-surface-variant);
   transition: border-radius 0.3s var(--ease-spring), background-color 0.2s;
@@ -2322,3 +2324,168 @@ ul, ol {
 }
 
 .remember-row { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); font-size: .875rem; }
+
+/* W13: Text scaling */
+html[data-text-size="S"] {
+  font-size: 87.5%;
+}
+html[data-text-size="M"] {
+  font-size: 100%;
+}
+html[data-text-size="L"] {
+  font-size: 112.5%;
+}
+html[data-text-size="XL"] {
+  font-size: 125%;
+}
+
+/* W13: High contrast */
+html[data-contrast="high"] {
+  --outline: var(--on-surface);
+  --outline-variant: var(--on-surface);
+  --on-surface-variant: var(--on-surface);
+}
+
+html[data-contrast="high"] .card,
+html[data-contrast="high"] .btn,
+html[data-contrast="high"] .icon-btn,
+html[data-contrast="high"] .seg-btn,
+html[data-contrast="high"] .score,
+html[data-contrast="high"] .stat-pill,
+html[data-contrast="high"] .subject {
+  border: 2px solid currentColor !important;
+}
+
+html[data-contrast="high"] :focus-visible {
+  outline: 4px solid var(--primary) !important;
+  outline-offset: 3px !important;
+}
+
+/* W13: Reduce motion */
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* W13: Simple mode */
+html[data-simple-mode="true"] {
+  font-size: 112.5%;
+}
+
+html[data-simple-mode="true"] .icon-btn {
+  width: 56px;
+  height: 56px;
+  min-width: 56px;
+  min-height: 56px;
+}
+
+html[data-simple-mode="true"] .btn {
+  min-height: 64px;
+  font-size: 1.125rem;
+}
+
+html[data-simple-mode="true"] .nav-item {
+  font-size: 0.875rem;
+}
+
+html[data-simple-mode="true"] .deco-shape,
+html[data-simple-mode="true"] .brand-mark,
+html[data-simple-mode="true"] .meta-row,
+html[data-simple-mode="true"] .muted-subtext {
+  display: none !important;
+}
+
+html[data-simple-mode="true"] .subject-name {
+  font-size: 1.25rem;
+}
+
+html[data-simple-mode="true"] .score-md {
+  font-size: 1.25rem;
+  min-width: 48px;
+  min-height: 48px;
+}
+
+/* W13: Settings dialog */
+.settings-dialog {
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--shape-xl);
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  padding: 0;
+  max-width: 520px;
+  width: calc(100% - 32px);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.24);
+  margin: auto;
+}
+
+.settings-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.settings-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+
+.settings-dialog-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.settings-dialog-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.settings-section-title {
+  margin: 0 0 10px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+}
+
+.setting-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  cursor: pointer;
+  border-bottom: 1px solid var(--surface-container-highest);
+}
+
+.setting-toggle-row:last-child {
+  border-bottom: none;
+}
+
+.setting-toggle-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.setting-toggle-row strong {
+  display: block;
+  font-size: 0.9375rem;
+  color: var(--on-surface);
+}
+
+.setting-toggle-row p {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  color: var(--on-surface-variant);
+}
