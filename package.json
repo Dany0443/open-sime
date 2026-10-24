@@ -1,0 +1,20 @@
+{
+  "name": "sime-web",
+  "version": "1.0.0",
+  "description": "Local Material 3 web frontend for agenda.sime.md",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "express": "^4.21.0"
+  }
+}

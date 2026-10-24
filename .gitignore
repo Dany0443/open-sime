@@ -1,0 +1,14 @@
+# Environment & Secrets
+.env
+.env.*
+*.env
+
+# Agent harness
+.agents/
+tmp/
+
+
+# OS / Editor files
+.idea/
+.vscode/
+node_modules/

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fbf8ff">
+  <title>open-sime</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <script src="/public/app.js" defer></script>
+</head>
+<body>
+  <div id="splash" class="splash" role="status" aria-label="Se încarcă">
+    <span class="spinner spinner-lg" aria-hidden="true"></span>
+  </div>
+
+  <main id="auth-view" class="auth" hidden>
+    <span class="auth-deco deco-a" data-cookie aria-hidden="true"></span>
+    <span class="auth-deco deco-b" data-cookie aria-hidden="true"></span>
+    <section class="auth-card" aria-labelledby="auth-title">
+      <div class="auth-brand">
+        <span class="brand-mark" data-cookie aria-hidden="true"></span>
+        <span>open-sime</span>
+      </div>
+      <div>
+        <h1 id="auth-title" class="auth-title">Autentificare</h1>
+        <p class="auth-lead">Folosește contul tău de pe agenda.sime.md.</p>
+      </div>
+      <form id="login-form" class="auth-form" novalidate>
+        <div class="seg" role="radiogroup" aria-label="Tip de cont">
+          <input type="radio" id="role-student" name="role" value="student" checked>
+          <label class="seg-btn" for="role-student">Elev</label>
+          <input type="radio" id="role-parent" name="role" value="parent">
+          <label class="seg-btn" for="role-parent">Părinte</label>
+        </div>
+        <div class="field">
+          <input class="field-input" id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder=" " maxlength="128" required>
+          <label class="field-label" for="username">Nume de utilizator</label>
+        </div>
+        <div class="field">
+          <input class="field-input" id="password" name="password" type="password" autocomplete="current-password" placeholder=" " maxlength="256" required>
+          <label class="field-label" for="password">Parolă</label>
+          <button id="toggle-password" class="icon-btn field-action" type="button" aria-label="Arată parola" aria-pressed="false" data-icon="visibility"></button>
+        </div>
+        <div id="auth-message" class="banner" role="alert" hidden>
+          <span id="auth-message-icon" class="banner-icon"></span>
+          <p id="auth-message-text"></p>
+        </div>
+        <button id="login-submit" class="btn btn-filled" type="submit">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="login-label">Intră în cont</span>
+        </button>
+      </form>
+    </section>
+  </main>
+
+  <div id="shell" class="shell" hidden>
+    <aside class="rail" aria-label="Navigare principală">
+      <div class="rail-brand">
+        <span class="brand-mark" data-cookie aria-hidden="true"></span>
+        <span class="brand-name">open-sime</span>
+      </div>
+      <nav id="rail-nav" class="rail-nav" aria-label="Secțiuni"></nav>
+    </aside>
+
+    <div class="main-col">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="page-title" class="page-title">Acasă</h1>
+          <p id="sync-status" class="sync-status sync-warn" role="status">
+            <span class="sync-dot" aria-hidden="true"></span>
+            <span id="sync-text">Nesincronizat</span>
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <button id="sync-btn" class="icon-btn tonal" type="button" aria-label="Sincronizează acum" data-icon="sync">
+            <span id="sync-count" class="cooldown-count" aria-hidden="true"></span>
+          </button>
+          <button id="theme-btn" class="icon-btn" type="button"></button>
+          <button id="logout-btn" class="icon-btn" type="button" aria-label="Deconectare" title="Deconectare" data-icon="logout"></button>
+        </div>
+      </header>
+
+      <div class="student-strip">
+        <div id="student-list" class="student-list" role="group" aria-label="Elev"></div>
+        <button id="profile-btn" class="icon-btn tonal profile-btn" type="button" aria-label="Profil și profesori" title="Profil și profesori" data-icon="person"></button>
+      </div>
+
+      <main id="content" class="content" tabindex="-1">
+        <section class="view" id="view-home" data-view="home" aria-label="Acasă" hidden>
+          <div class="home-grid">
+            <section id="home-live" class="card live-card" aria-label="Orele de azi"></section>
+            <div id="home-metrics" class="metrics"></div>
+            <section id="home-marks" class="card marks-card" aria-label="Note recente"></section>
+            <section id="home-homework" class="card homework-card" aria-label="Teme și termene"></section>
+          </div>
+        </section>
+
+        <section class="view" id="view-marks" data-view="marks" aria-label="Reușita" hidden>
+          <div id="marks-summary" class="stat-row"></div>
+          <div id="marks-list" class="subject-grid"></div>
+        </section>
+
+        <section class="view" id="view-timetable" data-view="timetable" aria-label="Orar" hidden>
+          <div id="day-switch" class="day-switch"></div>
+          <div id="day-heading" class="day-heading"></div>
+          <div id="lesson-list"></div>
+        </section>
+
+        <section class="view" id="view-absences" data-view="absences" aria-label="Absențe" hidden>
+          <div id="abs-toggle" class="seg abs-toggle" role="group" aria-label="Semestru"></div>
+          <div id="abs-stats" class="stat-row"></div>
+          <div id="abs-list"></div>
+        </section>
+
+        <section class="view" id="view-homework" data-view="homework" aria-label="Teme" hidden>
+          <div id="homework-list"></div>
+        </section>
+
+        <section class="view" id="view-profile" data-view="profile" aria-label="Profil și profesori" hidden>
+          <div id="profile-card"></div>
+          <div id="teacher-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Navigare"></nav>
+  </div>
+
+  <div id="toast-host" class="toast-host" aria-live="polite"></div>
+</body>
+</html>
