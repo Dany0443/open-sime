@@ -31,8 +31,22 @@ const HOST = "agenda.sime.md";
 const BASE_URL = `https://${HOST}`;
 const PUBLIC_PORTAL_URL = `${BASE_URL}/ords/r/agenda/main/public`;
 const ajaxUrl = (sessionId) => `${BASE_URL}/ords/wwv_flow.ajax?p_context=main/main-page/${sessionId}`;
-const studentSwitchUrl = (sessionId, studentId) =>
-  resolveSimeUrl(`f?p=AGENDA:1:${encodeURIComponent(sessionId)}::NO::P1_ELEVE_ID:${encodeURIComponent(studentId)}`, `${BASE_URL}/ords/`);
+const studentSwitchUrl = (sessionId, studentId, checksum = null) => {
+  if (!checksum) {
+    throw new SimeStudentNotFoundError("Cannot build student switch URL without APEX checksum");
+  }
+  return resolveSimeUrl(
+    `f?p=AGENDA:1:${encodeURIComponent(sessionId)}::NO::P1_ELEVE_ID:${encodeURIComponent(studentId)}&cs=${encodeURIComponent(checksum)}`,
+    `${BASE_URL}/ords/`,
+  );
+};
+
+function formatSwitchUrl(rawHref, sessionId) {
+  if (!rawHref) return null;
+  let url = rawHref.replace(/(f\?p=[^:]+:[^:]+:)([^:]*)/, `$1${sessionId}`);
+  url = url.replace(/([?&;:]session=)\d+/gi, `$1${sessionId}`);
+  return resolveSimeUrl(url);
+}
 
 const FLOW_ID = "104";
 const FLOW_STEP_ID = "1";
@@ -1810,22 +1824,56 @@ class SimeClient {
     return students;
   }
 
-  // Switches active student via f?p=AGENDA:1:${apexSession}::NO::P1_ELEVE_ID:${studentId} and parses full student state
+  // Switches active student via nav-tree checksum href and parses full student state
   async switchStudent(studentId, { gated = false } = {}) {
     const cleanId = String(studentId || "").trim();
     if (!cleanId) throw new SimeStudentNotFoundError("Student ID is required");
+    const key = studentKey(cleanId);
     return this.withRetry(async () => {
       await this.ensureLogin();
-      const targetUrl = studentSwitchUrl(this.auth.sessionId, cleanId);
+      const navUrl = this.studentUrls.get(key) || this.studentUrls.get(cleanId);
+      if (!navUrl) {
+        throw new SimeStudentNotFoundError(`No switch URL with checksum found for student: ${cleanId}`);
+      }
+      const targetUrl = formatSwitchUrl(navUrl, this.auth.sessionId);
       let page = await this.fetchDashboard(targetUrl, { gated, bypassCache: true });
-      const parsedId = parseStudentProfile(page.$).id;
-      if (parsedId && parsedId !== cleanId && this.studentUrls.has(cleanId)) {
-        const altUrl = this.studentUrls.get(cleanId);
-        if (altUrl && altUrl !== targetUrl) {
-          page = await this.fetchDashboard(altUrl, { gated: false, bypassCache: true });
+      let parsedProfile = parseStudentProfile(page.$);
+      let parsedKey = studentKey(parsedProfile.id);
+      const pageLinks = parseStudentLinks(page.$);
+      const currentLink = pageLinks.find((l) => l.isCurrent);
+
+      let matches =
+        parsedKey === key ||
+        normalizeName(parsedProfile.fullName) === normalizeName(cleanId) ||
+        Boolean(currentLink && studentKey(currentLink.studentId) === key);
+
+      if (!matches) {
+        const retryLink = pageLinks.find(
+          (l) => studentKey(l.studentId) === key || normalizeName(l.name) === normalizeName(cleanId),
+        );
+        if (retryLink?.href) {
+          const retryUrl = formatSwitchUrl(resolveSimeUrl(retryLink.href), this.auth.sessionId);
+          page = await this.fetchDashboard(retryUrl, { gated: false, bypassCache: true });
+          parsedProfile = parseStudentProfile(page.$);
+          parsedKey = studentKey(parsedProfile.id);
+          const retryPageLinks = parseStudentLinks(page.$);
+          const retryCurrentLink = retryPageLinks.find((l) => l.isCurrent);
+          matches =
+            parsedKey === key ||
+            normalizeName(parsedProfile.fullName) === normalizeName(cleanId) ||
+            Boolean(retryCurrentLink && studentKey(retryCurrentLink.studentId) === key);
+        }
+        if (!matches) {
+          throw new SimeStudentNotFoundError(`Failed to switch to student ${cleanId}`);
         }
       }
+
       this.studentUrls.set(cleanId, page.url);
+      this.studentUrls.set(key, page.url);
+      if (parsedKey) {
+        this.studentUrls.set(parsedKey, page.url);
+        this.portalIds.add(parsedKey);
+      }
       this.registerStudents(page);
       return this.enrichPortalPage(page, cleanId);
     });
@@ -1836,8 +1884,11 @@ class SimeClient {
     const isCurrent = !key || this.portalIds.has(key) || (studentId && this.portalIds.has(studentId));
     const portal = await this.loadPortal({ gated: gated && isCurrent, bypassCache });
     if (isCurrent) return portal;
-    const url = this.studentUrls.get(key) || (studentId ? this.studentUrls.get(studentId) : null) || studentSwitchUrl(this.auth.sessionId, studentId);
-    return this.fetchDashboard(url, { gated, bypassCache });
+    const url = this.studentUrls.get(key) || (studentId ? this.studentUrls.get(studentId) : null);
+    if (!url) {
+      throw new SimeStudentNotFoundError(`No dashboard URL found for student: ${studentId}`);
+    }
+    return this.fetchDashboard(formatSwitchUrl(url, this.auth.sessionId), { gated, bypassCache });
   }
 
   fetchStudentPortalHtml(studentId, { gated = false, bypassCache = false } = {}) {
@@ -2386,6 +2437,7 @@ export {
   executeHandshake,
   fingerprintHeaders,
   FINGERPRINTS,
+  formatSwitchUrl,
   inferAbsenceSemester,
   inspectParserHealth,
   loginGuard,
@@ -2404,7 +2456,13 @@ export {
   sessions,
   SimeAuth,
   SimeClient,
+  SimeError,
   SimeHttp,
+  SimeNetworkError,
+  SimeParseError,
+  SimeRateLimitError,
+  SimeSessionExpiredError,
+  SimeStudentNotFoundError,
   studentKey,
   studentSwitchUrl,
   normalizeName,

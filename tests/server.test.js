@@ -244,6 +244,10 @@ const SAMPLE_PORTAL_HTML =
   '<input id="P1_PROC_PREZ" value="95">' +
   '<input id="P1_LAST_3_EVAL_LIST" value="&lt;ul&gt;&lt;li&gt;20.10.2026 Matematica: 10&lt;/li&gt;&lt;/ul&gt;">' +
   '<input id="P1_HOMEWORK" value="&lt;b&gt;25.10.2026&lt;/b&gt;&lt;ul&gt;&lt;li&gt;&lt;span&gt;Matematica:&lt;/span&gt;&lt;span&gt;Ex. 12&lt;/span&gt;&lt;/li&gt;&lt;/ul&gt;">' +
+  '<div id="t_TreeNav"><ul>' +
+  '<li data-current="true"><a href="/ords/f?p=AGENDA:1:777888::NO::P1_ELEVE_ID:101&cs=CS101">Ion Ciobanu</a></li>' +
+  '<li><a href="/ords/f?p=AGENDA:1:777888::NO::P1_ELEVE_ID:202&cs=CS202">Elena Ciobanu</a></li>' +
+  '</ul></div>' +
   '<div id="SEMESTER_REG_1"><table class="t-Report-report"><tr>' +
   '<td headers="DISCIPLINA">Matematica</td>' +
   '<td headers="LISTA_EVALUATION"><span title="20.10.2026">10</span></td>' +
@@ -354,6 +358,10 @@ test("zero-waterfall login, <5ms unified overview cache, 4-strike login lockout,
     "</form>";
 
   const SECOND_STUDENT_HTML =
+    '<div id="t_TreeNav"><ul>' +
+    '<li><a href="/ords/f?p=AGENDA:1:777888::NO::P1_ELEVE_ID:101&cs=CS101">Ion Ciobanu</a></li>' +
+    '<li data-current="true"><a href="/ords/f?p=AGENDA:1:777888::NO::P1_ELEVE_ID:202&cs=CS202">Elena Ciobanu</a></li>' +
+    '</ul></div>' +
     '<select id="P1_ELEVE_ID"><option value="101">Ion Ciobanu</option><option value="202" selected>Elena Ciobanu</option></select>' +
     '<span id="P1_ELEVE">Elena Ciobanu</span>' +
     '<span id="P1_CLASS_NAME">8A</span>' +
@@ -454,7 +462,7 @@ test("zero-waterfall login, <5ms unified overview cache, 4-strike login lockout,
     });
     assert.equal(switchRes.status, 200);
     const switchPayload = await switchRes.json();
-    assert.ok(requestedUrls.some((u) => u.includes("f?p=AGENDA:1:777888::NO::P1_ELEVE_ID:202")));
+    assert.ok(requestedUrls.some((u) => u.includes("f?p=AGENDA:1:777888::NO::P1_ELEVE_ID:202") && u.includes("&cs=CS202")));
     assert.equal(switchPayload.studentId, "202");
     assert.equal(switchPayload.data.student.id, "202");
     assert.equal(switchPayload.data.student.fullName, "Elena Ciobanu");
