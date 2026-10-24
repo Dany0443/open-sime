@@ -5,7 +5,9 @@
 
 # Agent harness
 .agents/
+.claude/
 tmp/
+skills-lock.json
 
 
 # OS / Editor files

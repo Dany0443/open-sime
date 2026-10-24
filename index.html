@@ -43,6 +43,7 @@
           <label class="field-label" for="password">Parolă</label>
           <button id="toggle-password" class="icon-btn field-action" type="button" aria-label="Arată parola" aria-pressed="false" data-icon="visibility"></button>
         </div>
+        <label class="remember-row"><input id="remember-me" type="checkbox" checked> <span>Ține-mă minte</span></label>
         <div id="auth-message" class="banner" role="alert" hidden>
           <span id="auth-message-icon" class="banner-icon"></span>
           <p id="auth-message-text"></p>
@@ -99,7 +100,7 @@
 
         <section class="view" id="view-marks" data-view="marks" aria-label="Reușita" hidden>
           <div id="marks-summary" class="stat-row"></div>
-          <div id="marks-list" class="subject-grid"></div>
+          <div id="marks-list" class="marks-table-wrap"></div>
         </section>
 
         <section class="view" id="view-timetable" data-view="timetable" aria-label="Orar" hidden>

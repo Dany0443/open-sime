@@ -8,14 +8,15 @@ const KEYS = {
   theme: "open-sime.theme",
   role: "open-sime.role",
   tab: "open-sime.tab",
+  creds: "open_sime_creds",
 };
 const TICK_MS = 30000;
 const SYNC_COOLDOWN_MS = 30000;
 const STALE_AFTER_MS = 5 * 60000;
 const DAY_MS = 86400000;
-const THEMES = ["auto", "light", "dark"];
-const THEME_LABELS = { auto: "automată", light: "luminoasă", dark: "întunecată" };
-const THEME_ICONS = { auto: "contrast", light: "light_mode", dark: "dark_mode" };
+const THEMES = ["light", "dark"];
+const THEME_LABELS = { light: "automată", light: "luminoasă", dark: "întunecată" };
+const THEME_ICONS = { light: "contrast", light: "light_mode", dark: "dark_mode" };
 
 const TABS = [
   { id: "home", label: "Acasă", title: "Acasă", icon: "home" },
@@ -60,7 +61,8 @@ const state = {
   data: null,
   students: [],
   tab: "home",
-  theme: "auto",
+  theme: "light",
+  role: "student",
   semester: 1,
   semesterTouched: false,
   day: null,
@@ -175,6 +177,11 @@ function initials(name) {
   const words = String(name || "").split(/\s+/).filter(Boolean);
   const letters = words.slice(0, 2).map((w) => w.charAt(0));
   return letters.join("").toUpperCase() || "?";
+}
+
+function toTitleCase(str) {
+  if (!str) return "";
+  return String(str).toLowerCase().replace(/(?:^|\s|-)\S/g, (c) => c.toUpperCase());
 }
 
 function bandOf(value) {
@@ -338,6 +345,25 @@ function toast(text) {
 
 // network
 
+async function silentLogin() {
+  let creds;
+  try { creds = JSON.parse(store.get(KEYS.creds) || ""); } catch { creds = null; }
+  if (!creds || !creds.username || !creds.password) return false;
+  const res = await api("/api/auth/login", { method: "POST", body: { username: creds.username, password: creds.password, role: creds.role || "parent" }, auth: false, retry: false });
+  if (!res || !res.token || !res.data) return false;
+  state.token = res.token; state.role = res.role || creds.role || "parent"; store.set(KEYS.token, res.token); store.set(KEYS.role, state.role);
+  const payload = res.data; if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students; setData(payload, Date.now());
+  return true;
+}
+
+async function apiFetch(path, init, retry = true) {
+  const res = await fetch(path, init);
+  if (res.status === 401 && retry && init.auth !== false) {
+    try { if (await silentLogin()) { init.headers.Authorization = "Bearer " + state.token; return apiFetch(path, init, false); } } catch {}
+  }
+  return res;
+}
+
 async function api(path, options = {}) {
   const headers = { Accept: "application/json" };
   if (state.token && options.auth !== false) headers.Authorization = "Bearer " + state.token;
@@ -348,7 +374,7 @@ async function api(path, options = {}) {
   }
   let res;
   try {
-    res = await fetch(path, init);
+    res = await apiFetch(path, init, options.retry !== false);
   } catch {
     throw new ApiError("network", 0, 0);
   }
@@ -831,21 +857,22 @@ function subjectCard(s) {
   );
 }
 
+function marksCell(content, cls) { return h("td", { class: cls || "" }, content); }
 function renderMarks() {
   const summary = $("marks-summary");
   const list = $("marks-list");
   const m = model();
-  if (!m) {
-    summary.replaceChildren();
-    list.replaceChildren(pending(260));
-    return;
-  }
-  summary.replaceChildren(stat("Media anuală", fmtAvg(m.averages.annual), "primary"), stat("Semestrul 1", fmtAvg(m.averages.sem1), "neutral"), stat("Semestrul 2", fmtAvg(m.averages.sem2), "neutral"));
-  if (!m.subjects.length) {
-    list.replaceChildren(emptyState("Nicio disciplină încă", "Notele apar aici după prima sincronizare cu portalul."));
-    return;
-  }
-  list.replaceChildren(...m.subjects.map(subjectCard));
+  if (!m) { summary.replaceChildren(); list.replaceChildren(pending(260)); return; }
+  summary.replaceChildren(stat("Media general?", fmtAvg(m.averages.general ?? m.averages.annual), "primary"), stat("Semestrul 1", fmtAvg(m.averages.sem1), "neutral"), stat("Semestrul 2", fmtAvg(m.averages.sem2), "neutral"));
+  if (!m.subjects.length) { list.replaceChildren(emptyState("Nicio disciplin? ?nc?", "Notele apar aici dup? prima sincronizare cu portalul.")); return; }
+  const head = h("thead", null, h("tr", null, ...["Disciplin?", "Semestrul 1: Note", "Medie Sem. 1", "Semestrul 2: Note", "Medie Sem. 2", "Medie Anual?"].map((x) => h("th", { scope: "col", text: x }))));
+  const rows = m.subjects.map((subject) => {
+    const groups = markGroups(subject); const sem = (n) => groups.find((g) => g.semester === n);
+    const pills = (g) => g ? h("div", { class: "grade-pills" }, g.marks.map((mk) => score(mk.value, "md", mk.date))) : h("span", { class: "muted", text: "-" });
+    const annual = num(subject.annualAverage) ?? num(subject.average);
+    return h("tr", null, marksCell(h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || "Disciplin?") })), marksCell(pills(sem(1))), marksCell(avgBadge(num(subject.sem1Average))), marksCell(pills(sem(2))), marksCell(avgBadge(num(subject.sem2Average))), marksCell(avgBadge(annual)));
+  });
+  list.replaceChildren(h("div", { class: "marks-table-surface" }, h("table", { class: "marks-table" }, head, h("tbody", null, rows))));
 }
 
 // rendering: timetable
@@ -1084,7 +1111,7 @@ function renderProfile() {
   }
   const s = m.student;
   const meta = m.metadata;
-  const name = s.fullName || meta.fullName || "Elev";
+  const name = toTitleCase(s.fullName || meta.fullName || "Elev");
   const className = s.className || meta.className;
   const school = s.schoolName || meta.schoolName;
   const idx = Math.max(0, state.students.findIndex((x) => x.id === s.id));
@@ -1134,19 +1161,19 @@ function renderProfile() {
 
 function renderStudents() {
   const host = $("student-list");
-  const list = state.students;
+  const list = Array.from(new Map(state.students.map((s) => [String(s.id), s])).values());
   if (!list.length) {
     host.replaceChildren(h("div", { class: "skeleton student-skel", "aria-hidden": "true" }));
     return;
   }
   const hadFocus = host.contains(document.activeElement);
   const currentId = state.switching || (state.data && state.data.student && state.data.student.id) || "";
-  const multiple = list.length > 1;
+  const multiple = list.length > 1 && state.role !== "student";
   const nodes = list.map((s, i) => {
     const active = !multiple || String(s.id) === String(currentId);
     const body = [
       avatar(s, i, "sm"),
-      h("span", { class: "student-text" }, h("span", { class: "student-name", text: s.fullName || "Elev" }), s.className ? h("span", { class: "student-class", text: s.className }) : null),
+      h("span", { class: "student-text" }, h("span", { class: "student-name", text: toTitleCase(s.fullName || "Elev") }), s.className ? h("span", { class: "student-class", text: s.className }) : null),
     ];
     if (!multiple) return h("div", { class: "student-chip is-active is-static" }, body);
     return h(
@@ -1295,7 +1322,7 @@ function setTab(id) {
 const colorQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 function applyTheme() {
-  const dark = state.theme === "dark" || (state.theme === "auto" && colorQuery.matches);
+  const dark = state.theme === "dark";
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   const color = window.getComputedStyle(document.documentElement).getPropertyValue("--surface").trim();
   const meta = document.querySelector('meta[name="theme-color"]');
@@ -1304,7 +1331,7 @@ function applyTheme() {
 }
 
 function cycleTheme() {
-  state.theme = THEMES[(THEMES.indexOf(state.theme) + 1) % THEMES.length];
+  state.theme = state.theme === "dark" ? "light" : "dark";
   store.set(KEYS.theme, state.theme);
   applyTheme();
 }
@@ -1372,6 +1399,8 @@ async function onLogin(event) {
     state.token = res.token;
     store.set(KEYS.token, res.token);
     store.set(KEYS.role, role);
+    state.role = role;
+    if ($("remember-me").checked) store.set(KEYS.creds, JSON.stringify({ username, password, role })); else store.del(KEYS.creds);
     const payload = res.data;
     if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students;
     state.error = "";
@@ -1534,7 +1563,7 @@ function bindEvents() {
     if (state.token) setTab(tabFromHash() || "home");
   });
   colorQuery.addEventListener("change", () => {
-    if (state.theme === "auto") applyTheme();
+    applyTheme();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !state.token) return;
@@ -1545,8 +1574,8 @@ function bindEvents() {
 
 function boot() {
   const savedTheme = store.get(KEYS.theme);
-  state.theme = THEMES.includes(savedTheme) ? savedTheme : "auto";
-  document.documentElement.dataset.theme = state.theme === "dark" || (state.theme === "auto" && colorQuery.matches) ? "dark" : "light";
+  state.theme = THEMES.includes(savedTheme) ? savedTheme : (colorQuery.matches ? "dark" : "light");
+  document.documentElement.dataset.theme = state.theme === "dark" ? "dark" : "light";
 
   for (const el of document.querySelectorAll("[data-icon]")) el.prepend(icon(el.dataset.icon));
   for (const el of document.querySelectorAll("[data-cookie]")) el.appendChild(cookieSvg("deco-shape"));
@@ -1560,6 +1589,7 @@ function boot() {
 
   const token = store.get(KEYS.token);
   if (token) {
+    state.role = store.get(KEYS.role) || "student";
     state.token = token;
     const cached = loadCached();
     if (cached) setData(cached, Number(store.get(KEYS.sync)) || 0);
@@ -1568,7 +1598,8 @@ function boot() {
     render();
     refresh({ background: true });
   } else {
-    showAuth("");
+    const creds = store.get(KEYS.creds);
+    if (creds) silentLogin().then(() => { showShell(); setTab(state.tab); render(); }).catch(() => showAuth("")); else showAuth("");
   }
   window.setInterval(tick, TICK_MS);
 }

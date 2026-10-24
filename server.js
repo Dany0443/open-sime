@@ -2012,6 +2012,8 @@ function createApp() {
   });
 
   app.post("/api/student/switch", requireSession, async (req, res) => {
+    if (!req.session) return res.status(401).json({ error: "Not authenticated" });
+    if (req.session.role === "student" || req.session.role === "E") return res.status(400).json({ error: "Students cannot switch students" });
     const rawId = req.body?.studentId;
     const studentId = typeof rawId === "string" || typeof rawId === "number" ? String(rawId).trim().slice(0, 128) : "";
     if (!studentId) {

@@ -2147,3 +2147,11 @@ ul, ol {
     transition-duration: 0.01ms;
   }
 }
+.marks-table-surface { overflow-x: auto; background: var(--surface-container-low); border-radius: var(--shape-lg); border: 1px solid var(--outline-variant); }
+.marks-table { width: 100%; min-width: 860px; border-collapse: collapse; text-align: left; }
+.marks-table th { position: sticky; top: 0; z-index: 1; padding: 12px 16px; background: var(--surface-container-high); color: var(--on-surface-variant); font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.marks-table td { padding: 12px 16px; border-top: 1px solid var(--outline-variant); vertical-align: middle; }
+.marks-table tbody tr:nth-child(even) { background: var(--surface-container); }
+.marks-table .subject-name { font-size: 1rem; font-weight: 700; }
+.grade-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.remember-row { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); font-size: .875rem; }
