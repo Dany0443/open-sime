@@ -40,8 +40,8 @@ const ITEM_STUDENT_ID = "P1_ELEVE_ID";
 const ITEM_LAST_EVALS = "P1_LAST_3_EVAL_LIST";
 const ITEM_HOMEWORK = "P1_HOMEWORK";
 const REGIONS = [
-  { semester: 1, id: "sem1", selectors: ["#sem1", "#SEMESTER_REG_1", "#R_SEM1", "[id='sem1' i]", "[id*='semester_reg_1' i]", "[id*='sem_1' i]"] },
-  { semester: 2, id: "sem2", selectors: ["#sem2", "#SEMESTER_REG_2", "#R_SEM2", "[id='sem2' i]", "[id*='semester_reg_2' i]", "[id*='sem_2' i]"] },
+  { semester: 1, id: "sem1", selectors: ["#sem1", "#SEMESTER_REG_1", "#R_SEM1", "[id='sem1' i]", "[id*='semester_reg_1' i]", "[id*='sem_1' i]"] /* UNVERIFIED */ },
+  { semester: 2, id: "sem2", selectors: ["#sem2", "#SEMESTER_REG_2", "#R_SEM2", "[id='sem2' i]", "[id*='semester_reg_2' i]", "[id*='sem_2' i]"] /* UNVERIFIED */ },
 ];
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -399,13 +399,13 @@ function parseSemesterReportFromRoot($, root) {
   root.find("tr").each((_i, tr) => {
     const tds = $(tr).find("td").toArray();
     if (!tds.length) return;
-    const disc = tds.find((td) => headerHas($, td, ["DISCIPLINA", "DISCIPLINE", "MATERIA", "OBIECT"]));
+    const disc = tds.find((td) => headerHas($, td, ["DISCIPLINA", "DISCIPLINE" /* UNVERIFIED */, "MATERIA" /* UNVERIFIED */, "OBIECT" /* UNVERIFIED */]));
     if (!disc) return;
     const subject = textOf(disc);
     if (!subject) return;
-    const evals = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION", "EVALUATION", "NOTE", "MARKS"]));
-    const avg = tds.find((td) => headerHas($, td, ["MED_SEM", "MEDIA_SEM", "MEDIA"]));
-    const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR", "CADRU", "TEACHER"]));
+    const evals = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION", "EVALUATION" /* UNVERIFIED */, "NOTE" /* UNVERIFIED */, "MARKS" /* UNVERIFIED */]));
+    const avg = tds.find((td) => headerHas($, td, ["MED_SEM" /* UNVERIFIED */, "MEDIA_SEM" /* UNVERIFIED */, "MEDIA" /* UNVERIFIED */]));
+    const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR", "CADRU" /* UNVERIFIED */, "TEACHER" /* UNVERIFIED */]));
     result.set(subject, {
       subject,
       marks: evals ? parseMarkCell($, evals) : [],
@@ -436,16 +436,16 @@ function parseCombinedReportFromRoot($, root, annualMap = new Map()) {
     const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR", "CADRU", "TEACHER"]));
     const teacher = teacherTd ? textOf(teacherTd) || null : null;
 
-    const annualTd = tds.find((td) => headerHas($, td, ["MED_AN", "MEDIA_AN", "MEDIA_GEN", "ANUAL", "ANNUAL"]));
+    const annualTd = tds.find((td) => headerHas($, td, ["MED_AN" /* UNVERIFIED */, "MEDIA_AN" /* UNVERIFIED */, "MEDIA_GEN" /* UNVERIFIED */, "ANUAL" /* UNVERIFIED */, "ANNUAL" /* UNVERIFIED */]));
     if (annualTd) {
       const val = toFloat(textOf(annualTd));
       if (val !== null) annualMap.set(subject, val);
     }
 
-    const evals1 = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION_1", "EVAL_SEM1", "NOTE_SEM1", "SEM1_NOTE"]));
-    const evals2 = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION_2", "EVAL_SEM2", "NOTE_SEM2", "SEM2_NOTE"]));
-    const avg1 = tds.find((td) => headerHas($, td, ["MED_SEM1", "MED_SEM_1", "MEDIA_SEM1", "SEM1_MED"]));
-    const avg2 = tds.find((td) => headerHas($, td, ["MED_SEM2", "MED_SEM_2", "MEDIA_SEM2", "SEM2_MED"]));
+    const evals1 = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION_1" /* UNVERIFIED */, "EVAL_SEM1" /* UNVERIFIED */, "NOTE_SEM1" /* UNVERIFIED */, "SEM1_NOTE" /* UNVERIFIED */]));
+    const evals2 = tds.find((td) => headerHas($, td, ["LISTA_EVALUATION_2" /* UNVERIFIED */, "EVAL_SEM2" /* UNVERIFIED */, "NOTE_SEM2" /* UNVERIFIED */, "SEM2_NOTE" /* UNVERIFIED */]));
+    const avg1 = tds.find((td) => headerHas($, td, ["MED_SEM1" /* UNVERIFIED */, "MED_SEM_1" /* UNVERIFIED */, "MEDIA_SEM1" /* UNVERIFIED */, "SEM1_MED" /* UNVERIFIED */]));
+    const avg2 = tds.find((td) => headerHas($, td, ["MED_SEM2" /* UNVERIFIED */, "MED_SEM_2" /* UNVERIFIED */, "MEDIA_SEM2" /* UNVERIFIED */, "SEM2_MED" /* UNVERIFIED */]));
 
     if (evals1 || avg1) {
       sem1.set(subject, {
@@ -633,9 +633,9 @@ function parseCalendarEventsWithDom($, events) {
       .flatMap((key) => asList(ev[key]).map(String))
       .join(" ")
       .toLowerCase();
-    const absenceEl = classContains($, root[0], "absen");
+    const absenceEl = classContains($, root[0], "absen" /* UNVERIFIED */);
     if (absenceEl) marker += ` ${classTokens(absenceEl).join(" ").toLowerCase()}`;
-    const isAbsence = marker.includes("absen");
+    const isAbsence = marker.includes("absen" /* UNVERIFIED */);
     const isUnexcused = UNEXCUSED_MARKERS.some((k) => marker.includes(k));
     const isExcused = !isUnexcused && EXCUSED_MARKERS.some((k) => marker.includes(k));
     const explicitSem = ev.semester === 1 || ev.semester === 2 ? ev.semester : null;
@@ -643,14 +643,14 @@ function parseCalendarEventsWithDom($, events) {
       start,
       end,
       subject,
-      classroom: textFor("lesson-room"),
-      teacher: textFor("lesson-teacher"),
-      topic: textFor("lesson-homework", "lesson-line3"),
+      classroom: textFor("lesson-room" /* UNVERIFIED */),
+      teacher: textFor("lesson-teacher" /* UNVERIFIED */),
+      topic: textFor("lesson-homework" /* UNVERIFIED */, "lesson-line3" /* UNVERIFIED */),
       isAbsence,
       isExcused,
       isUnexcused,
       semester: explicitSem,
-      note: textFor("absence-reason", "reason", "note") || absenceEl?.attribs?.title || null,
+      note: textFor("absence-reason" /* UNVERIFIED */, "reason" /* UNVERIFIED */, "note" /* UNVERIFIED */) || absenceEl?.attribs?.title || null,
     });
   }
   entries.sort((a, b) => a.start - b.start);
@@ -725,9 +725,9 @@ function extractHtmlAbsenceRecords($, today = todayChisinau()) {
   $("tr").each((_i, tr) => {
     const tds = $(tr).find("td").toArray();
     if (!tds.length) return;
-    const statusTd = tds.find((td) => headerHas($, td, ["STATUT", "MOTIVAT", "TIP_ABS", "ABSENT"]));
-    const dateTd = tds.find((td) => headerHas($, td, ["DATA", "DATE", "DATA_ABS"]));
-    const discTd = tds.find((td) => headerHas($, td, ["DISCIPLINA", "DISCIPLINE", "MATERIA"]));
+    const statusTd = tds.find((td) => headerHas($, td, ["STATUT" /* UNVERIFIED */, "MOTIVAT" /* UNVERIFIED */, "TIP_ABS" /* UNVERIFIED */, "ABSENT" /* UNVERIFIED */]));
+    const dateTd = tds.find((td) => headerHas($, td, ["DATA" /* UNVERIFIED */, "DATE" /* UNVERIFIED */, "DATA_ABS" /* UNVERIFIED */]));
+    const discTd = tds.find((td) => headerHas($, td, ["DISCIPLINA" /* UNVERIFIED */, "DISCIPLINE" /* UNVERIFIED */, "MATERIA" /* UNVERIFIED */]));
     if (!statusTd || !dateTd || !discTd) return;
     const date = parseDate(textOf(dateTd), today);
     const subject = textOf(discTd);
@@ -738,10 +738,10 @@ function extractHtmlAbsenceRecords($, today = todayChisinau()) {
       : EXCUSED_MARKERS.some((k) => rawStatus.includes(k))
         ? "motivat"
         : "necunoscut";
-    const timeTd = tds.find((td) => headerHas($, td, ["ORA", "TIME", "LECTIA"]));
-    const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR", "CADRU", "TEACHER"]));
-    const noteTd = tds.find((td) => headerHas($, td, ["MOTIV", "NOTE", "OBSERVATII"]));
-    const semTd = tds.find((td) => headerHas($, td, ["SEMESTRU", "SEM"]));
+    const timeTd = tds.find((td) => headerHas($, td, ["ORA" /* UNVERIFIED */, "TIME" /* UNVERIFIED */, "LECTIA" /* UNVERIFIED */]));
+    const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR" /* UNVERIFIED */, "CADRU" /* UNVERIFIED */, "TEACHER" /* UNVERIFIED */]));
+    const noteTd = tds.find((td) => headerHas($, td, ["MOTIV" /* UNVERIFIED */, "NOTE" /* UNVERIFIED */, "OBSERVATII" /* UNVERIFIED */]));
+    const semTd = tds.find((td) => headerHas($, td, ["SEMESTRU" /* UNVERIFIED */, "SEM" /* UNVERIFIED */]));
     const explicitSem = semTd ? parseInt(textOf(semTd), 10) : null;
     records.push({
       date,
@@ -1003,6 +1003,128 @@ function parseFullPortal(html, today = todayChisinau(), { extraReports = [], ext
     homework,
     teachers,
   };
+}
+
+// Parser health diagnostics: returns which selectors matched, which fields were found,
+// and counts per section. Never leaks personal names or sensitive data.
+function inspectParserHealth(html) {
+  const $ = cheerio.load(html || "");
+  const out = {};
+
+  // students
+  const studentSelectors = ["#P1_ELEVE_ID", "#P1_ELEVE", "#P1_CLASS_NAME", "#P1_INSTITUTION_NAME", "#t_TreeNav", "select#P1_ELEVE_ID"];
+  const matchedStudentSel = studentSelectors.filter((s) => $(s).length > 0);
+  const links = parseStudentLinks($);
+  const profile = parseStudentProfile($);
+  const studentFields = [];
+  if (profile.id) studentFields.push("id");
+  if (profile.fullName) studentFields.push("fullName");
+  if (profile.className) studentFields.push("className");
+  if (profile.schoolName) studentFields.push("schoolName");
+  out.students = {
+    count: Math.max(links.length, profile.id || profile.fullName ? 1 : 0),
+    selectorsMatched: matchedStudentSel,
+    fieldsFound: studentFields,
+  };
+
+  // grades
+  const gradeSelectors = ["#P1_LAST_3_EVAL_LIST", "input#P1_LAST_3_EVAL_LIST", ".eval-date", ".eval-discipline", ".grade"];
+  const matchedGradeSel = gradeSelectors.filter((s) => $(s).length > 0);
+  const evalVal = getInputValue($, ITEM_LAST_EVALS);
+  const evalRoot = evalVal ? $(`<div>${evalVal}</div>`) : $("#P1_LAST_3_EVAL_LIST");
+  const grades = evalRoot.length ? parseRecentGradesFromRoot($, evalRoot) : [];
+  const gradeFields = new Set();
+  for (const g of grades) {
+    if (g.subject) gradeFields.add("subject");
+    if (g.value != null || g.raw != null) gradeFields.add("value");
+    if (g.date) gradeFields.add("date");
+    if (g.semester != null) gradeFields.add("semester");
+  }
+  out.grades = {
+    count: grades.length,
+    selectorsMatched: matchedGradeSel,
+    fieldsFound: [...gradeFields],
+  };
+
+  // catalog
+  const catalogSelectors = ["#SEMESTER_REG_1", "#SEMESTER_REG_2", ".t-Report-report", "td[headers*='DISCIPLINA' i]", "td[headers*='MED_SEM' i]"];
+  const matchedCatSel = catalogSelectors.filter((s) => $(s).length > 0);
+  const catReports = [];
+  for (const region of REGIONS) {
+    const scope = findSemesterScope($, region);
+    if (scope.length) {
+      const rep = parseSemesterReportFromRoot($, scope);
+      if (rep.size) catReports.push({ semester: region.semester, report: rep });
+    }
+  }
+  const catalog = buildCatalog(catReports);
+  const catFields = new Set();
+  for (const subj of catalog.subjects) {
+    if (subj.subject) catFields.add("subject");
+    if (subj.marks?.length) catFields.add("marks");
+    if (subj.average != null || subj.sem1Average != null) catFields.add("semesterAverage");
+    if (subj.teacher) catFields.add("teacher");
+  }
+  out.catalog = {
+    count: catalog.subjects.length,
+    selectorsMatched: matchedCatSel,
+    fieldsFound: [...catFields],
+  };
+
+  // absences summary
+  const absSummarySelectors = ["#P1_MOTIVATED", "#P1_UNMOTIVATED", "#P1_MOTIVATED2", "#P1_UNMOTIVATED2", "#P1_PRESENCE_PERCENT", "#P1_PROC_PREZ"];
+  const matchedAbsSel = absSummarySelectors.filter((s) => $(s).length > 0);
+  const absSummary = parseAbsenceSummary($);
+  const absFields = [];
+  if (absSummary.presencePercent != null) absFields.push("presencePercent");
+  if (absSummary.sem1Excused != null) absFields.push("sem1Excused");
+  if (absSummary.sem1Unexcused != null) absFields.push("sem1Unexcused");
+  if (absSummary.sem2Excused != null) absFields.push("sem2Excused");
+  if (absSummary.sem2Unexcused != null) absFields.push("sem2Unexcused");
+  if (absSummary.total != null) absFields.push("total");
+  out.absencesSummary = {
+    count: absSummary.total,
+    selectorsMatched: matchedAbsSel,
+    fieldsFound: absFields,
+  };
+
+  // calendar
+  const calSelectors = ["#P1_CALENDAR_EVENTS", "script#P1_CALENDAR_EVENTS", "[data-start][data-end]"];
+  const matchedCalSel = calSelectors.filter((s) => $(s).length > 0);
+  const calEntries = extractEmbeddedCalendarEntries($);
+  const calFields = new Set();
+  for (const c of calEntries) {
+    if (c.start) calFields.add("start");
+    if (c.end) calFields.add("end");
+    if (c.subject) calFields.add("subject");
+    if (c.classroom) calFields.add("classroom");
+    if (c.teacher) calFields.add("teacher");
+  }
+  out.calendar = {
+    count: calEntries.length,
+    selectorsMatched: matchedCalSel,
+    fieldsFound: [...calFields],
+  };
+
+  // teachers
+  const teacherSelectors = ["#P1_DIRIGINTE", "input#P1_DIRIGINTE", "td[headers*='PROFESOR' i]", ".lesson-teacher"];
+  const matchedTeacherSel = teacherSelectors.filter((s) => $(s).length > 0);
+  const metadata = parseStudentMetadata($);
+  const teachers = buildTeachers(calEntries, metadata, catalog.subjects);
+  const teacherFields = new Set();
+  for (const t of teachers) {
+    if (t.name) teacherFields.add("name");
+    if (t.subjects?.length) teacherFields.add("subjects");
+    if (t.lessons != null) teacherFields.add("lessons");
+    if (t.note) teacherFields.add("note");
+  }
+  out.teachers = {
+    count: teachers.length,
+    selectorsMatched: matchedTeacherSel,
+    fieldsFound: [...teacherFields],
+  };
+
+  return out;
 }
 
 // resilience: fingerprint, rate gate, circuit breaker
@@ -2159,6 +2281,23 @@ function createApp() {
     },
   });
 
+  app.get("/api/debug/parser-health", (req, res) => {
+    if (process.env.SIME_DEBUG !== "1") {
+      return res.status(404).json({ error: "Debug endpoints disabled" });
+    }
+    return requireSession(req, res, async () => {
+      try {
+        const requested = typeof req.query.student === "string" ? req.query.student.trim() : "";
+        const targetId = requested || req.session.defaultStudentId || "";
+        const page = await req.session.client.loadStudent(targetId);
+        const health = inspectParserHealth(page.html);
+        return res.json(health);
+      } catch (err) {
+        return sendError(res, err, req.token);
+      }
+    });
+  });
+
   app.get("/", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
   app.use("/public", express.static(path.join(ROOT, "public"), { index: false, dotfiles: "ignore" }));
 
@@ -2192,6 +2331,7 @@ export {
   fingerprintHeaders,
   FINGERPRINTS,
   inferAbsenceSemester,
+  inspectParserHealth,
   loginGuard,
   parseAbsenceSummary,
   parseCalendarEvents,
