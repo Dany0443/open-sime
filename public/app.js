@@ -324,6 +324,7 @@ function score(valueOrMark, size, date, isThesis = false) {
   let labelText = "";
   let markDate = date;
   let markThesis = isThesis;
+  let markIsNew = false;
   let isQual = false;
 
   if (valueOrMark && typeof valueOrMark === "object") {
@@ -331,6 +332,7 @@ function score(valueOrMark, size, date, isThesis = false) {
     labelText = valueOrMark.label || (val != null ? String(val) : "");
     markDate = valueOrMark.date || date;
     markThesis = Boolean(valueOrMark.isThesis || isThesis);
+    markIsNew = Boolean(valueOrMark.isNew);
     isQual = valueOrMark.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(labelText).toUpperCase()]);
   } else if (typeof valueOrMark === "string" && QUALIFIER_NAMES[valueOrMark.toUpperCase()]) {
     isQual = true;
@@ -350,16 +352,20 @@ function score(valueOrMark, size, date, isThesis = false) {
   } else {
     accessibleLabel = (markThesis ? "Teză: " : "Nota ") + labelText + (dateStr ? " (" + dateStr + ")" : "");
   }
+  if (markIsNew) {
+    accessibleLabel += " (Nou)";
+  }
 
   return h(
     "span",
     {
-      class: "score score-" + size + " " + band + (markThesis ? " is-thesis" : "") + (isQual ? " is-qualifier" : ""),
+      class: "score score-" + size + " " + band + (markThesis ? " is-thesis" : "") + (isQual ? " is-qualifier" : "") + (markIsNew ? " has-new" : ""),
       role: "img",
       "aria-label": accessibleLabel,
       title: accessibleLabel,
     },
     markThesis ? h("span", { class: "thesis-tag", text: "Teză" }) : null,
+    markIsNew ? h("span", { class: "badge-new", text: "Nou" }) : null,
     labelText
   );
 }
@@ -480,6 +486,48 @@ function describeError(err, context) {
 
 // data model
 
+function markKey(subject, m) {
+  const s = String(subject || "").trim().toLowerCase();
+  const d = String(m?.date || "").trim();
+  const v = m?.value ?? "";
+  const l = String(m?.label || "").trim();
+  const t = m?.isThesis ? "t" : "";
+  const sem = m?.semester || "";
+  return `${s}:${sem}:${d}:${v}:${l}:${t}`;
+}
+
+function diffNewMarks(currentCatalog, prevCatalog) {
+  if (!Array.isArray(currentCatalog)) return;
+  if (!Array.isArray(prevCatalog) || !prevCatalog.length) {
+    for (const subj of currentCatalog) {
+      for (const sem of (subj.semesters || [])) {
+        for (const mk of (sem.marks || [])) {
+          mk.isNew = false;
+        }
+      }
+    }
+    return;
+  }
+  const prevKeys = new Set();
+  for (const subj of prevCatalog) {
+    const sName = subj.subject || subj.discipline || "";
+    for (const sem of (subj.semesters || [])) {
+      for (const mk of (sem.marks || [])) {
+        prevKeys.add(markKey(sName, mk));
+      }
+    }
+  }
+  for (const subj of currentCatalog) {
+    const sName = subj.subject || subj.discipline || "";
+    for (const sem of (subj.semesters || [])) {
+      for (const mk of (sem.marks || [])) {
+        const k = markKey(sName, mk);
+        mk.isNew = !prevKeys.has(k);
+      }
+    }
+  }
+}
+
 function setData(data, syncedAt) {
   state.data = data;
   const list = Array.isArray(data.students) ? data.students.filter((s) => s && s.id) : [];
@@ -487,6 +535,23 @@ function setData(data, syncedAt) {
   if (list.length) state.students = list;
   state.syncedAt = syncedAt || Date.now();
   if (!state.semesterTouched) state.semester = defaultSemester(data);
+
+  const studentId = data.student?.id || state.student || "";
+  if (studentId && Array.isArray(data.catalog) && data.catalog.length) {
+    const marksKey = "open-sime.prev-marks." + studentId;
+    let prevCatalog = null;
+    try {
+      const prev = store.get(marksKey);
+      if (prev) prevCatalog = JSON.parse(prev);
+    } catch {
+      prevCatalog = null;
+    }
+    diffNewMarks(data.catalog, prevCatalog);
+    try {
+      store.set(marksKey, JSON.stringify(data.catalog));
+    } catch {}
+  }
+
   persist();
 }
 
@@ -1568,6 +1633,21 @@ async function loadTabData(tabId, { force = false } = {}) {
         const res = await api(`/api/catalog${q}`);
         if (res && res.data) {
           if (!state.data) state.data = {};
+          const studentId = student || state.data.student?.id || "";
+          if (studentId && Array.isArray(res.data) && res.data.length) {
+            const marksKey = "open-sime.prev-marks." + studentId;
+            let prevCatalog = null;
+            try {
+              const prev = store.get(marksKey);
+              if (prev) prevCatalog = JSON.parse(prev);
+            } catch {
+              prevCatalog = null;
+            }
+            diffNewMarks(res.data, prevCatalog);
+            try {
+              store.set(marksKey, JSON.stringify(res.data));
+            } catch {}
+          }
           state.data.catalog = res.data;
           state.data.reusita = res.data;
           modelSource = null;
@@ -1986,6 +2066,18 @@ function boot() {
       });
   }
   window.setInterval(tick, TICK_MS);
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+  window.addEventListener("online", () => {
+    state.offline = false;
+    renderSync();
+  });
+  window.addEventListener("offline", () => {
+    state.offline = true;
+    renderSync();
+  });
 }
 
 boot();

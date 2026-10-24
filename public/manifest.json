@@ -1,0 +1,18 @@
+{
+  "name": "open-sime",
+  "short_name": "open-sime",
+  "description": "Student-friendly frontend for agenda.sime.md",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3a5ba9",
+  "icons": [
+    {
+      "src": "/public/assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

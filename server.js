@@ -2884,6 +2884,14 @@ function createApp() {
     res.set("Content-Type", "text/html; charset=utf-8");
     res.sendFile(path.join(ROOT, "index.html"));
   });
+  app.get("/sw.js", (_req, res) => {
+    res.set({
+      "Content-Type": "application/javascript; charset=utf-8",
+      "Service-Worker-Allowed": "/",
+      "Cache-Control": "no-cache",
+    });
+    res.sendFile(path.join(ROOT, "public", "sw.js"));
+  });
   app.use(
     "/public",
     express.static(path.join(ROOT, "public"), {
