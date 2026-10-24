@@ -185,7 +185,13 @@ function toTitleCase(str) {
   return String(str).toLowerCase().replace(/(?:^|\s|-)\S/g, (c) => c.toUpperCase());
 }
 
-function bandOf(value) {
+function bandOf(value, label = "") {
+  const l = String(label || "").toUpperCase();
+  if (l === "FB") return "band-top";
+  if (l === "B") return "band-good";
+  if (l === "S") return "band-ok";
+  if (l === "I") return "band-low";
+
   if (value == null) return "band-none";
   if (value >= 9) return "band-top";
   if (value >= 7) return "band-good";
@@ -307,19 +313,55 @@ function textButton(label, onClick) {
   return h("button", { type: "button", class: "text-btn", on: { click: onClick } }, label);
 }
 
-function score(value, size, date, isThesis = false) {
-  const dateStr = date ? (longDate(date) || shortDate(date)) : "";
-  const label = (isThesis ? "Teză: " : "Nota ") + fmtMark(value) + (dateStr ? " (" + dateStr + ")" : "");
+const QUALIFIER_NAMES = {
+  FB: "Foarte Bine",
+  B: "Bine",
+  S: "Suficient",
+  I: "Insuficient",
+};
+
+function score(valueOrMark, size, date, isThesis = false) {
+  let val = valueOrMark;
+  let labelText = "";
+  let markDate = date;
+  let markThesis = isThesis;
+  let isQual = false;
+
+  if (valueOrMark && typeof valueOrMark === "object") {
+    val = valueOrMark.value;
+    labelText = valueOrMark.label || (val != null ? String(val) : "");
+    markDate = valueOrMark.date || date;
+    markThesis = Boolean(valueOrMark.isThesis || isThesis);
+    isQual = valueOrMark.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(labelText).toUpperCase()]);
+  } else if (typeof valueOrMark === "string" && QUALIFIER_NAMES[valueOrMark.toUpperCase()]) {
+    isQual = true;
+    labelText = valueOrMark.toUpperCase();
+    val = null;
+  } else {
+    labelText = val != null ? fmtMark(val) : "";
+  }
+
+  const band = bandOf(val, labelText);
+  const qualFull = isQual ? (QUALIFIER_NAMES[String(labelText).toUpperCase()] || labelText) : "";
+  const dateStr = markDate ? (longDate(markDate) || shortDate(markDate)) : "";
+
+  let accessibleLabel;
+  if (isQual) {
+    accessibleLabel = "Calificativ: " + qualFull + " (" + labelText + ")" + (dateStr ? " din " + dateStr : "");
+  } else {
+    accessibleLabel = (markThesis ? "Teză: " : "Nota ") + labelText + (dateStr ? " (" + dateStr + ")" : "");
+  }
+
   return h(
     "span",
     {
-      class: "score score-" + size + " " + bandOf(value) + (isThesis ? " is-thesis" : ""),
+      class: "score score-" + size + " " + band + (markThesis ? " is-thesis" : "") + (isQual ? " is-qualifier" : ""),
       role: "img",
-      "aria-label": label,
-      title: label,
+      "aria-label": accessibleLabel,
+      title: accessibleLabel,
     },
-    isThesis ? h("span", { class: "thesis-tag", text: "Teză" }) : null,
-    fmtMark(value)
+    markThesis ? h("span", { class: "thesis-tag", text: "Teză" }) : null,
+    labelText
   );
 }
 
@@ -881,7 +923,7 @@ function markGroupBlock(group) {
         h(
           "li",
           { class: "mark" },
-          score(mk.value, "md", mk.date, mk.isThesis),
+          score(mk, "md", mk.date, mk.isThesis),
           mk.date ? h("time", { class: "mark-date", datetime: mk.date, text: shortDate(mk.date) }) : null
         )
       )
@@ -942,7 +984,7 @@ function renderMarks() {
         ? h(
             "div",
             { class: "grade-pills" },
-            g.marks.map((mk) => score(mk.value, "md", mk.date, mk.isThesis))
+            g.marks.map((mk) => score(mk, "md", mk.date, mk.isThesis))
           )
         : h("span", { class: "muted", text: "-" });
 
@@ -974,7 +1016,17 @@ function renderMarks() {
     m.subjects.map(subjectCard)
   );
 
-  list.replaceChildren(tableSurface, cardsSurface);
+  const legend = h(
+    "div",
+    { class: "qualifier-legend", role: "region", "aria-label": "Legendă calificative" },
+    h("span", { class: "legend-title", text: "Calificative:" }),
+    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-top is-qualifier", text: "FB" }), "Foarte Bine"),
+    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-good is-qualifier", text: "B" }), "Bine"),
+    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-ok is-qualifier", text: "S" }), "Suficient"),
+    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-low is-qualifier", text: "I" }), "Insuficient")
+  );
+
+  list.replaceChildren(tableSurface, cardsSurface, legend);
 }
 
 // rendering: timetable

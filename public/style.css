@@ -2270,4 +2270,33 @@ ul, ol {
   }
 }
 
+.score.is-qualifier {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.qualifier-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-top: 16px;
+  border-radius: var(--shape-lg);
+  background: var(--surface-container);
+  color: var(--on-surface-variant);
+  font-size: 0.8125rem;
+}
+
+.legend-title {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .remember-row { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); font-size: .875rem; }

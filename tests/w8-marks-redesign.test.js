@@ -74,7 +74,7 @@ test("W8: app.js renderMarks contains no average stats or average columns in tab
 
 test("W8: score function styles thesis marks with is-thesis and thesis-tag", () => {
   const appJs = fs.readFileSync(path.resolve("public/app.js"), "utf8");
-  const scoreMatch = appJs.match(/function score\(value, size, date, isThesis[\s\S]*?\{([\s\S]*?)\n\}/);
+  const scoreMatch = appJs.match(/function score\([\s\S]*?isThesis[\s\S]*?\{([\s\S]*?)\n\}/);
   assert.ok(scoreMatch, "score function with isThesis parameter must exist");
   const fnBody = scoreMatch[1];
 

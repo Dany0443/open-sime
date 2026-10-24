@@ -59,8 +59,8 @@ test("semester report marks, dates, and catalog aggregation", () => {
   assert.deepEqual(report.get("Fizica"), {
     subject: "Fizica",
     marks: [
-      { value: 8, date: "2026-10-12" },
-      { value: 10, date: "2026-10-19" },
+      { kind: "numeric", value: 8, label: "8", raw: "8", isThesis: false, date: "2026-10-12", semester: null },
+      { kind: "numeric", value: 10, label: "10", raw: "10", isThesis: false, date: "2026-10-19", semester: null },
     ],
     semesterAverage: 9,
     teacher: "Ion Popescu",

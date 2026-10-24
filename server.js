@@ -189,14 +189,20 @@ function unescapeJs(value) {
 // strip every text node, drop empties, join with sep
 function textOf(el, sep = "") {
   if (!el) return "";
+  if (typeof el.text === "function") return el.text().trim();
+  const node = el.type ? el : (el[0] || el);
+  if (!node) return "";
+  if (typeof node.text === "function") return node.text().trim();
   const parts = [];
-  const walk = (node) => {
-    for (const child of node.children || []) {
+  const walk = (n) => {
+    if (!n) return;
+    const kids = Array.isArray(n.children) ? n.children : (Array.isArray(n.childNodes) ? n.childNodes : []);
+    for (const child of kids) {
       if (child.type === "text") parts.push(child.data);
       else if (child.type === "tag") walk(child);
     }
   };
-  walk(el);
+  walk(node);
   return parts.map((s) => s.trim()).filter(Boolean).join(sep);
 }
 
@@ -446,22 +452,29 @@ function parseRecentGradesFromRoot($, root, defaultSemester = null, today = toda
     const gradeEl = classContains($, li, "grade");
     let dateText;
     let subject;
-    let value;
+    let rawGrade;
     if (dateEl && subjectEl && gradeEl) {
       dateText = textOf(dateEl);
       subject = textOf(subjectEl).replace(/:+$/, "").trim();
-      value = toFloat(textOf(gradeEl));
+      rawGrade = textOf(gradeEl);
     } else {
-      // Fallback when class names change: date, subject and trailing mark in plain text
-      const m = /^\s*(\S+)\s+(.+?)[:\s]+(\d+(?:[.,]\d+)?)\s*$/.exec(textOf(li, " "));
+      // Fallback: date, subject and trailing mark in plain text
+      const m = /^\s*(\S+)\s+(.+?)[:\s]+(\d+(?:[.,]\d+)?|[A-Za-z.]+)\s*$/.exec(textOf(li, " "));
       if (!m) return;
       dateText = m[1];
       subject = m[2].trim();
-      value = toFloat(m[3]);
+      rawGrade = m[3];
     }
-    if (value === null || !subject) return;
+    if (!rawGrade || !subject) return;
     const day = parseDate(dateText, today);
-    grades.push({ subject, value, date: day, semester: inferSemester(day, defaultSemester) });
+    const sem = inferSemester(day, defaultSemester);
+    const markObj = normalizeMark(rawGrade, null, false, sem);
+    if (!markObj || (markObj.kind !== "numeric" && markObj.kind !== "qualifier")) return;
+    markObj.date = day;
+    grades.push({
+      subject,
+      ...markObj,
+    });
   });
   return grades;
 }
@@ -477,30 +490,89 @@ function headerHas($, td, needles) {
   return Boolean(raw) && raw.split(/\s+/).some((t) => needles.some((n) => t.includes(n)));
 }
 
+const QUALIFIERS = {
+  fb: "FB",
+  "f.b.": "FB",
+  "f.b": "FB",
+  b: "B",
+  s: "S",
+  i: "I",
+};
+
+function normalizeMark(rawText, rawAttr = null, isThesisExplicit = false, semester = null) {
+  if (!rawText && rawText !== 0) return null;
+  const raw = String(rawText).trim();
+  if (!raw) return null;
+
+  const date = parseFullDate(rawAttr);
+  const isThesis = Boolean(
+    isThesisExplicit ||
+    (rawAttr && /tez[aă]/i.test(rawAttr))
+  );
+
+  const lower = raw.toLowerCase();
+  if (QUALIFIERS[lower] || /^(fb|b|s|i)$/i.test(raw)) {
+    const qual = QUALIFIERS[lower] || raw.toUpperCase();
+    return {
+      kind: "qualifier",
+      value: null,
+      label: qual,
+      raw,
+      isThesis,
+      date,
+      semester,
+    };
+  }
+
+  const numVal = toFloat(raw);
+  if (numVal !== null && numVal >= 0 && numVal <= 10) {
+    return {
+      kind: "numeric",
+      value: numVal,
+      label: String(numVal),
+      raw,
+      isThesis,
+      date,
+      semester,
+    };
+  }
+
+  return {
+    kind: "other",
+    value: null,
+    label: raw,
+    raw,
+    isThesis,
+    date,
+    semester,
+  };
+}
+
 // Marks are read from leaf elements when the cell is structured (date taken from a title-like
-// attribute when present); otherwise from numeric tokens in the cell text.
-function parseMarkCell($, cell) {
+// attribute when present); otherwise from numeric or qualifier tokens in the cell text.
+function parseMarkCell($, cell, semester = null) {
   const marks = [];
-  const leaves = $(cell).find("*").toArray().filter((e) => $(e).children().length === 0);
+  const cellNode = cell?.type ? cell : (cell?.[0] || cell);
+  const leaves = $(cellNode).find("*").toArray().filter((e) => $(e).children().length === 0);
   for (const leaf of leaves) {
     const text = textOf(leaf);
-    if (!/^\d+(?:[.,]\d+)?$/.test(text)) continue;
-    const value = toFloat(text);
-    if (!(value > 0 && value <= 10)) continue;
-    const raw = ["title", "data-date", "data-title", "aria-label"].map((k) => leaf.attribs[k]).find(Boolean) || leaf.parent?.attribs?.title;
+    const rawAttr = ["title", "data-date", "data-title", "aria-label"].map((k) => leaf.attribs[k]).find(Boolean) || leaf.parent?.attribs?.title;
     const isThesis = Boolean(
       (leaf.attribs?.class && /tez[aă]/i.test(leaf.attribs.class)) ||
-      (raw && /tez[aă]/i.test(raw)) ||
+      (rawAttr && /tez[aă]/i.test(rawAttr)) ||
       (leaf.parent?.attribs?.class && /tez[aă]/i.test(leaf.parent.attribs.class))
     );
-    const entry = { value, date: parseFullDate(raw) };
-    if (isThesis) entry.isThesis = true;
-    marks.push(entry);
+    const m = normalizeMark(text, rawAttr, isThesis, semester);
+    if (m && (m.kind === "numeric" || m.kind === "qualifier")) {
+      marks.push(m);
+    }
   }
   if (marks.length) return marks;
-  for (const token of textOf(cell, " ").match(/\d+(?:\.\d+)?/g) || []) {
-    const value = Number(token);
-    if (value > 0 && value <= 10) marks.push({ value, date: null });
+  for (const token of textOf(cellNode, " ").split(/[,\s]+/).filter(Boolean)) {
+    const m = normalizeMark(token, null, false, semester);
+    if (m && (m.kind === "numeric" || m.kind === "qualifier")) {
+      marks.push(m);
+    }
   }
   return marks;
 }
@@ -607,11 +679,16 @@ function buildCatalog(reports, annualMap = new Map()) {
       if (!subjects.has(name)) subjects.set(name, { subject: name, teacher: null, semesters: [] });
       const s = subjects.get(name);
       s.teacher = s.teacher || entry.teacher;
-      const values = entry.marks.map((m) => m.value);
+      const values = entry.marks
+        .filter((m) => m.kind === "numeric" && typeof m.value === "number")
+        .map((m) => m.value);
       const existing = s.semesters.find((x) => x.semester === semester);
       if (existing) {
         if (!existing.marks.length && entry.marks.length) existing.marks = entry.marks;
-        existing.average = mean(existing.marks.map((m) => m.value));
+        const existVals = existing.marks
+          .filter((m) => m.kind === "numeric" && typeof m.value === "number")
+          .map((m) => m.value);
+        existing.average = existVals.length ? mean(existVals) : null;
         if (existing.officialAverage === null && entry.semesterAverage !== null) {
           existing.officialAverage = entry.semesterAverage;
         }
@@ -619,7 +696,7 @@ function buildCatalog(reports, annualMap = new Map()) {
         s.semesters.push({
           semester,
           marks: entry.marks,
-          average: mean(values),
+          average: values.length ? mean(values) : null,
           officialAverage: entry.semesterAverage,
         });
       }
@@ -632,15 +709,22 @@ function buildCatalog(reports, annualMap = new Map()) {
     const sem1Average = sem1 ? (sem1.officialAverage ?? sem1.average ?? null) : null;
     const sem2Average = sem2 ? (sem2.officialAverage ?? sem2.average ?? null) : null;
     const markDetails = s.semesters.flatMap((x) =>
-      x.marks.map((m) => {
-        const d = { value: m.value, date: m.date, semester: x.semester };
-        if (m.isThesis) d.isThesis = true;
-        return d;
-      })
+      x.marks.map((m) => ({
+        kind: m.kind || (typeof m.value === "number" ? "numeric" : "qualifier"),
+        value: m.value ?? null,
+        label: m.label || (m.value != null ? String(m.value) : m.raw || ""),
+        raw: m.raw || String(m.value ?? m.label ?? ""),
+        isThesis: Boolean(m.isThesis),
+        date: m.date ?? null,
+        semester: x.semester,
+      }))
     );
-    const marks = markDetails.map((m) => m.value);
+    const numericMarks = markDetails
+      .filter((m) => m.kind === "numeric" && typeof m.value === "number")
+      .map((m) => m.value);
+    const marks = numericMarks.length ? numericMarks : markDetails.map((m) => m.label || m.value);
     const official = s.semesters.map((x) => x.officialAverage).filter((v) => v !== null);
-    const computedAverage = marks.length ? mean(marks) : mean(official);
+    const computedAverage = numericMarks.length ? mean(numericMarks) : (official.length ? mean(official) : null);
     const explicitAnnual = annualMap instanceof Map ? (annualMap.get(s.subject) ?? null) : null;
     const annualAverage =
       explicitAnnual ?? (sem1Average !== null && sem2Average !== null ? mean([sem1Average, sem2Average]) : computedAverage);
@@ -2711,6 +2795,8 @@ export {
   studentKey,
   studentSwitchUrl,
   normalizeName,
+  normalizeMark,
+  parseMarkCell,
   unescapeJs,
   weekStart,
 };
