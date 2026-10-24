@@ -930,30 +930,115 @@ function buildSemesterAbsences(summary, rawRecords = []) {
   };
 }
 
+function parseTeacherTokens(name) {
+  if (!name) return { fullTokens: [], initials: [] };
+  const cleaned = name
+    .replace(/\b(prof|profesor|d-na|dna|dl|invatator|învățător)\.?\b/gi, "")
+    .replace(/[.,]/g, " ")
+    .trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  const fullTokens = [];
+  const initials = [];
+  for (const p of parts) {
+    const lower = p.toLowerCase();
+    if (lower.length === 1) initials.push(lower);
+    else fullTokens.push(lower);
+  }
+  return { parts, fullTokens, initials };
+}
+
+function areTeacherNamesSimilar(nameA, nameB) {
+  if (!nameA || !nameB) return false;
+  if (nameA.trim().toLowerCase() === nameB.trim().toLowerCase()) return true;
+
+  const a = parseTeacherTokens(nameA);
+  const b = parseTeacherTokens(nameB);
+
+  if (!a.fullTokens.length || !b.fullTokens.length) return false;
+
+  const sharedFull = a.fullTokens.filter((tok) => b.fullTokens.includes(tok));
+  if (sharedFull.length === 0) return false;
+
+  const remA = a.fullTokens.filter((tok) => !sharedFull.includes(tok));
+  const remB = b.fullTokens.filter((tok) => !sharedFull.includes(tok));
+
+  if (remA.length && remB.length) {
+    return remA.every((tok) => remB.includes(tok));
+  }
+
+  if (remA.length && b.initials.length) {
+    return b.initials.some((init) => remA.some((full) => full.startsWith(init)));
+  }
+  if (remB.length && a.initials.length) {
+    return a.initials.some((init) => remB.some((full) => full.startsWith(init)));
+  }
+
+  if (!remA.length && !remB.length && !a.initials.length && !b.initials.length) {
+    return true;
+  }
+
+  if ((a.initials.length && !b.initials.length && !remB.length) || (b.initials.length && !a.initials.length && !remA.length)) {
+    return true;
+  }
+
+  return false;
+}
+
 function buildTeachers(entries, metadata = null, catalogSubjects = []) {
-  const map = new Map();
-  const ensure = (name) => {
-    if (!map.has(name)) map.set(name, { name, subjects: new Set(), lessons: 0, note: null });
-    return map.get(name);
+  const teachersList = [];
+
+  const findTeacher = (name) => {
+    return teachersList.find((t) => areTeacherNamesSimilar(t.name, name));
   };
+
+  const ensure = (name) => {
+    if (!name || typeof name !== "string") return null;
+    const cleanName = name.trim();
+    if (!cleanName) return null;
+    let existing = findTeacher(cleanName);
+    if (!existing) {
+      existing = { name: cleanName, subjects: new Set(), lessons: 0, note: null };
+      teachersList.push(existing);
+    } else {
+      if (cleanName.length > existing.name.length && !cleanName.includes(".")) {
+        existing.name = cleanName;
+      }
+    }
+    return existing;
+  };
+
   if (metadata?.classMaster) {
     const cm = ensure(metadata.classMaster);
-    cm.note = "Diriginte";
+    if (cm) cm.note = "Diriginte";
   }
+
   for (const s of catalogSubjects) {
     if (!s?.teacher) continue;
     const t = ensure(s.teacher);
-    if (s.subject) t.subjects.add(s.subject);
+    if (t && s.subject) t.subjects.add(s.subject);
   }
+
   for (const e of entries) {
     if (!e.teacher) continue;
     const t = ensure(e.teacher);
-    if (e.subject) t.subjects.add(e.subject);
-    t.lessons += 1;
+    if (t) {
+      if (e.subject) t.subjects.add(e.subject);
+      t.lessons += 1;
+    }
   }
-  return [...map.values()]
-    .map((t) => ({ name: t.name, subjects: [...t.subjects].sort(), lessons: t.lessons, note: t.note }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return teachersList
+    .map((t) => ({
+      name: t.name,
+      subjects: [...t.subjects].sort(),
+      lessons: t.lessons,
+      note: t.note,
+    }))
+    .sort((a, b) => {
+      if (a.note === "Diriginte" && b.note !== "Diriginte") return -1;
+      if (b.note === "Diriginte" && a.note !== "Diriginte") return 1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 function extractEmbeddedCalendarEntries($) {
@@ -2077,14 +2162,21 @@ class SimeClient {
     });
   }
 
-  // Teachers are derived from the lesson entries of a two to three week window plus class master metadata
+  // Teachers are derived from the lesson entries of a two to three week window plus class master metadata and catalog
   getTeachers(studentId) {
     return this.withRetry(async () => {
       const page = await this.loadStudent(studentId);
       const meta = parseStudentMetadata(page.$);
       const today = todayChisinau();
       const entries = await this.calendarRange(studentId, addDays(today, -7), addDays(today, 14));
-      return buildTeachers(entries, meta);
+      let catalogSubjects = [];
+      try {
+        const catalog = await this.getCatalog(studentId);
+        catalogSubjects = catalog?.subjects || catalog?.disciplines || [];
+      } catch {
+        // Degrade gracefully if catalog cannot be loaded
+      }
+      return buildTeachers(entries, meta, catalogSubjects);
     });
   }
 }
