@@ -68,28 +68,45 @@
     </aside>
 
     <div class="main-col">
+      <div id="global-progress" class="linear-progress" role="progressbar" aria-hidden="true" hidden>
+        <div class="linear-progress-bar"></div>
+      </div>
       <header class="topbar">
-        <div class="topbar-title">
-          <h1 id="page-title" class="page-title">Acasă</h1>
-          <p id="sync-status" class="sync-status sync-warn" role="status">
-            <span class="sync-dot" aria-hidden="true"></span>
-            <span id="sync-text">Nesincronizat</span>
-          </p>
+        <div class="topbar-main">
+          <div class="topbar-title-group">
+            <div class="title-row">
+              <h1 id="page-title" class="page-title">Acasă</h1>
+              <span id="offline-chip" class="offline-chip" role="status" hidden>Offline</span>
+            </div>
+            <p id="header-student-subtitle" class="header-subtitle" hidden></p>
+          </div>
+          <div class="topbar-actions">
+            <button id="theme-btn" class="icon-btn" type="button" aria-label="Schimbă tema" title="Schimbă tema"></button>
+            <button id="settings-btn" class="icon-btn" type="button" aria-label="Setări" title="Setări" data-icon="settings"></button>
+            <div class="account-menu-anchor">
+              <button id="account-btn" class="icon-btn account-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Cont utilizator" title="Cont utilizator">
+                <span id="account-avatar" class="account-avatar" aria-hidden="true"></span>
+              </button>
+              <ul id="account-menu" class="account-menu" role="menu" hidden>
+                <li role="none">
+                  <button id="profile-btn" class="account-menu-item" type="button" role="menuitem" data-icon="person">
+                    <span class="account-menu-label">Profil și profesori</span>
+                  </button>
+                </li>
+                <li role="separator" class="account-menu-divider"></li>
+                <li role="none">
+                  <button id="logout-btn" class="account-menu-item" type="button" role="menuitem" data-icon="logout">
+                    <span class="account-menu-label">Deconectare</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
-        <div class="topbar-actions">
-          <button id="profile-btn" class="icon-btn tonal profile-btn" type="button" aria-label="Profil și profesori" title="Profil și profesori" data-icon="person"></button>
-          <button id="sync-btn" class="icon-btn tonal" type="button" aria-label="Sincronizează acum" data-icon="sync">
-            <span id="sync-count" class="cooldown-count" aria-hidden="true"></span>
-          </button>
-          <button id="theme-btn" class="icon-btn" type="button"></button>
-          <button id="settings-btn" class="icon-btn" type="button" aria-label="Setări" title="Setări" data-icon="settings"></button>
-          <button id="logout-btn" class="icon-btn" type="button" aria-label="Deconectare" title="Deconectare" data-icon="logout"></button>
+        <div class="student-strip">
+          <div id="student-list" class="student-list" role="group" aria-label="Elev"></div>
         </div>
       </header>
-
-      <div class="student-strip">
-        <div id="student-list" class="student-list" role="group" aria-label="Elev"></div>
-      </div>
 
       <main id="content" class="content" tabindex="-1">
         <section class="view" id="view-home" data-view="home" aria-label="Acasă" hidden>
@@ -190,6 +207,9 @@
           </div>
         </label>
       </section>
+      <div class="settings-sync-line">
+        <span id="settings-sync-time" class="settings-sync-time"></span>
+      </div>
     </div>
   </dialog>
 

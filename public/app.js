@@ -1530,50 +1530,51 @@ function renderStudents() {
   }
 }
 
-function renderSync() {
-  const now = Date.now();
-  const until = Math.max(state.cooldownUntil, state.limitedUntil);
-  const cooling = until > now;
-  const secs = Math.ceil((until - now) / 1000);
-  const btn = $("sync-btn");
-  btn.disabled = state.syncing || cooling || !state.token;
-  btn.classList.toggle("is-spinning", state.syncing);
-  btn.classList.toggle("on-cooldown", cooling && !state.syncing);
-  $("sync-count").textContent = cooling ? (secs > 99 ? Math.ceil(secs / 60) + "m" : String(secs)) : "";
-  btn.setAttribute("aria-label", cooling ? "Sincronizare disponibilă peste " + waitText(secs) : "Sincronizează acum");
-  btn.title = btn.getAttribute("aria-label");
+function renderHeaderState() {
+  const prog = $("global-progress");
+  if (prog) prog.hidden = !state.syncing && !state.switching;
 
-  const age = state.syncedAt ? now - state.syncedAt : 0;
-  let text;
-  let tone;
-  if (state.syncing) {
-    text = "Se sincronizează";
-    tone = "busy";
-  } else if (state.limitedUntil > now) {
-    text = "Portalul limitează cererile, reîncearcă peste " + waitText(Math.ceil((state.limitedUntil - now) / 1000));
-    tone = "error";
-  } else if (state.stale) {
-    text = "Portal indisponibil. Ultima sincronizare " + agoText(age);
-    tone = "warn";
-  } else if (state.offline) {
-    text = "Actualizare eșuată. Ultima sincronizare " + agoText(age);
-    tone = "warn";
-  } else if (state.syncedAt) {
-    text = "Sincronizat " + agoText(age);
-    tone = age > STALE_AFTER_MS ? "warn" : "ok";
-  } else {
-    text = "Nesincronizat";
-    tone = "warn";
+  const off = $("offline-chip");
+  if (off) off.hidden = !state.offline;
+
+  const subtitle = $("header-student-subtitle");
+  if (subtitle) {
+    if (state.role === "parent" && state.studentKey) {
+      const s = state.students.find((x) => String(x.id) === String(state.studentKey));
+      const name = s?.fullName || state.data?.student?.fullName || "";
+      const cls = s?.className || state.data?.student?.className || "";
+      subtitle.textContent = [name, cls ? `Clasa ${cls}` : ""].filter(Boolean).join(" • ");
+      subtitle.hidden = !subtitle.textContent;
+    } else {
+      subtitle.hidden = true;
+    }
   }
-  $("sync-text").textContent = text;
-  $("sync-status").className = "sync-status sync-" + tone;
+
+  const avatarEl = $("account-avatar");
+  if (avatarEl) {
+    if (state.role === "student") {
+      avatarEl.textContent = (state.data?.student?.fullName || "E").slice(0, 1).toUpperCase();
+    } else {
+      avatarEl.textContent = "P";
+    }
+  }
+
+  const syncTimeEl = $("settings-sync-time");
+  if (syncTimeEl) {
+    if (state.syncedAt) {
+      const age = Date.now() - state.syncedAt;
+      syncTimeEl.textContent = `Ultima sincronizare: ${agoText(age)}`;
+    } else {
+      syncTimeEl.textContent = "Nesincronizat";
+    }
+  }
 }
 
 let cooldownTimer = 0;
 
 function scheduleCooldown() {
   window.clearTimeout(cooldownTimer);
-  renderSync();
+  renderHeaderState();
   if (Math.max(state.cooldownUntil, state.limitedUntil) > Date.now()) cooldownTimer = window.setTimeout(scheduleCooldown, 1000);
 }
 
@@ -1596,7 +1597,7 @@ function render() {
   renderAbsences();
   renderHomework();
   renderProfile();
-  renderSync();
+  renderHeaderState();
 }
 
 function tick() {
@@ -1608,7 +1609,7 @@ function tick() {
     return;
   }
   state.today = today;
-  renderSync();
+  renderHeaderState();
   if (!state.token || !state.data) return;
   renderLive();
   if (state.tab === "timetable") renderLessons();
@@ -2091,14 +2092,15 @@ async function refresh({ force = false, background = false } = {}) {
   if (!state.token || state.syncing) return;
   const seq = state.seq;
   state.syncing = true;
-  renderSync();
-  const student = state.data && state.data.student && state.data.student.id;
+  renderHeaderState();
+  const student = state.studentKey || (state.data && state.data.student && state.data.student.id) || "";
   const query = [];
   if (student) query.push("student=" + encodeURIComponent(student));
   if (force) query.push("force=1");
   try {
     const res = await api("/api/overview" + (query.length ? "?" + query.join("&") : ""));
     if (seq !== state.seq || !res || !res.data) return;
+    if (res.studentKey && state.studentKey && res.studentKey !== state.studentKey) return;
     if (res.role) {
       state.role = res.role;
       store.set(KEYS.role, res.role);
@@ -2111,7 +2113,6 @@ async function refresh({ force = false, background = false } = {}) {
     setData(res.data, Date.now() - ageMs);
     render();
     if (force) {
-      state.cooldownUntil = Date.now() + SYNC_COOLDOWN_MS;
       tabLoadedAt.clear();
       if (state.tab && state.tab !== "home") loadTabData(state.tab, { force: true });
     }
@@ -2186,8 +2187,32 @@ async function switchStudent(id) {
   }
 }
 
-function onSyncClick() {
-  refresh({ force: true });
+function bindAccountMenu() {
+  const btn = $("account-btn");
+  const menu = $("account-menu");
+  if (!btn || !menu) return;
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !menu.hidden;
+    menu.hidden = open;
+    btn.setAttribute("aria-expanded", String(!open));
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) {
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !menu.hidden) {
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+      btn.focus();
+    }
+  });
 }
 
 // startup
@@ -2203,10 +2228,24 @@ function bindEvents() {
     btn.setAttribute("aria-label", show ? "Ascunde parola" : "Arată parola");
     setIcon(btn, show ? "visibility_off" : "visibility");
   });
-  $("sync-btn").addEventListener("click", onSyncClick);
   $("theme-btn").addEventListener("click", cycleTheme);
-  $("logout-btn").addEventListener("click", logout);
-  $("profile-btn").addEventListener("click", () => goTab("profile"));
+  bindAccountMenu();
+  $("logout-btn").addEventListener("click", () => {
+    const menu = $("account-menu");
+    if (menu) {
+      menu.hidden = true;
+      $("account-btn")?.setAttribute("aria-expanded", "false");
+    }
+    logout();
+  });
+  $("profile-btn").addEventListener("click", () => {
+    const menu = $("account-menu");
+    if (menu) {
+      menu.hidden = true;
+      $("account-btn")?.setAttribute("aria-expanded", "false");
+    }
+    goTab("profile");
+  });
   window.addEventListener("hashchange", () => {
     if (state.token) setTab(tabFromHash() || "home");
   });
@@ -2283,11 +2322,11 @@ function boot() {
   }
   window.addEventListener("online", () => {
     state.offline = false;
-    renderSync();
+    renderHeaderState();
   });
   window.addEventListener("offline", () => {
     state.offline = true;
-    renderSync();
+    renderHeaderState();
   });
 }
 
