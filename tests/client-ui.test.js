@@ -19,7 +19,8 @@ function loadClientContext() {
       this.tagName = tag.toUpperCase();
       this.nodeName = this.tagName;
       this.props = { ...props };
-      const set = new Set();
+      this._classSet = new Set();
+      const set = this._classSet;
       this.classList = {
         add: (...tokens) => tokens.forEach((t) => set.add(t)),
         remove: (...tokens) => tokens.forEach((t) => set.delete(t)),
@@ -38,17 +39,33 @@ function loadClientContext() {
         [Symbol.iterator]: () => set.values(),
       };
       if (props.class) {
-        for (const c of props.class.split(/\s+/).filter(Boolean)) this.classList.add(c);
+        this.className = props.class;
       }
       this.dataset = { ...props.dataset };
       this.attributes = new Map();
       this.children = [];
       this.parentNode = null;
-      this.textContent = props.text || "";
+      this._textContent = props.text || "";
       this._eventListeners = new Map();
       this.style = {};
       this.hidden = false;
       this.disabled = false;
+    }
+    get textContent() {
+      if (this.nodeName === "#TEXT" || this.children.length === 0) {
+        return this._textContent || "";
+      }
+      return this.children.map((c) => (c instanceof MockNode ? c.textContent : String(c))).join("");
+    }
+    set textContent(val) {
+      this._textContent = String(val ?? "");
+    }
+    get className() { return [...this._classSet].join(" "); }
+    set className(val) {
+      this._classSet.clear();
+      if (val) {
+        for (const c of String(val).split(/\s+/).filter(Boolean)) this._classSet.add(c);
+      }
     }
     setAttribute(k, v) { this.attributes.set(k, String(v)); if (k === "class") this.className = v; }
     getAttribute(k) { return this.attributes.get(k) || null; }
@@ -196,7 +213,7 @@ function loadClientContext() {
   vm.runInContext(cleanStrings, sandbox);
   vm.runInContext(cleanApp, sandbox);
   vm.runInContext(
-    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score });",
+    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score, scaleChip, getSubjectScale, normalizeSubjectName, emptyMarkText, subjectCard });",
     sandbox
   );
   return sandbox;
@@ -701,4 +718,74 @@ test("Service Worker: public/sw.js never caches /api/auth and caches shell", () 
   assert.ok(swJs.includes("style.css"), "sw.js pre-caches style.css");
   assert.ok(swJs.includes("favicon.svg"), "sw.js pre-caches favicon.svg");
   assert.ok(!swJs.includes(".png"), "sw.js must not reference removed png icons");
+});
+
+test("Marks UI: Qualifier pills and neutral raw pills rendering in score", () => {
+  const ctx = loadClientContext();
+  const fb = ctx.score({ kind: "qualifier", label: "FB", value: null });
+  assert.ok(fb.classList.contains("is-qualifier"));
+  assert.ok(fb.classList.contains("band-top"));
+  assert.equal(fb.textContent, "FB");
+  assert.ok(fb.attributes.get("title").includes("Foarte Bine"));
+
+  const b = ctx.score({ kind: "qualifier", label: "B", value: null });
+  assert.ok(b.classList.contains("band-good"));
+
+  const s = ctx.score({ kind: "qualifier", label: "S", value: null });
+  assert.ok(s.classList.contains("band-ok"));
+
+  // Unrecognized non-empty cell text renders as neutral raw pill (band-none, is-other)
+  const other = ctx.score({ kind: "other", label: "25", raw: "25", value: null });
+  assert.ok(other.classList.contains("band-none"));
+  assert.ok(other.classList.contains("is-other"));
+  assert.equal(other.textContent, "25");
+
+  const descriptor = ctx.score({ kind: "descriptor", label: "Competent", raw: "Competent", value: null });
+  assert.ok(descriptor.classList.contains("band-none"));
+  assert.ok(descriptor.classList.contains("is-other"));
+  assert.equal(descriptor.textContent, "Competent");
+});
+
+test("Marks UI: qualifier legend does not exist in markup, CSS, or strings", () => {
+  const appJs = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
+  const styleCss = fs.readFileSync(path.join(__dirname, "../public/style.css"), "utf8");
+  const stringsJs = fs.readFileSync(path.join(__dirname, "../public/strings.js"), "utf8");
+
+  assert.ok(!appJs.includes("qualifier-legend"), "app.js must not contain qualifier-legend");
+  assert.ok(!styleCss.includes(".qualifier-legend"), "style.css must not contain .qualifier-legend");
+  assert.ok(!styleCss.includes(".legend-title"), "style.css must not contain .legend-title");
+  assert.ok(!styleCss.includes(".legend-item"), "style.css must not contain .legend-item");
+  assert.ok(!stringsJs.includes("qualifiers_legend"), "strings.js must not contain qualifiers_legend");
+});
+
+test("Marks UI: subject scale chips and scale-aware empty state", () => {
+  const ctx = loadClientContext();
+  const physScale = ctx.getSubjectScale("Educație fizică");
+  assert.equal(physScale, "qualifier");
+  const socScale = ctx.getSubjectScale("Educație pentru societate");
+  assert.equal(socScale, "descriptor");
+  const mathScale = ctx.getSubjectScale("Matematică");
+  assert.equal(mathScale, null);
+
+  // Scale chip rendering
+  const qualChip = ctx.scaleChip("qualifier");
+  assert.ok(qualChip.classList.contains("scale-chip"));
+  assert.ok(qualChip.textContent.includes("Calificative"));
+
+  const descChip = ctx.scaleChip("descriptor");
+  assert.ok(descChip.classList.contains("scale-chip"));
+  assert.ok(descChip.textContent.includes("Descriptori"));
+
+  assert.equal(ctx.scaleChip(null), null);
+
+  // Empty state tooltips
+  assert.equal(ctx.emptyMarkText("qualifier"), "Încă nu sunt calificative");
+  assert.equal(ctx.emptyMarkText("descriptor"), "Încă nu sunt descriptori");
+  assert.equal(ctx.emptyMarkText(null), "Încă nu sunt note");
+
+  // Empty subject card shows scale-aware message
+  const emptyCard = ctx.subjectCard({ subject: "Educație fizică", discipline: "Educație fizică", scale: "qualifier", markDetails: [], semesters: [] });
+  assert.ok(emptyCard.classList.contains("subject"));
+  const pMuted = emptyCard.children.find((c) => c.tagName === "P" && c.classList.contains("muted"));
+  assert.equal(pMuted.textContent, "Încă nu sunt calificative");
 });

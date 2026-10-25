@@ -32,6 +32,9 @@ import {
   inspectParserHealth,
   loginGuard,
   normalizeMark,
+  normalizeSubjectName,
+  getSubjectScale,
+  SUBJECT_SCALE_REGISTRY,
   parseAbsenceSummary,
   parseCalendarEvents,
   parseDate,
@@ -49,7 +52,11 @@ import {
   unescapeJs,
 } from "../server.js";
 import { sanitizeCapture, sanitizeHtml } from "../scripts/sanitize-capture.mjs";
-import { findAbsenceApexRegions, scanKnownAbsenceMatches } from "../scripts/capture-absence-sources.mjs";
+import {
+  findAbsenceApexRegions,
+  scanKnownAbsenceMatches,
+  extractSubjectMarksDiagnostics,
+} from "../scripts/capture-absence-sources.mjs";
 
 const TODAY = "2026-10-24";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1322,4 +1329,130 @@ test("Capture Tooling: capture diagnostic tooling helper functions operate corre
   const calMatch = highlights.find((h) => h.source === "calendar");
   assert.ok(calMatch);
   assert.ok(calMatch.className.includes("fc-absent-unexcused"));
+});
+
+test("Subject scale registry: normalization and lookup with diacritic variants", () => {
+  // Comma and cedilla forms of s and t, diacritics, case, whitespace
+  assert.equal(normalizeSubjectName("Educație fizică"), "educatie fizica");
+  assert.equal(normalizeSubjectName("Educaţie fizică"), "educatie fizica"); // cedilla
+  assert.equal(normalizeSubjectName("  EDUCAȚIA MUZICALĂ  "), "educatie muzicala");
+  assert.equal(normalizeSubjectName("Educație plastică"), "educatie plastica");
+  assert.equal(normalizeSubjectName("Educație tehnologică"), "educatie tehnologica");
+  assert.equal(normalizeSubjectName("Educație pentru societate"), "educatie pentru societate");
+  assert.equal(normalizeSubjectName("EDUCAŢIE PENTRU SOCIETATE"), "educatie pentru societate"); // cedilla
+  assert.equal(normalizeSubjectName("Matematică"), "matematica");
+
+  // Registry lookups
+  assert.equal(getSubjectScale("Educație fizică"), "qualifier");
+  assert.equal(getSubjectScale("Educaţia fizică"), "qualifier");
+  assert.equal(getSubjectScale("Educație muzicală"), "qualifier");
+  assert.equal(getSubjectScale("Educație plastică"), "qualifier");
+  assert.equal(getSubjectScale("Educație tehnologică"), "qualifier");
+  assert.equal(getSubjectScale("Educație pentru societate"), "descriptor");
+  assert.equal(getSubjectScale("Matematică"), null);
+  assert.equal(getSubjectScale("Limba română"), null);
+  assert.equal(getSubjectScale("Istorie"), null);
+});
+
+test("Marks: raw mark fallback preserves unrecognized text as kind other", () => {
+  // normalizeMark: numbers 0-10 -> numeric; FB/B/S/I -> qualifier; empty/dash -> null; other -> other
+  const m25 = normalizeMark("25");
+  assert.deepEqual(m25, {
+    kind: "other",
+    value: null,
+    label: "25",
+    raw: "25",
+    isThesis: false,
+    date: null,
+    semester: null,
+  });
+
+  const mDescriptor = normalizeMark("Competență înaltă");
+  assert.equal(mDescriptor.kind, "other");
+  assert.equal(mDescriptor.label, "Competență înaltă");
+
+  assert.equal(normalizeMark(""), null);
+  assert.equal(normalizeMark("-"), null);
+  assert.equal(normalizeMark("–"), null);
+  assert.equal(normalizeMark("—"), null);
+
+  // parseMarkCell with unrecognized tokens
+  const $ = cheerio.load('<table><tr><td id="C1">25</td><td id="C2">FB</td><td id="C3">-</td></tr></table>');
+  const marks1 = parseMarkCell($, $("#C1"));
+  assert.equal(marks1.length, 1);
+  assert.equal(marks1[0].kind, "other");
+  assert.equal(marks1[0].label, "25");
+
+  const marks2 = parseMarkCell($, $("#C2"));
+  assert.equal(marks2.length, 1);
+  assert.equal(marks2[0].kind, "qualifier");
+  assert.equal(marks2[0].label, "FB");
+
+  const marks3 = parseMarkCell($, $("#C3"));
+  assert.equal(marks3.length, 0);
+
+  // parseRecentGrades with other marks
+  const grades = parseRecentGrades(
+    '<ul><li><span class="eval-date">25.10</span><span class="eval-discipline">Educație pentru societate</span><span class="grade">25</span></li></ul>'
+  );
+  assert.equal(grades.length, 1);
+  assert.equal(grades[0].subject, "Educație pentru societate");
+  assert.equal(grades[0].kind, "other");
+  assert.equal(grades[0].label, "25");
+});
+
+test("Marks: qualifier, descriptor, and other marks do not affect numeric averages", () => {
+  const html =
+    '<table class="t-Report-report">' +
+    '<tr>' +
+    '<td headers="DISCIPLINA">Matematica</td><td headers="LISTA_EVALUATION"><span>10</span><span>8</span></td><td headers="MED_SEM">9.00</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td headers="DISCIPLINA">Educație fizică</td><td headers="LISTA_EVALUATION"><span>FB</span><span>B</span><span>S</span></td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td headers="DISCIPLINA">Educație pentru societate</td><td headers="LISTA_EVALUATION"><span>25</span></td>' +
+    '</tr>' +
+    '</table>';
+  const report = parseSemesterReport(html);
+  const cat = buildCatalog([{ semester: 1, report }]);
+
+  const math = cat.subjects.find((s) => s.subject === "Matematica");
+  assert.equal(math.average, 9);
+
+  const phys = cat.subjects.find((s) => s.subject === "Educație fizică");
+  assert.equal(phys.average, null);
+  assert.equal(phys.scale, "qualifier");
+  assert.equal(phys.marks.length, 3);
+
+  const soc = cat.subjects.find((s) => s.subject === "Educație pentru societate");
+  assert.equal(soc.average, null);
+  assert.equal(soc.scale, "descriptor");
+  assert.equal(soc.marks.length, 1);
+  assert.equal(soc.marks[0], "25");
+
+  // General average remains 9 and never NaN
+  assert.equal(cat.generalAverage, 9);
+  assert.equal(cat.sem1GeneralAverage, 9);
+  assert.ok(!Number.isNaN(cat.generalAverage));
+});
+
+test("Capture Tooling: extractSubjectMarksDiagnostics extracts sanitized shape of report rows", () => {
+  const repHtml =
+    '<table>' +
+    '<tr><th id="D">DISCIPLINA</th><th id="E">EVALUARI</th></tr>' +
+    '<tr><td headers="D">Educație pentru societate</td><td headers="E"><span class="m-val" title="Evaluare formativă">25</span></td></tr>' +
+    '</table>';
+  const diags = extractSubjectMarksDiagnostics([{ semester: 1, regionId: "REG1", html: repHtml }]);
+  assert.ok(diags.length >= 1);
+  const row = diags.find((r) => r.subject.includes("Educație pentru societate"));
+  assert.ok(row);
+  assert.equal(row.source, "report_sem1");
+  assert.equal(row.cells.length, 2);
+  const markCell = row.cells.find((c) => c.headers === "E");
+  assert.ok(markCell);
+  assert.equal(markCell.text, "25");
+  assert.equal(markCell.marks.length, 1);
+  assert.equal(markCell.marks[0].text, "25");
+  assert.equal(markCell.marks[0].attributes.title, "Evaluare formativă");
 });

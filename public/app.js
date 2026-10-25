@@ -383,18 +383,18 @@ function getSubjectScale(subjectName) {
 
 function scaleChip(scale) {
   if (scale === "qualifier") {
-    return h("span", { class: "scale-chip scale-chip-qualifier", role: "note", "aria-label": "Sistem de evaluare: Calificative" }, t("scale_qualifiers") || "Calificative");
+    return h("span", { class: "scale-chip scale-chip-qualifier", role: "note", "aria-label": "Sistem de evaluare: Calificative" }, (typeof getString !== "undefined" ? getString("scale_qualifiers") : null) || "Calificative");
   }
   if (scale === "descriptor") {
-    return h("span", { class: "scale-chip scale-chip-descriptor", role: "note", "aria-label": "Sistem de evaluare: Descriptori" }, t("scale_descriptors") || "Descriptori");
+    return h("span", { class: "scale-chip scale-chip-descriptor", role: "note", "aria-label": "Sistem de evaluare: Descriptori" }, (typeof getString !== "undefined" ? getString("scale_descriptors") : null) || "Descriptori");
   }
   return null;
 }
 
 function emptyMarkText(scale) {
-  if (scale === "qualifier") return t("no_qualifiers_yet") || "Încă nu sunt calificative";
-  if (scale === "descriptor") return t("no_descriptors_yet") || "Încă nu sunt descriptori";
-  return t("no_marks_yet") || "Încă nu sunt note";
+  if (scale === "qualifier") return (typeof getString !== "undefined" ? getString("no_qualifiers_yet") : null) || "Încă nu sunt calificative";
+  if (scale === "descriptor") return (typeof getString !== "undefined" ? getString("no_descriptors_yet") : null) || "Încă nu sunt descriptori";
+  return (typeof getString !== "undefined" ? getString("no_marks_yet") : null) || "Încă nu sunt note";
 }
 
 function score(valueOrMark, size, date, isThesis = false) {
