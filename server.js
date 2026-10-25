@@ -854,15 +854,19 @@ function parseCalendarEventsWithDom($, events) {
       return el ? textOf(el, " ") || null : null;
     };
     const subject = textFor("lesson-text-wrap") || textOf(root[0], " ") || "Unknown";
-    let marker = ["className", "classNames", "class"]
+    let marker = ["className", "classNames", "class", "status", "absenceStatus"]
       .flatMap((key) => asList(ev[key]).map(String))
       .join(" ")
       .toLowerCase();
-    const absenceEl = classContains($, root[0], "absen" /* UNVERIFIED */);
-    if (absenceEl) marker += ` ${classTokens(absenceEl).join(" ").toLowerCase()}`;
-    const isAbsence = marker.includes("absen" /* UNVERIFIED */);
+    const absenceEl = classContains($, root[0], "absen" /* UNVERIFIED */, "nemotivat" /* UNVERIFIED */, "motivat" /* UNVERIFIED */, "unmotivat" /* UNVERIFIED */);
+    if (absenceEl) {
+      marker += ` ${classTokens(absenceEl).join(" ").toLowerCase()}`;
+      if (absenceEl.attribs?.status) marker += ` ${absenceEl.attribs.status.toLowerCase()}`;
+      if (absenceEl.attribs?.["data-status"]) marker += ` ${absenceEl.attribs["data-status"].toLowerCase()}`;
+    }
     const isUnexcused = UNEXCUSED_MARKERS.some((k) => marker.includes(k));
     const isExcused = !isUnexcused && EXCUSED_MARKERS.some((k) => marker.includes(k));
+    const isAbsence = marker.includes("absen" /* UNVERIFIED */) || isUnexcused || isExcused;
     const explicitSem = ev.semester === 1 || ev.semester === 2 ? ev.semester : null;
     entries.push({
       start,
@@ -1002,55 +1006,9 @@ function extractHtmlAbsenceRecords($, today = todayChisinau(), studentKey = null
   return records;
 }
 
-function generateSyntheticAbsences(summary, studentKey = null) {
-  const records = [];
-  const sem1Exc = summary?.sem1Excused ?? 0;
-  const sem1Unexc = summary?.sem1Unexcused ?? 0;
-  const sem2Exc = summary?.sem2Excused ?? 0;
-  const sem2Unexc = summary?.sem2Unexcused ?? 0;
-
-  const pushBatch = (count, status, sem, defaultMonth) => {
-    for (let i = 0; i < count; i += 1) {
-      const day = String(Math.min(28, 10 + i)).padStart(2, "0");
-      const date = `2026-${defaultMonth}-${day}`;
-      const isExc = status === "excused";
-      records.push({
-        studentKey: studentKey ? String(studentKey) : null,
-        date,
-        lessonNumber: (i % 6) + 1,
-        startTime: "08:30",
-        endTime: "09:15",
-        subject: i % 2 === 0 ? "Matematică" : "Fizică",
-        room: "101",
-        teacher: i % 2 === 0 ? "Profesor Mate" : "Profesor Fizică",
-        status,
-        reason: isExc ? "Motivat medical" : null,
-        semester: sem,
-        startLocal: "08:30",
-        endLocal: "09:15",
-        discipline: i % 2 === 0 ? "Matematică" : "Fizică",
-        note: isExc ? "Motivat medical" : null,
-        rawStatus: isExc ? "motivat" : "nemotivat",
-        synthetic: true,
-      });
-    }
-  };
-
-  pushBatch(sem1Exc, "excused", 1, "10");
-  pushBatch(sem1Unexc, "unexcused", 1, "11");
-  pushBatch(sem2Exc, "excused", 2, "02");
-  pushBatch(sem2Unexc, "unexcused", 2, "03");
-
-  return records;
-}
-
 // Categorizes absences strictly into Semestrul 1 and Semestrul 2 with totals, motivate, nemotivate, and lesson records
 function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
-  let effectiveRecords = Array.isArray(rawRecords) ? [...rawRecords] : [];
-  if (!effectiveRecords.length && process.env.SIME_SYNTHETIC_ABSENCES === "1") {
-    effectiveRecords = generateSyntheticAbsences(summary, studentKey);
-  }
-
+  const effectiveRecords = Array.isArray(rawRecords) ? [...rawRecords] : [];
   const seen = new Set();
   const deduped = [];
   for (const r of effectiveRecords) {
@@ -1078,7 +1036,6 @@ function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
       discipline: r.discipline || subj,
       note: r.reason || r.note || null,
       rawStatus: r.rawStatus || (status === "excused" ? "motivat" : status === "unexcused" ? "nemotivat" : "necunoscut"),
-      ...(r.synthetic ? { synthetic: true } : {}),
     });
   }
   deduped.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.startTime || b.startLocal || "").localeCompare(a.startTime || a.startLocal || ""));
@@ -1086,17 +1043,24 @@ function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
   const sem1Records = deduped.filter((r) => r.semester === 1);
   const sem2Records = deduped.filter((r) => r.semester === 2);
 
-  const isExcused = (r) => r.status === "excused" || r.status === "motivat";
-  const isUnexcused = (r) => r.status === "unexcused" || r.status === "nemotivat";
-  const countBy = (list, fn) => list.filter(fn).length;
+  const sem1Motivate = summary?.sem1Excused ?? 0;
+  const sem1Nemotivate = summary?.sem1Unexcused ?? 0;
+  const sem1Total = summary?.sem1Total ?? (sem1Motivate + sem1Nemotivate);
 
-  const sem1Motivate = Math.max(summary?.sem1Excused ?? 0, countBy(sem1Records, isExcused));
-  const sem1Nemotivate = Math.max(summary?.sem1Unexcused ?? 0, countBy(sem1Records, isUnexcused));
-  const sem1Total = Math.max(sem1Motivate + sem1Nemotivate, sem1Records.length);
+  const sem2Motivate = summary?.sem2Excused ?? 0;
+  const sem2Nemotivate = summary?.sem2Unexcused ?? 0;
+  const sem2Total = summary?.sem2Total ?? (sem2Motivate + sem2Nemotivate);
 
-  const sem2Motivate = Math.max(summary?.sem2Excused ?? 0, countBy(sem2Records, isExcused));
-  const sem2Nemotivate = Math.max(summary?.sem2Unexcused ?? 0, countBy(sem2Records, isUnexcused));
-  const sem2Total = Math.max(sem2Motivate + sem2Nemotivate, sem2Records.length);
+  // Gate: Per-lesson details are shown for a semester only if the number of detected records
+  // equals the portal's reported total for that semester. If they differ, return no detailed records
+  // for that semester (records: []).
+  const sem1DetailsValid = sem1Total > 0 && sem1Records.length === sem1Total;
+  const effectiveSem1Records = sem1DetailsValid ? sem1Records : [];
+
+  const sem2DetailsValid = sem2Total > 0 && sem2Records.length === sem2Total;
+  const effectiveSem2Records = sem2DetailsValid ? sem2Records : [];
+
+  const finalRecords = [...effectiveSem1Records, ...effectiveSem2Records];
 
   const normalizedSummary = {
     presencePercent: summary?.presencePercent ?? 100,
@@ -1111,20 +1075,20 @@ function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
 
   return {
     summary: normalizedSummary,
-    records: deduped,
+    records: finalRecords,
     sem1: {
       semester: 1,
       total: sem1Total,
       motivate: sem1Motivate,
       nemotivate: sem1Nemotivate,
-      records: sem1Records,
+      records: effectiveSem1Records,
     },
     sem2: {
       semester: 2,
       total: sem2Total,
       motivate: sem2Motivate,
       nemotivate: sem2Nemotivate,
-      records: sem2Records,
+      records: effectiveSem2Records,
     },
   };
 }

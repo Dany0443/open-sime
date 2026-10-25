@@ -109,7 +109,7 @@ test("Item 3: HTML absence table parser extracts records with schema", () => {
   assert.equal(r.reason, "Certificat medical");
 });
 
-test("Item 3: synthetic records fallback only active when SIME_SYNTHETIC_ABSENCES=1", () => {
+test("Item 3: absence record reconciliation does not invent fake records", () => {
   const summary = {
     total: 3,
     sem1Excused: 2,
@@ -117,28 +117,8 @@ test("Item 3: synthetic records fallback only active when SIME_SYNTHETIC_ABSENCE
     sem2Excused: 0,
     sem2Unexcused: 0,
   };
-
-  // Case 1: Without SIME_SYNTHETIC_ABSENCES flag, records remain empty in production
-  delete process.env.SIME_SYNTHETIC_ABSENCES;
   const prodAbsences = buildSemesterAbsences(summary, [], "STUDENT_1");
-  assert.equal(prodAbsences.records.length, 0, "Production must not invent absences");
-  assert.equal(prodAbsences.sem1.records.length, 0);
-
-  // Case 2: With SIME_SYNTHETIC_ABSENCES=1, generates synthetic records
-  process.env.SIME_SYNTHETIC_ABSENCES = "1";
-  try {
-    const testAbsences = buildSemesterAbsences(summary, [], "STUDENT_1");
-    assert.equal(testAbsences.records.length, 3, "Synthetic absences must match summary total");
-    assert.equal(testAbsences.sem1.records.length, 3);
-    assert.equal(testAbsences.sem1.records.filter((r) => r.status === "excused").length, 2);
-    assert.equal(testAbsences.sem1.records.filter((r) => r.status === "unexcused").length, 1);
-    for (const r of testAbsences.records) {
-      assert.equal(r.studentKey, "STUDENT_1");
-      assert.ok(r.synthetic, "Must be flagged as synthetic");
-    }
-  } finally {
-    delete process.env.SIME_SYNTHETIC_ABSENCES;
-  }
+  assert.equal(prodAbsences.records.length, 0, "Portal reports totals but no hourly details, must not invent records");
 });
 
 test("Item 3: capture diagnostic tooling helper functions operate correctly", () => {

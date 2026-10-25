@@ -1349,7 +1349,7 @@ function absenceRow(r) {
   const valid = validIso(r.date);
   const time = [r.startTime || r.startLocal, r.endTime || r.endLocal].filter((x) => Boolean(x) && x !== "null" && x !== "undefined").join(" - ");
   const lessonOra = r.lessonNumber ? ((typeof getString !== "undefined" ? getString("lesson_period", { period: r.lessonNumber }) : null) || "Ora " + r.lessonNumber) : "";
-  const roomText = r.room ? `Sala ${r.room}` : null;
+  const roomText = r.room ? (String(r.room).startsWith("Sala") ? String(r.room) : `Sala ${r.room}`) : null;
   const teacher = r.teacher && r.teacher !== "null" && r.teacher !== "undefined" ? r.teacher : null;
   const metaParts = [lessonOra, time, roomText, teacher].filter(Boolean);
   const note = r.reason || r.note;
@@ -1391,8 +1391,16 @@ function renderAbsences() {
     setChildren(
       list,
       sem.total > 0
-        ? emptyState("Detaliile nu sunt disponibile pe portal", "Portalul raportează " + sem.total + " absențe în acest semestru, dar fără detalii pe ore.")
-        : emptyState("Nicio absență", "Nu sunt absențe înregistrate în Semestrul " + state.semester + ".")
+        ? emptyState(
+            getString("absences_no_details_title") || "Detaliile nu sunt disponibile pe portal",
+            getString("absences_no_details_sub", { total: sem.total }) ||
+              ("Portalul raportează " + sem.total + " absențe în acest semestru, dar fără detalii pe ore.")
+          )
+        : emptyState(
+            getString("no_absences_title") || "Nicio absență",
+            getString("no_absences_sub", { sem: state.semester }) ||
+              ("Nu sunt absențe înregistrate în Semestrul " + state.semester + ".")
+          )
     );
     return;
   }

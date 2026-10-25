@@ -57,45 +57,32 @@ test("W6: getAbsenceRecords combines calendar events and HTML table absences", a
   assert.ok(subjNames.includes("Limba Romana"));
 });
 
-test("W6: buildSemesterAbsences reconciles totals with records and groups semesters", () => {
-  const summary = {
-    total: 3,
-    sem1Excused: 1,
-    sem1Unexcused: 2,
-    sem2Excused: 0,
-    sem2Unexcused: 0,
-    presencePercent: 95,
-  };
-
-  // Only 2 records available in calendar/table
+test("W6: guarded detection (a) match equals portal total shows lesson details", () => {
+  const summary = { total: 2, sem1Excused: 1, sem1Unexcused: 1, sem2Excused: 0, sem2Unexcused: 0 };
   const rawRecords = [
-    {
-      date: "2026-10-05",
-      startLocal: "08:30",
-      subject: "Matematica",
-      status: "motivat",
-      semester: 1,
-    },
-    {
-      date: "2026-10-12",
-      startLocal: "09:25",
-      subject: "Fizica",
-      status: "nemotivat",
-      semester: 1,
-    },
+    { date: "2026-10-05", startLocal: "08:30", subject: "Matematica", status: "motivat", semester: 1 },
+    { date: "2026-10-12", startLocal: "09:25", subject: "Fizica", status: "nemotivat", semester: 1 },
   ];
-
   const absences = buildSemesterAbsences(summary, rawRecords);
-
-  // Sem 1 total from summary is 3, records count is 2
-  assert.equal(absences.sem1.total, 3);
+  assert.equal(absences.sem1.total, 2);
   assert.equal(absences.sem1.records.length, 2);
-  assert.equal(absences.sem1.motivate, 1);
-  assert.equal(absences.sem1.nemotivate, 2);
+});
 
-  // Verify records are sorted descending by date
-  assert.equal(absences.sem1.records[0].date, "2026-10-12");
-  assert.equal(absences.sem1.records[1].date, "2026-10-05");
+test("W6: guarded detection (b) mismatch shows totals only and honest message", () => {
+  const summary = { total: 3, sem1Excused: 1, sem1Unexcused: 2, sem2Excused: 0, sem2Unexcused: 0 };
+  const rawRecords = [
+    { date: "2026-10-05", startLocal: "08:30", subject: "Matematica", status: "motivat", semester: 1 },
+  ];
+  const absences = buildSemesterAbsences(summary, rawRecords);
+  assert.equal(absences.sem1.total, 3);
+  assert.equal(absences.sem1.records.length, 0);
+});
+
+test("W6: guarded detection (c) no markers shows totals only", () => {
+  const summary = { total: 10, sem1Excused: 5, sem1Unexcused: 5, sem2Excused: 0, sem2Unexcused: 0 };
+  const absences = buildSemesterAbsences(summary, []);
+  assert.equal(absences.sem1.total, 10);
+  assert.equal(absences.sem1.records.length, 0);
 });
 
 test("W6: per-subject grouping logic groups records and counts excused/unexcused correctly", () => {
