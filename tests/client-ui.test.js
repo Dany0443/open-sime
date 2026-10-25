@@ -47,7 +47,11 @@ function loadClientContext() {
       this.parentNode = null;
       this._textContent = props.text || "";
       this._eventListeners = new Map();
-      this.style = {};
+      this.style = {
+        setProperty(k, v) {
+          this[k] = v;
+        },
+      };
       this.hidden = false;
       this.disabled = false;
     }
@@ -213,7 +217,7 @@ function loadClientContext() {
   vm.runInContext(cleanStrings, sandbox);
   vm.runInContext(cleanApp, sandbox);
   vm.runInContext(
-    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score, scaleChip, getSubjectScale, normalizeSubjectName, emptyMarkText, subjectCard, recentMarks, bandOf, renderMetrics, renderRecent });",
+    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, setLanguage, applyLocalization, describeError, ApiError, pluralForm, tp, setTab, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score, scaleChip, getSubjectScale, normalizeSubjectName, emptyMarkText, subjectCard, recentMarks, bandOf, renderMetrics, renderRecent });",
     sandbox
   );
   return sandbox;
@@ -881,4 +885,174 @@ test("Marks UI: subject scale chips and scale-aware empty state", () => {
   assert.ok(emptyCard.classList.contains("subject"));
   const pMuted = emptyCard.children.find((c) => c.tagName === "P" && c.classList.contains("muted"));
   assert.equal(pMuted.textContent, "Încă nu sunt calificative");
+});
+
+// 7. ENGLISH & RUSSIAN LOCALIZATION, LANGUAGE SWITCHING, AND SUN ROTATION
+
+test("Localization: Full English (en) and Russian (ru) rendering across all tabs, errors, and pluralization", () => {
+  const ctx = loadClientContext();
+  const { state, elements, setLanguage, describeError, ApiError, tp } = ctx;
+
+  const today = ctx.todayIso();
+  state.token = "test-token";
+  state.studentId = "101";
+  state.students = [{ id: "101", fullName: "Ion Ciobanu", className: "11R", school: "Liceul Teoretic" }];
+  state.semester = 1;
+  state.day = today;
+  state.data = {
+    student: { id: "101", fullName: "Ion Ciobanu", className: "11R", school: "Liceul Teoretic", classMaster: "Prof. Elena" },
+    metadata: { className: "11R", schoolName: "Liceul Teoretic", classMaster: "Prof. Elena", studyYear: "2026-2027" },
+    schedule: {
+      days: {
+        [today]: [
+          {
+            start: `${today}T08:00:00Z`,
+            end: `${today}T08:45:00Z`,
+            subject: "Matematică",
+            classroom: "101",
+            teacher: "Ion Popescu",
+            topic: "Ecuații",
+            periodIndex: 1,
+          },
+        ],
+      },
+    },
+    grades: [
+      { subject: "Matematică", value: 10, date: "2026-10-14", semester: 1, isThesis: true },
+      { subject: "Fizică", value: 9, date: "2026-10-15", semester: 1 },
+    ],
+    reusita: {
+      subjects: [
+        {
+          subject: "Matematică",
+          discipline: "Matematică",
+          teacher: "Ion Popescu",
+          semesters: [{ semester: 1, marks: [{ value: 10, date: "2026-10-14", isThesis: true }] }],
+        },
+      ],
+    },
+    homework: [
+      { subject: "Matematică", task: "Ex. 5 pag. 42", assignedDate: "2026-10-14", dueDate: "2026-10-20" },
+    ],
+    absences: {
+      summary: { sem1Total: 2, sem1Motivate: 1, sem1Nemotivate: 1 },
+      sem1: {
+        total: 2,
+        motivate: 1,
+        nemotivate: 1,
+        records: [
+          {
+            date: "2026-10-14",
+            lessonNumber: 1,
+            startTime: "08:30",
+            endTime: "09:15",
+            subject: "Matematică",
+            room: "101",
+            teacher: "Ion Popescu",
+            status: "unexcused",
+            semester: 1,
+          },
+        ],
+      },
+    },
+  };
+
+  // Switch to English
+  setLanguage("en");
+  assert.equal(state.lang, "en");
+  assert.equal(ctx.doc.documentElement.lang, "en");
+  assert.equal(elements.get("page-title").textContent, "Home");
+  assert.ok(elements.get("home-metrics").innerText.includes("General GPA (estimated)"), "English GPA metric label");
+  assert.ok(elements.get("home-metrics").innerText.includes("Latest grade"), "English latest grade label");
+  assert.ok(elements.get("marks-list").innerText.includes("Subject"), "English marks table header");
+  assert.ok(elements.get("marks-list").innerText.includes("Thesis"), "English thesis tag");
+  assert.ok(elements.get("abs-stats").innerText.includes("Unexcused"), "English absences stats");
+  assert.ok(elements.get("abs-list").innerText.includes("Room 101"), "English room label");
+  assert.ok(elements.get("homework-list").innerText.includes("Matematică"), "English homework list item");
+  assert.ok(elements.get("profile-card").innerText.includes("Class master"), "English profile class master");
+
+  // English pluralization and errors
+  assert.equal(tp(1, "lesson_count"), "1 lesson");
+  assert.equal(tp(5, "lesson_count"), "5 lessons");
+  const enErr = describeError(new ApiError("Auth", 401, 0, "PORTAL_LOGIN_REJECTED"), "login");
+  assert.ok(enErr.includes("Incorrect username or password"));
+
+  // Switch to Russian
+  setLanguage("ru");
+  assert.equal(state.lang, "ru");
+  assert.equal(ctx.doc.documentElement.lang, "ru");
+  assert.equal(elements.get("page-title").textContent, "Главная");
+  assert.ok(elements.get("home-metrics").innerText.includes("Средний балл (расчётный)"), "Russian GPA metric label");
+  assert.ok(elements.get("home-metrics").innerText.includes("Последняя оценка"), "Russian latest mark label");
+  assert.ok(elements.get("marks-list").innerText.includes("Предмет"), "Russian marks table header");
+  assert.ok(elements.get("marks-list").innerText.includes("Теза"), "Russian thesis tag");
+  assert.ok(elements.get("abs-stats").innerText.includes("Неуважительные"), "Russian absences stats");
+  assert.ok(elements.get("abs-list").innerText.includes("Каб. 101"), "Russian room label");
+  assert.ok(elements.get("homework-list").innerText.includes("Matematică"), "Russian homework list item");
+  assert.ok(elements.get("profile-card").innerText.includes("Классный руководитель"), "Russian profile class teacher");
+
+  // Russian 3-form pluralization (1, 2-4, 5+) and errors
+  assert.equal(tp(1, "lesson_count"), "1 урок");
+  assert.equal(tp(3, "lesson_count"), "3 урока");
+  assert.equal(tp(5, "lesson_count"), "5 уроков");
+  assert.equal(tp(12, "lesson_count"), "12 уроков");
+  assert.equal(tp(21, "lesson_count"), "21 урок");
+  const ruErr = describeError(new ApiError("Auth", 401, 0, "PORTAL_LOGIN_REJECTED"), "login");
+  assert.ok(ruErr.includes("Неверное имя пользователя или пароль"));
+});
+
+test("Localization: Language preference persists in localStorage and preserves active tab and student state", () => {
+  const ctx = loadClientContext();
+  const { state, store, KEYS, setLanguage, setTab } = ctx;
+
+  state.token = "tok-123";
+  state.studentId = "stud-2";
+  state.data = { student: { id: "stud-2", fullName: "Maria Ionescu" } };
+  setTab("marks");
+
+  setLanguage("ru");
+  assert.equal(store.get(KEYS.lang), "ru", "Selected language must be saved in localStorage");
+  assert.equal(state.tab, "marks", "Switching language must preserve active tab");
+  assert.equal(state.studentId, "stud-2", "Switching language must preserve active student");
+  assert.equal(state.token, "tok-123", "Switching language must preserve auth token");
+  assert.equal(ctx.elements.get("page-title").textContent, "Успеваемость", "Marks tab title must update to Russian immediately");
+
+  setLanguage("en");
+  assert.equal(store.get(KEYS.lang), "en");
+  assert.equal(ctx.elements.get("page-title").textContent, "Grades", "Marks tab title must update to English immediately");
+});
+
+test("Sun Rotation: CSS rotates only background suns and GPA sun with center origin and respects reduced motion", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../public/style.css"), "utf8");
+
+  // Keyframes exist
+  assert.ok(css.includes("@keyframes sun-spin"), "CSS must define @keyframes sun-spin");
+  assert.ok(css.includes("@keyframes sun-spin-reverse"), "CSS must define @keyframes sun-spin-reverse");
+
+  // Background suns and GPA sun have center transform-origin and slow linear infinite animations
+  assert.ok(css.includes(".auth-deco.deco-a .deco-shape"), "Must target .auth-deco.deco-a .deco-shape");
+  assert.ok(css.includes(".auth-deco.deco-b .deco-shape"), "Must target .auth-deco.deco-b .deco-shape");
+  assert.ok(css.includes(".metric-gpa .metric-deco .deco-shape"), "Must target .metric-gpa .metric-deco .deco-shape");
+  assert.ok(css.includes("transform-origin: 50% 50%"), "Sun shapes must rotate around their center (50% 50%)");
+
+  // Brand mark and avatar cookies must NOT rotate
+  const nonRotatingMatch = css.match(/\.brand-mark\s+\.deco-shape,\s*\r?\n?\.cookie-shape\s*\{([^}]+)\}/);
+  assert.ok(nonRotatingMatch, "Must explicitly guard .brand-mark .deco-shape and .cookie-shape");
+  assert.ok(nonRotatingMatch[1].includes("animation: none"), ".brand-mark .deco-shape and .cookie-shape must have animation: none");
+
+  // GPA metric card renders .metric-deco inside .metric-gpa in runtime DOM
+  const ctx = loadClientContext();
+  ctx.state.data = {
+    grades: [{ subject: "Matematică", value: 10, date: "2026-10-14", semester: 1 }],
+    reusita: { subjects: [] },
+    absences: { summary: {} },
+    schedule: { days: {} },
+    homework: [],
+  };
+  ctx.renderHome();
+  const metricsHost = ctx.elements.get("home-metrics");
+  const gpaCard = metricsHost.querySelector(".metric-gpa");
+  assert.ok(gpaCard, "renderHome must render .metric-gpa card");
+  const gpaDeco = gpaCard.querySelector(".metric-deco");
+  assert.ok(gpaDeco, ".metric-gpa card must contain .metric-deco sun container");
 });
