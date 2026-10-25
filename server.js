@@ -462,7 +462,7 @@ function parseRecentGradesFromRoot($, root, defaultSemester = null, today = toda
       rawGrade = textOf(gradeEl);
     } else {
       // Fallback: date, subject and trailing mark in plain text
-      const m = /^\s*(\S+)\s+(.+?)[:\s]+(\d+(?:[.,]\d+)?|[A-Za-z.]+)\s*$/.exec(textOf(li, " "));
+      const m = /^\s*(\S+)\s+(.+?)[:\s]+(f[oó]arte\s+bine|\d+(?:[.,]\d+)?|[A-Za-z.]+)\s*$/i.exec(textOf(li, " "));
       if (!m) return;
       dateText = m[1];
       subject = m[2].trim();
@@ -493,14 +493,41 @@ function headerHas($, td, needles) {
   return Boolean(raw) && raw.split(/\s+/).some((t) => needles.some((n) => t.includes(n)));
 }
 
+// UNVERIFIED: Portal spelling variations for qualifiers.
+// "Foarte bine" reported by maintainer; exact casing/diacritics beyond that are unverified.
 const QUALIFIERS = {
   fb: "FB",
   "f.b.": "FB",
   "f.b": "FB",
+  "foarte bine": "FB",   /* UNVERIFIED */
   b: "B",
+  bine: "B",             /* UNVERIFIED */
   s: "S",
+  suficient: "S",        /* UNVERIFIED */
   i: "I",
+  insuficient: "I",      /* UNVERIFIED */
 };
+
+function normalizeQualifierKey(str) {
+  if (!str) return "";
+  return String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/[\u015F\u0219]/g, "s")
+    .replace(/[\u0163\u021B]/g, "t")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function splitMarkTokens(rawText) {
+  if (!rawText) return [];
+  const text = String(rawText).trim();
+  if (!text) return [];
+  // Match "foarte bine" (with arbitrary whitespace/casing/accents) before splitting individual tokens
+  const matches = text.match(/f[oó]arte\s+bine|[^\s,]+/gi);
+  return matches ? matches.map((t) => t.trim()).filter(Boolean) : [];
+}
 
 // UNVERIFIED: Subject scale lookup based on maintainer description.
 // Portal captures needed to confirm exact naming variations.
@@ -544,13 +571,12 @@ function normalizeMark(rawText, rawAttr = null, isThesisExplicit = false, semest
     (rawAttr && /tez[aă]/i.test(rawAttr))
   );
 
-  const lower = raw.toLowerCase();
-  if (QUALIFIERS[lower] || /^(fb|b|s|i)$/i.test(raw)) {
-    const qual = QUALIFIERS[lower] || raw.toUpperCase();
+  const qualKey = normalizeQualifierKey(raw);
+  if (QUALIFIERS[qualKey]) {
     return {
       kind: "qualifier",
       value: null,
-      label: qual,
+      label: QUALIFIERS[qualKey],
       raw,
       isThesis,
       date,
@@ -596,13 +622,21 @@ function parseMarkCell($, cell, semester = null) {
       (rawAttr && /tez[aă]/i.test(rawAttr)) ||
       (leaf.parent?.attribs?.class && /tez[aă]/i.test(leaf.parent.attribs.class))
     );
-    const m = normalizeMark(text, rawAttr, isThesis, semester);
-    if (m) {
-      marks.push(m);
+    const tokens = splitMarkTokens(text);
+    if (tokens.length > 1) {
+      for (const tok of tokens) {
+        const m = normalizeMark(tok, rawAttr, isThesis, semester);
+        if (m) marks.push(m);
+      }
+    } else {
+      const m = normalizeMark(text, rawAttr, isThesis, semester);
+      if (m) {
+        marks.push(m);
+      }
     }
   }
   if (marks.length) return marks;
-  for (const token of textOf(cellNode, " ").split(/[,\s]+/).filter(Boolean)) {
+  for (const token of splitMarkTokens(textOf(cellNode, " "))) {
     const m = normalizeMark(token, null, false, semester);
     if (m) {
       marks.push(m);
@@ -3334,6 +3368,9 @@ export {
   studentSwitchUrl,
   normalizeName,
   normalizeMark,
+  normalizeQualifierKey,
+  splitMarkTokens,
+  QUALIFIERS,
   normalizeSubjectName,
   getSubjectScale,
   SUBJECT_SCALE_REGISTRY,

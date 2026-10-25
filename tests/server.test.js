@@ -32,6 +32,7 @@ import {
   inspectParserHealth,
   loginGuard,
   normalizeMark,
+  splitMarkTokens,
   normalizeSubjectName,
   getSubjectScale,
   SUBJECT_SCALE_REGISTRY,
@@ -1455,4 +1456,98 @@ test("Capture Tooling: extractSubjectMarksDiagnostics extracts sanitized shape o
   assert.equal(markCell.marks.length, 1);
   assert.equal(markCell.marks[0].text, "25");
   assert.equal(markCell.marks[0].attributes.title, "Evaluare formativă");
+});
+
+test("Marks: full-word qualifiers parse to single marks with correct label and raw text", () => {
+  // 1. "Foarte bine" parses to exactly one qualifier mark with label FB and raw "Foarte bine"
+  const fb1 = normalizeMark("Foarte bine");
+  assert.deepEqual(fb1, {
+    kind: "qualifier",
+    value: null,
+    label: "FB",
+    raw: "Foarte bine",
+    isThesis: false,
+    date: null,
+    semester: null,
+  });
+
+  // 2. Case and diacritic variants
+  const fbUpper = normalizeMark("FOARTE BINE");
+  assert.equal(fbUpper.kind, "qualifier");
+  assert.equal(fbUpper.label, "FB");
+  assert.equal(fbUpper.raw, "FOARTE BINE");
+
+  const fbSpaces = normalizeMark("foarte  bine");
+  assert.equal(fbSpaces.kind, "qualifier");
+  assert.equal(fbSpaces.label, "FB");
+  assert.equal(fbSpaces.raw, "foarte  bine");
+
+  // 3. "Bine", "Suficient", "Insuficient" parse to B, S, I
+  const b = normalizeMark("Bine");
+  assert.equal(b.kind, "qualifier");
+  assert.equal(b.label, "B");
+  assert.equal(b.raw, "Bine");
+
+  const s = normalizeMark("Suficient");
+  assert.equal(s.kind, "qualifier");
+  assert.equal(s.label, "S");
+  assert.equal(s.raw, "Suficient");
+
+  const i = normalizeMark("Insuficient");
+  assert.equal(i.kind, "qualifier");
+  assert.equal(i.label, "I");
+  assert.equal(i.raw, "Insuficient");
+
+  // 4. splitMarkTokens tokenizes "foarte bine" as a single token before splitting
+  assert.deepEqual(splitMarkTokens("Foarte bine"), ["Foarte bine"]);
+  assert.deepEqual(splitMarkTokens("Foarte bine Bine Suficient"), ["Foarte bine", "Bine", "Suficient"]);
+  assert.deepEqual(splitMarkTokens("FB B S"), ["FB", "B", "S"]);
+  assert.deepEqual(splitMarkTokens("7 8 10"), ["7", "8", "10"]);
+
+  // 5. parseMarkCell on mixed cells
+  const $ = cheerio.load(
+    '<table>' +
+    '<tr>' +
+    '<td id="C_FB">Foarte bine</td>' +
+    '<td id="C_MIXED">Foarte bine Bine Suficient</td>' +
+    '<td id="C_ABBR">FB B S</td>' +
+    '<td id="C_NUM">7 8 10</td>' +
+    '<td id="C_OTHER">foarte ceva</td>' +
+    '</tr>' +
+    '</table>'
+  );
+
+  const mFb = parseMarkCell($, $("#C_FB"));
+  assert.equal(mFb.length, 1);
+  assert.equal(mFb[0].kind, "qualifier");
+  assert.equal(mFb[0].label, "FB");
+  assert.equal(mFb[0].raw, "Foarte bine");
+
+  const mMixed = parseMarkCell($, $("#C_MIXED"));
+  assert.equal(mMixed.length, 3);
+  assert.equal(mMixed[0].label, "FB");
+  assert.equal(mMixed[0].raw, "Foarte bine");
+  assert.equal(mMixed[1].label, "B");
+  assert.equal(mMixed[1].raw, "Bine");
+  assert.equal(mMixed[2].label, "S");
+  assert.equal(mMixed[2].raw, "Suficient");
+
+  const mAbbr = parseMarkCell($, $("#C_ABBR"));
+  assert.equal(mAbbr.length, 3);
+  assert.equal(mAbbr[0].label, "FB");
+  assert.equal(mAbbr[1].label, "B");
+  assert.equal(mAbbr[2].label, "S");
+
+  const mNum = parseMarkCell($, $("#C_NUM"));
+  assert.equal(mNum.length, 3);
+  assert.equal(mNum[0].value, 7);
+  assert.equal(mNum[1].value, 8);
+  assert.equal(mNum[2].value, 10);
+
+  const mOther = parseMarkCell($, $("#C_OTHER"));
+  assert.equal(mOther.length, 2);
+  assert.equal(mOther[0].kind, "other");
+  assert.equal(mOther[0].label, "foarte");
+  assert.equal(mOther[1].kind, "other");
+  assert.equal(mOther[1].label, "ceva");
 });
