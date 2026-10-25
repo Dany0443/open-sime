@@ -1164,7 +1164,7 @@ test("Tauri 2 Desktop: configuration, sidecar externalBin, scripts, capabilities
   assert.equal(tauriConf.build.frontendDist, "../dist-tauri");
   assert.equal(tauriConf.app.windows[0].title, "Open SIME");
   assert.equal(tauriConf.app.windows[0].label, "main");
-  assert.equal(tauriConf.app.windows[0].visible, false);
+  assert.equal(tauriConf.app.windows[0].visible, true);
   assert.ok(tauriConf.app.windows[0].width >= 800);
   assert.ok(tauriConf.app.windows[0].height >= 600);
   assert.equal(tauriConf.bundle.active, true);

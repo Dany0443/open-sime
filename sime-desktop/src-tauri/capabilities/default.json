@@ -11,6 +11,11 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
+          "name": "open-sime-server",
+          "sidecar": true,
+          "args": true
+        },
+        {
           "name": "binaries/open-sime-server",
           "sidecar": true,
           "args": true
@@ -20,6 +25,11 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [
+        {
+          "name": "open-sime-server",
+          "sidecar": true,
+          "args": true
+        },
         {
           "name": "binaries/open-sime-server",
           "sidecar": true,

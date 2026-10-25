@@ -1,15 +1,10 @@
 (function () {
-  const params = new URLSearchParams(window.location.search);
-  const error = params.get("error");
-  const detail = params.get("detail");
-  const code = params.get("code");
+  function showError(code, detail) {
+    const card = document.getElementById("status-card");
+    const titleEl = document.getElementById("status-title");
+    const detailEl = document.getElementById("status-detail");
+    const codeEl = document.getElementById("status-code");
 
-  const card = document.getElementById("status-card");
-  const titleEl = document.getElementById("status-title");
-  const detailEl = document.getElementById("status-detail");
-  const codeEl = document.getElementById("status-code");
-
-  if (error) {
     if (card) card.classList.add("is-error");
     if (titleEl) {
       titleEl.textContent = "Serviciul local Open SIME nu a putut porni";
@@ -24,5 +19,15 @@
       codeEl.textContent = code;
     }
   }
-})();
 
+  window.__showSimeError = showError;
+
+  const params = new URLSearchParams(window.location.search);
+  const error = params.get("error");
+  const detail = params.get("detail");
+  const code = params.get("code");
+
+  if (error) {
+    showError(code, detail);
+  }
+})();
