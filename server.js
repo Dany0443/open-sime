@@ -3,6 +3,7 @@
 // HTTP transport, APEX login & handshake, client, web layer.
 
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -2637,6 +2638,7 @@ function scrubLog(input) {
 }
 
 function deriveRememberKey(secret) {
+  if (Buffer.isBuffer(secret) && secret.length === 32) return secret;
   return crypto.createHash("sha256").update(String(secret)).digest();
 }
 
@@ -2673,6 +2675,122 @@ function decryptRememberToken(token, secret) {
   }
 }
 
+const REMEMBER_STORE_PATH = process.env.SIME_REMEMBER_STORE || path.resolve("data/remember-tokens.json");
+const REMEMBER_KEY_PATH = process.env.SIME_REMEMBER_KEY_FILE || path.resolve("data/remember-secret.key");
+let memRememberKey = null;
+
+function getRememberSecretKey() {
+  if (process.env.SIME_REMEMBER_SECRET) {
+    return deriveRememberKey(process.env.SIME_REMEMBER_SECRET);
+  }
+  try {
+    if (fs.existsSync(REMEMBER_KEY_PATH)) {
+      const existing = fs.readFileSync(REMEMBER_KEY_PATH);
+      if (existing.length === 32) return existing;
+      return deriveRememberKey(existing);
+    }
+    const dir = path.dirname(REMEMBER_KEY_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    }
+    const generated = crypto.randomBytes(32);
+    fs.writeFileSync(REMEMBER_KEY_PATH, generated, { mode: 0o600 });
+    return generated;
+  } catch {
+    if (!memRememberKey) {
+      memRememberKey = crypto.randomBytes(32);
+    }
+    return memRememberKey;
+  }
+}
+
+function loadRememberTokens() {
+  try {
+    if (!fs.existsSync(REMEMBER_STORE_PATH)) return {};
+    const raw = fs.readFileSync(REMEMBER_STORE_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveRememberTokens(tokens) {
+  try {
+    const dir = path.dirname(REMEMBER_STORE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    }
+    fs.writeFileSync(REMEMBER_STORE_PATH, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+  } catch {
+    // Fail closed or keep in memory if file cannot be written
+  }
+}
+
+function parseCookie(cookieHeader, name) {
+  if (!cookieHeader || typeof cookieHeader !== "string") return null;
+  for (const part of cookieHeader.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
+}
+
+function makeRememberCookie(token, req, maxAge = 30 * 24 * 3600) {
+  const isSecure = req.secure || req.get("x-forwarded-proto") === "https";
+  const secureFlag = isSecure ? "; Secure" : "";
+  return `sime_remember=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=${maxAge}${secureFlag}`;
+}
+
+function makeClearCookie(req) {
+  const isSecure = req.secure || req.get("x-forwarded-proto") === "https";
+  const secureFlag = isSecure ? "; Secure" : "";
+  return `sime_remember=; HttpOnly; SameSite=Lax; Path=/api/auth; Max-Age=0${secureFlag}`;
+}
+
+function isCrossOrigin(req) {
+  const secFetchSite = (req.get("sec-fetch-site") || "").toLowerCase();
+  if (secFetchSite === "cross-site") return true;
+  const host = req.get("host");
+  const origin = req.get("origin");
+  if (origin && host) {
+    try {
+      const u = new URL(origin);
+      if (u.host !== host) return true;
+    } catch {
+      return true;
+    }
+  }
+  const referer = req.get("referer");
+  if (!origin && referer && host) {
+    try {
+      const u = new URL(referer);
+      if (u.host !== host) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+const resumeRateMap = new Map();
+const RESUME_MAX_ATTEMPTS = 5;
+const RESUME_WINDOW_MS = 15 * 60 * 1000;
+
+function checkResumeRate(ip) {
+  const now = Date.now();
+  const history = (resumeRateMap.get(ip) || []).filter((t) => now - t < RESUME_WINDOW_MS);
+  if (history.length >= RESUME_MAX_ATTEMPTS) {
+    resumeRateMap.set(ip, history);
+    const oldest = history[0];
+    const retryAfter = Math.ceil((oldest + RESUME_WINDOW_MS - now) / 1000);
+    return { allowed: false, retryAfter: Math.max(1, retryAfter) };
+  }
+  history.push(now);
+  resumeRateMap.set(ip, history);
+  return { allowed: true };
+}
+
 function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -2703,12 +2821,12 @@ function createApp() {
 
   app.get("/api/auth/config", (_req, res) => {
     res.json({
-      rememberMeAvailable: Boolean(process.env.SIME_REMEMBER_SECRET),
+      rememberMeAvailable: true,
     });
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password, role, rememberMe } = req.body ?? {};
+    const { username, password, role, remember, rememberMe } = req.body ?? {};
     if (typeof username !== "string" || typeof password !== "string" || !username || !password || username.length > 128 || password.length > 256) {
       return res.status(400).json(makeErrorPayload("INVALID_REQUEST", "Username and password are required"));
     }
@@ -2752,12 +2870,24 @@ function createApp() {
       const token = crypto.randomBytes(32).toString("base64url");
       sessions.set(token, session);
 
-      if (rememberMe && process.env.SIME_REMEMBER_SECRET) {
-        const encrypted = encryptRememberToken({ username, password, role: normalizedRole }, process.env.SIME_REMEMBER_SECRET);
+      const shouldRemember = Boolean(remember || rememberMe);
+      if (shouldRemember) {
+        const secretKey = getRememberSecretKey();
+        const encrypted = encryptRememberToken({ username, password, role: normalizedRole }, secretKey);
         if (encrypted) {
-          const isSecure = req.secure || req.get("x-forwarded-proto") === "https";
-          const secureFlag = isSecure ? "; Secure" : "";
-          res.setHeader("Set-Cookie", `sime_remember=${encodeURIComponent(encrypted)}; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=${30 * 24 * 3600}${secureFlag}`);
+          const rawToken = crypto.randomBytes(32).toString("base64url");
+          const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+          const tokens = loadRememberTokens();
+          tokens[tokenHash] = {
+            tokenHash,
+            encrypted,
+            role: normalizedRole,
+            createdAt: now,
+            lastUsedAt: now,
+            userAgent: req.get("user-agent") || "",
+          };
+          saveRememberTokens(tokens);
+          res.setHeader("Set-Cookie", makeRememberCookie(rawToken, req, 30 * 24 * 3600));
         }
       }
 
@@ -2768,37 +2898,73 @@ function createApp() {
   });
 
   app.post("/api/auth/resume", async (req, res) => {
-    const secret = process.env.SIME_REMEMBER_SECRET;
-    if (!secret) {
-      return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Remember-me is not configured"));
+    if (isCrossOrigin(req)) {
+      return res.status(403).json(makeErrorPayload("FORBIDDEN", "Cross-origin request blocked"));
     }
-    const cookieHeader = req.headers.cookie;
-    let rememberToken = null;
-    if (cookieHeader) {
-      for (const part of cookieHeader.split(";")) {
-        const [k, ...v] = part.trim().split("=");
-        if (k === "sime_remember") {
-          rememberToken = decodeURIComponent(v.join("="));
-          break;
-        }
-      }
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    const rate = checkResumeRate(ip);
+    if (!rate.allowed) {
+      res.set("Retry-After", String(rate.retryAfter));
+      return res.status(429).json(makeErrorPayload("PORTAL_THROTTLED", "Too many resume attempts", rate.retryAfter));
     }
-    if (!rememberToken) {
+
+    const rawToken = parseCookie(req.headers.cookie, "sime_remember");
+    if (!rawToken) {
       return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "No remember token"));
     }
-    const creds = decryptRememberToken(rememberToken, secret);
-    if (!creds || !creds.username || !creds.password) {
+
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const tokens = loadRememberTokens();
+    const stored = tokens[tokenHash];
+    if (!stored) {
+      res.setHeader("Set-Cookie", makeClearCookie(req));
       return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Invalid remember token"));
     }
+
+    const now = Date.now();
+    const INACTIVITY_MS = 30 * 24 * 3600 * 1000;
+    if (now - (stored.lastUsedAt || 0) > INACTIVITY_MS) {
+      delete tokens[tokenHash];
+      saveRememberTokens(tokens);
+      res.setHeader("Set-Cookie", makeClearCookie(req));
+      return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Remember token expired"));
+    }
+
+    const secretKey = getRememberSecretKey();
+    const creds = decryptRememberToken(stored.encrypted, secretKey);
+    if (!creds || !creds.username || !creds.password) {
+      delete tokens[tokenHash];
+      saveRememberTokens(tokens);
+      res.setHeader("Set-Cookie", makeClearCookie(req));
+      return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Invalid remember token payload"));
+    }
+
     const normalizedRole = creds.role === "student" ? "student" : "parent";
     const client = new SimeClient(creds.username, creds.password, normalizedRole);
     try {
       const loginResult = await client.loginAndParsePortal();
       if (!loginResult) {
+        delete tokens[tokenHash];
+        saveRememberTokens(tokens);
+        res.setHeader("Set-Cookie", makeClearCookie(req));
         return res.status(401).json(makeErrorPayload("PORTAL_LOGIN_REJECTED", "Remembered credentials were rejected"));
       }
+
+      delete tokens[tokenHash];
+      const newRawToken = crypto.randomBytes(32).toString("base64url");
+      const newTokenHash = crypto.createHash("sha256").update(newRawToken).digest("hex");
+      tokens[newTokenHash] = {
+        tokenHash: newTokenHash,
+        encrypted: stored.encrypted,
+        role: normalizedRole,
+        createdAt: stored.createdAt || now,
+        lastUsedAt: now,
+        userAgent: req.get("user-agent") || "",
+      };
+      saveRememberTokens(tokens);
+      res.setHeader("Set-Cookie", makeRememberCookie(newRawToken, req, 30 * 24 * 3600));
+
       const { data } = loginResult;
-      const now = Date.now();
       const studentId = data.student?.id || "";
       const session = {
         client,
@@ -2816,8 +2982,28 @@ function createApp() {
       sessions.set(token, session);
       return res.json({ token, role: normalizedRole, student: record.data.student, students: record.data.students, data: record.data });
     } catch (err) {
+      delete tokens[tokenHash];
+      saveRememberTokens(tokens);
+      res.setHeader("Set-Cookie", makeClearCookie(req));
       return sendError(res, err, null);
     }
+  });
+
+  app.post("/api/auth/forget-device", (req, res) => {
+    if (isCrossOrigin(req)) {
+      return res.status(403).json(makeErrorPayload("FORBIDDEN", "Cross-origin request blocked"));
+    }
+    const rawToken = parseCookie(req.headers.cookie, "sime_remember");
+    if (rawToken) {
+      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const tokens = loadRememberTokens();
+      if (tokens[tokenHash]) {
+        delete tokens[tokenHash];
+        saveRememberTokens(tokens);
+      }
+    }
+    res.setHeader("Set-Cookie", makeClearCookie(req));
+    return res.json({ ok: true });
   });
 
   app.post("/api/auth/logout", requireSession, (req, res) => {
@@ -2831,7 +3017,16 @@ function createApp() {
       }
     }
     sessions.delete(req.token);
-    res.setHeader("Set-Cookie", "sime_remember=; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=0");
+    const rawToken = parseCookie(req.headers.cookie, "sime_remember");
+    if (rawToken) {
+      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const tokens = loadRememberTokens();
+      if (tokens[tokenHash]) {
+        delete tokens[tokenHash];
+        saveRememberTokens(tokens);
+      }
+    }
+    res.setHeader("Set-Cookie", makeClearCookie(req));
     res.status(204).end();
   });
 
@@ -3112,6 +3307,12 @@ export {
   scrubLog,
   encryptRememberToken,
   decryptRememberToken,
+  loadRememberTokens,
+  saveRememberTokens,
+  makeRememberCookie,
+  makeClearCookie,
+  parseCookie,
+  getRememberSecretKey,
   RateGate,
   requireSimeUrl,
   resolveSimeUrl,

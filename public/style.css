@@ -2681,7 +2681,54 @@ ul, ol {
   gap: 6px;
 }
 
-.remember-row { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); font-size: .875rem; }
+.remember-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 10px;
+}
+
+.remember-row .check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--on-surface);
+}
+
+.remember-row .check-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.remember-row .field-hint {
+  margin: 0 0 0 26px;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--on-surface-variant);
+}
+
+.setting-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.setting-action-row strong {
+  display: block;
+  font-size: 0.9375rem;
+  color: var(--on-surface);
+}
+
+.setting-action-row p {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  color: var(--on-surface-variant);
+}
 
 /* W13: Text scaling */
 html[data-text-size="S"] {

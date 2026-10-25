@@ -2096,6 +2096,21 @@ function initSettings() {
     });
   }
 
+  const forgetBtn = $("forget-device-btn");
+  if (forgetBtn) {
+    forgetBtn.addEventListener("click", async () => {
+      forgetBtn.disabled = true;
+      try {
+        await api("/api/auth/forget-device", { method: "POST", auth: false, retry: false });
+        toast(getString("device_forgotten"));
+      } catch {
+        toast(getString("device_forgotten"));
+      } finally {
+        forgetBtn.disabled = false;
+      }
+    });
+  }
+
   applySettings();
 }
 
@@ -2156,8 +2171,8 @@ async function onLogin(event) {
   }
   setAuthBusy(true);
   try {
-    const rememberMe = Boolean($("remember-me")?.checked);
-    const res = await api("/api/auth/login", { method: "POST", body: { username, password, role, rememberMe }, auth: false });
+    const remember = Boolean($("auth-remember")?.checked || $("remember-me")?.checked);
+    const res = await api("/api/auth/login", { method: "POST", body: { username, password, role, remember, rememberMe: remember }, auth: false });
     if (!res || !res.token || !res.data) throw new ApiError("bad response", 502, 0);
     state.seq += 1;
     state.token = res.token;

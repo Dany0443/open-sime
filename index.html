@@ -45,7 +45,13 @@
           <label class="field-label" for="password">Parolă</label>
           <button id="toggle-password" class="icon-btn field-action" type="button" aria-label="Arată parola" aria-pressed="false" data-icon="visibility"></button>
         </div>
-        <label class="remember-row" hidden><input id="remember-me" type="checkbox"> <span>Ține-mă minte</span></label>
+        <div class="field-check remember-row">
+          <label class="check-label" for="auth-remember">
+            <input type="checkbox" id="auth-remember" name="remember">
+            <span class="check-text" data-string="remember_me">Ține-mă minte pe acest dispozitiv</span>
+          </label>
+          <p class="field-hint" data-string="remember_me_hint">Datele de conectare sunt stocate criptat pe server și folosite doar pentru reconectare.</p>
+        </div>
         <div id="auth-message" class="banner" role="alert" hidden>
           <span id="auth-message-icon" class="banner-icon"></span>
           <p id="auth-message-text"></p>
@@ -216,6 +222,17 @@
             <p>Dezactivează animațiile și efectele de tranziție</p>
           </div>
         </label>
+      </section>
+
+      <section class="settings-section">
+        <h3 class="settings-section-title">Dispozitiv</h3>
+        <div class="setting-action-row">
+          <div>
+            <strong data-string="forget_device">Uită acest dispozitiv</strong>
+            <p data-string="forget_device_desc">Șterge sesiunea salvată pe acest dispozitiv.</p>
+          </div>
+          <button type="button" class="btn tonal" id="forget-device-btn" data-string="forget_device">Uită dispozitivul</button>
+        </div>
       </section>
       <div class="settings-sync-line">
         <span id="settings-sync-time" class="settings-sync-time"></span>
