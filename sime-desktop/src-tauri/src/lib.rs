@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::sync::Mutex;
 #[allow(unused_imports)]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[allow(unused_imports)]
 use tauri::{AppHandle, Manager, RunEvent, Url, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 #[allow(unused_imports)]
@@ -128,8 +129,7 @@ fn spawn_production_sidecar(app: &AppHandle) {
         .env("SIME_WEB_HOST", PRODUCTION_HOST)
         .env("SIME_WEB_PORT", &port_str)
         .env("SIME_DATA_DIR", app_data_dir.to_string_lossy().as_ref())
-        .env("SIME_INSTANCE_ID", &instance_id)
-    }
+        .env("SIME_INSTANCE_ID", &instance_id),
     Err(err) => {
       show_startup_error(
         app,
