@@ -13,7 +13,7 @@
   <script src="/public/app.js" defer></script>
 </head>
 <body>
-  <div id="splash" class="splash" role="status" aria-label="Se încarcă">
+  <div id="splash" class="splash" role="status" aria-label="Se încarcă" data-aria-label="loading_aria">
     <span class="spinner spinner-lg" aria-hidden="true"></span>
   </div>
 
@@ -24,25 +24,26 @@
       <div class="auth-brand">
         <span class="brand-mark" data-cookie aria-hidden="true"></span>
         <span>Open SIME</span>
+        <button id="auth-settings-btn" class="icon-btn auth-settings-btn" type="button" aria-label="Setări" title="Setări" data-aria-label="settings_title" data-title="settings_title" data-icon="settings"></button>
       </div>
       <div>
-        <h1 id="auth-title" class="auth-title">Autentificare</h1>
-        <p class="auth-lead">Folosește contul tău de pe agenda.sime.md.</p>
+        <h1 id="auth-title" class="auth-title" data-string="auth_title">Autentificare</h1>
+        <p class="auth-lead" data-string="auth_lead">Folosește contul tău de pe agenda.sime.md.</p>
       </div>
       <form id="login-form" class="auth-form" novalidate>
-        <div class="seg" role="radiogroup" aria-label="Tip de cont">
+        <div class="seg" role="radiogroup" aria-label="Tip de cont" data-aria-label="account_type_aria">
           <input type="radio" id="role-student" name="role" value="student" checked>
-          <label class="seg-btn" for="role-student">Elev</label>
+          <label class="seg-btn" for="role-student" data-string="role_student">Elev</label>
           <input type="radio" id="role-parent" name="role" value="parent">
-          <label class="seg-btn" for="role-parent">Părinte</label>
+          <label class="seg-btn" for="role-parent" data-string="role_parent">Părinte</label>
         </div>
         <div class="field">
           <input class="field-input" id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder=" " maxlength="128" required>
-          <label class="field-label" for="username">Nume de utilizator</label>
+          <label class="field-label" for="username" data-string="username">Nume de utilizator</label>
         </div>
         <div class="field">
           <input class="field-input" id="password" name="password" type="password" autocomplete="current-password" placeholder=" " maxlength="256" required>
-          <label class="field-label" for="password">Parolă</label>
+          <label class="field-label" for="password" data-string="password">Parolă</label>
           <button id="toggle-password" class="icon-btn field-action" type="button" aria-label="Arată parola" aria-pressed="false" data-icon="visibility"></button>
         </div>
         <div class="field-check remember-row">
@@ -58,27 +59,27 @@
         </div>
         <button id="login-submit" class="btn btn-filled" type="submit">
           <span class="spinner" aria-hidden="true"></span>
-          <span id="login-label">Intră în cont</span>
+          <span id="login-label" data-string="login_submit">Intră în cont</span>
         </button>
       </form>
     </section>
   </main>
 
   <div id="shell" class="shell" hidden>
-    <aside class="rail drawer" aria-label="Navigare principală">
+    <aside class="rail drawer" aria-label="Navigare principală" data-aria-label="nav_main_aria">
       <div class="rail-brand drawer-brand">
         <img class="brand-icon" src="/public/assets/favicon.svg" width="40" height="40" alt="" aria-hidden="true">
         <span class="brand-name">Open SIME</span>
       </div>
-      <nav id="rail-nav" class="rail-nav drawer-nav" aria-label="Secțiuni"></nav>
+      <nav id="rail-nav" class="rail-nav drawer-nav" aria-label="Secțiuni" data-aria-label="nav_sections_aria"></nav>
       <div class="drawer-pinned-bottom">
-        <button id="drawer-profile-btn" class="nav-item drawer-item" type="button" data-tab="profile" aria-label="Profil și profesori">
+        <button id="drawer-profile-btn" class="nav-item drawer-item" type="button" data-tab="profile" aria-label="Profil și profesori" data-aria-label="tab_profile">
           <span class="nav-pill" aria-hidden="true"></span>
-          <span class="nav-label">Profil</span>
+          <span class="nav-label" data-string="tab_profile_short">Profil</span>
         </button>
-        <button id="drawer-settings-btn" class="nav-item drawer-item" type="button" aria-label="Setări">
+        <button id="drawer-settings-btn" class="nav-item drawer-item" type="button" aria-label="Setări" data-aria-label="settings_title">
           <span class="nav-pill" aria-hidden="true"></span>
-          <span class="nav-label">Setări</span>
+          <span class="nav-label" data-string="settings_title">Setări</span>
         </button>
       </div>
     </aside>
@@ -92,27 +93,27 @@
           <div class="topbar-title-group">
             <div class="title-row">
               <h1 id="page-title" class="page-title">Acasă</h1>
-              <span id="offline-chip" class="offline-chip" role="status" hidden>Offline</span>
+              <span id="offline-chip" class="offline-chip" role="status" data-string="offline_badge" hidden>Offline</span>
             </div>
             <p id="header-student-subtitle" class="header-subtitle" hidden></p>
           </div>
           <div class="topbar-actions">
             <button id="theme-btn" class="icon-btn" type="button" aria-label="Schimbă tema" title="Schimbă tema"></button>
-            <button id="settings-btn" class="icon-btn" type="button" aria-label="Setări" title="Setări" data-icon="settings"></button>
+            <button id="settings-btn" class="icon-btn" type="button" aria-label="Setări" title="Setări" data-aria-label="settings_title" data-title="settings_title" data-icon="settings"></button>
             <div class="account-menu-anchor">
-              <button id="account-btn" class="icon-btn account-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Cont utilizator" title="Cont utilizator">
+              <button id="account-btn" class="icon-btn account-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Cont utilizator" title="Cont utilizator" data-aria-label="account_menu_aria" data-title="account_menu_aria">
                 <span id="account-avatar" class="account-avatar" aria-hidden="true"></span>
               </button>
               <ul id="account-menu" class="account-menu" role="menu" hidden>
                 <li role="none">
                   <button id="profile-btn" class="account-menu-item" type="button" role="menuitem" data-icon="person">
-                    <span class="account-menu-label">Profil și profesori</span>
+                    <span class="account-menu-label" data-string="tab_profile">Profil și profesori</span>
                   </button>
                 </li>
                 <li role="separator" class="account-menu-divider"></li>
                 <li role="none">
                   <button id="logout-btn" class="account-menu-item" type="button" role="menuitem" data-icon="logout">
-                    <span class="account-menu-label">Deconectare</span>
+                    <span class="account-menu-label" data-string="logout">Deconectare</span>
                   </button>
                 </li>
               </ul>
@@ -120,60 +121,60 @@
           </div>
         </div>
         <div class="student-strip">
-          <div id="student-list" class="student-list" role="group" aria-label="Elev"></div>
+          <div id="student-list" class="student-list" role="group" aria-label="Elev" data-aria-label="student_label"></div>
         </div>
       </header>
 
       <main id="content" class="content" tabindex="-1">
-        <section class="view" id="view-home" data-view="home" aria-label="Acasă" hidden>
+        <section class="view" id="view-home" data-view="home" aria-label="Acasă" data-aria-label="tab_home" hidden>
           <div class="home-grid">
-            <section id="home-live" class="card live-card" aria-label="Orele de azi"></section>
+            <section id="home-live" class="card live-card" aria-label="Orele de azi" data-aria-label="todays_lessons"></section>
             <div id="home-metrics" class="metrics"></div>
-            <section id="home-marks" class="card marks-card" aria-label="Note recente"></section>
-            <section id="home-homework" class="card homework-card" aria-label="Teme și termene"></section>
+            <section id="home-marks" class="card marks-card" aria-label="Note recente" data-aria-label="recent_grades"></section>
+            <section id="home-homework" class="card homework-card" aria-label="Teme și termene" data-aria-label="homework_preview"></section>
           </div>
         </section>
 
-        <section class="view" id="view-marks" data-view="marks" aria-label="Reușita" hidden>
+        <section class="view" id="view-marks" data-view="marks" aria-label="Reușita" data-aria-label="tab_marks" hidden>
           <div id="marks-summary" class="stat-row"></div>
           <div id="marks-list" class="marks-table-wrap"></div>
         </section>
 
-        <section class="view" id="view-timetable" data-view="timetable" aria-label="Orar" hidden>
+        <section class="view" id="view-timetable" data-view="timetable" aria-label="Orar" data-aria-label="tab_timetable" hidden>
           <div id="day-switch" class="day-switch"></div>
           <div id="day-heading" class="day-heading"></div>
           <div id="lesson-list"></div>
         </section>
 
-        <section class="view" id="view-absences" data-view="absences" aria-label="Absențe" hidden>
-          <div id="abs-toggle" class="seg abs-toggle" role="group" aria-label="Semestru"></div>
+        <section class="view" id="view-absences" data-view="absences" aria-label="Absențe" data-aria-label="tab_absences" hidden>
+          <div id="abs-toggle" class="seg abs-toggle" role="group" aria-label="Semestru" data-aria-label="semester_aria"></div>
           <div id="abs-stats" class="stat-row"></div>
           <div id="abs-list"></div>
         </section>
 
-        <section class="view" id="view-homework" data-view="homework" aria-label="Teme" hidden>
+        <section class="view" id="view-homework" data-view="homework" aria-label="Teme" data-aria-label="tab_homework" hidden>
           <div id="homework-list"></div>
         </section>
 
-        <section class="view" id="view-profile" data-view="profile" aria-label="Profil și profesori" hidden>
+        <section class="view" id="view-profile" data-view="profile" aria-label="Profil și profesori" data-aria-label="tab_profile" hidden>
           <div id="profile-card"></div>
           <div id="teacher-grid"></div>
         </section>
       </main>
     </div>
 
-    <nav id="bottom-nav" class="bottom-nav" aria-label="Navigare"></nav>
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Navigare" data-aria-label="nav_bottom_aria"></nav>
   </div>
 
   <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-dialog-title">
     <div class="settings-dialog-header">
-      <h2 id="settings-dialog-title" class="settings-dialog-title">Setări</h2>
-      <button id="settings-close-btn" class="icon-btn" type="button" aria-label="Închide" data-icon="close"></button>
+      <h2 id="settings-dialog-title" class="settings-dialog-title" data-string="settings_title">Setări</h2>
+      <button id="settings-close-btn" class="icon-btn" type="button" aria-label="Închide" title="Închide" data-aria-label="close_btn" data-title="close_btn" data-icon="close"></button>
     </div>
     <div class="settings-dialog-body">
       <section class="settings-section">
-        <h3 class="settings-section-title">Limbă</h3>
-        <div class="seg" role="radiogroup" aria-label="Limbă">
+        <h3 class="settings-section-title" data-string="settings_lang_title">Limbă</h3>
+        <div class="seg" role="radiogroup" aria-label="Limbă" data-aria-label="settings_lang_title">
           <label><input type="radio" name="setting-lang" value="ro" checked><span class="seg-btn">Română</span></label>
           <label><input type="radio" name="setting-lang" value="ru"><span class="seg-btn">Русский</span></label>
           <label><input type="radio" name="setting-lang" value="en"><span class="seg-btn">English</span></label>
@@ -181,56 +182,56 @@
       </section>
 
       <section class="settings-section">
-        <h3 class="settings-section-title">Mărime text</h3>
-        <div class="seg" role="radiogroup" aria-label="Mărime text">
-          <label><input type="radio" name="setting-text-size" value="S"><span class="seg-btn">Mică (S)</span></label>
-          <label><input type="radio" name="setting-text-size" value="M" checked><span class="seg-btn">Normală (M)</span></label>
-          <label><input type="radio" name="setting-text-size" value="L"><span class="seg-btn">Mare (L)</span></label>
-          <label><input type="radio" name="setting-text-size" value="XL"><span class="seg-btn">Foarte mare (XL)</span></label>
+        <h3 class="settings-section-title" data-string="settings_text_size_title">Mărime text</h3>
+        <div class="seg" role="radiogroup" aria-label="Mărime text" data-aria-label="settings_text_size_title">
+          <label><input type="radio" name="setting-text-size" value="S"><span class="seg-btn" data-string="text_size_s">Mică (S)</span></label>
+          <label><input type="radio" name="setting-text-size" value="M" checked><span class="seg-btn" data-string="text_size_m">Normală (M)</span></label>
+          <label><input type="radio" name="setting-text-size" value="L"><span class="seg-btn" data-string="text_size_l">Mare (L)</span></label>
+          <label><input type="radio" name="setting-text-size" value="XL"><span class="seg-btn" data-string="text_size_xl">Foarte mare (XL)</span></label>
         </div>
       </section>
 
       <section class="settings-section">
-        <h3 class="settings-section-title">Temă</h3>
-        <div class="seg" role="radiogroup" aria-label="Temă">
-          <label><input type="radio" name="setting-theme" value="light"><span class="seg-btn">Luminoasă</span></label>
-          <label><input type="radio" name="setting-theme" value="dark"><span class="seg-btn">Întunecată</span></label>
+        <h3 class="settings-section-title" data-string="settings_theme_title">Temă</h3>
+        <div class="seg" role="radiogroup" aria-label="Temă" data-aria-label="settings_theme_title">
+          <label><input type="radio" name="setting-theme" value="light"><span class="seg-btn" data-string="theme_option_light">Luminoasă</span></label>
+          <label><input type="radio" name="setting-theme" value="dark"><span class="seg-btn" data-string="theme_option_dark">Întunecată</span></label>
         </div>
       </section>
 
       <section class="settings-section">
-        <h3 class="settings-section-title">Opțiuni accesibilitate</h3>
+        <h3 class="settings-section-title" data-string="settings_a11y_title">Opțiuni accesibilitate</h3>
         <label class="setting-toggle-row">
           <input id="setting-simple-mode" type="checkbox">
           <div>
-            <strong>Mod simplificat</strong>
-            <p>Limbaj simplu și butoane mari pentru cei mici</p>
+            <strong data-string="simple_mode_title">Mod simplificat</strong>
+            <p data-string="simple_mode_desc">Limbaj simplu și butoane mari pentru cei mici</p>
           </div>
         </label>
         <label class="setting-toggle-row">
           <input id="setting-contrast" type="checkbox">
           <div>
-            <strong>Contrast sporit</strong>
-            <p>Borduri accentuate și contrast ridicat</p>
+            <strong data-string="contrast_title">Contrast sporit</strong>
+            <p data-string="contrast_desc">Borduri accentuate și contrast ridicat</p>
           </div>
         </label>
         <label class="setting-toggle-row">
           <input id="setting-reduce-motion" type="checkbox">
           <div>
-            <strong>Reducere animații</strong>
-            <p>Dezactivează animațiile și efectele de tranziție</p>
+            <strong data-string="reduce_motion_title">Reducere animații</strong>
+            <p data-string="reduce_motion_desc">Dezactivează animațiile și efectele de tranziție</p>
           </div>
         </label>
       </section>
 
       <section class="settings-section">
-        <h3 class="settings-section-title">Dispozitiv</h3>
+        <h3 class="settings-section-title" data-string="settings_device_title">Dispozitiv</h3>
         <div class="setting-action-row">
           <div>
             <strong data-string="forget_device">Uită acest dispozitiv</strong>
             <p data-string="forget_device_desc">Șterge sesiunea salvată pe acest dispozitiv.</p>
           </div>
-          <button type="button" class="btn tonal" id="forget-device-btn" data-string="forget_device">Uită dispozitivul</button>
+          <button type="button" class="btn btn-tonal tonal" id="forget-device-btn" data-string="forget_device_btn">Uită dispozitivul</button>
         </div>
       </section>
       <div class="settings-sync-line">

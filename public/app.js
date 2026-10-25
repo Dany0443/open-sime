@@ -24,12 +24,12 @@ const THEME_LABELS = { light: "luminoasă", dark: "întunecată" };
 const THEME_ICONS = { light: "dark_mode", dark: "light_mode" };
 
 const TABS = [
-  { id: "home", label: "Acasă", title: "Acasă", icon: "home" },
-  { id: "marks", label: "Reușita", title: "Reușita", icon: "grade" },
-  { id: "timetable", label: "Orar", title: "Orar", icon: "schedule" },
-  { id: "absences", label: "Absențe", title: "Absențe", icon: "event_busy" },
-  { id: "homework", label: "Teme", title: "Teme", icon: "assignment" },
-  { id: "profile", label: "Profil", title: "Profil și profesori", icon: "person", railOnly: true },
+  { id: "home", label: "Acasă", title: "Acasă", key: "tab_home", simpleKey: "simple_tab_home", icon: "home" },
+  { id: "marks", label: "Reușita", title: "Reușita", key: "tab_marks", simpleKey: "simple_tab_marks", icon: "grade" },
+  { id: "timetable", label: "Orar", title: "Orar", key: "tab_timetable", simpleKey: "simple_tab_timetable", icon: "schedule" },
+  { id: "absences", label: "Absențe", title: "Absențe", key: "tab_absences", simpleKey: "simple_tab_absences", icon: "event_busy" },
+  { id: "homework", label: "Teme", title: "Teme", key: "tab_homework", simpleKey: "simple_tab_homework", icon: "assignment" },
+  { id: "profile", label: "Profil", title: "Profil și profesori", key: "tab_profile", shortKey: "tab_profile_short", simpleKey: "simple_tab_profile", icon: "person", railOnly: true },
 ];
 
 const ICONS = {
@@ -61,7 +61,33 @@ const MONTHS = ["ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", "i
 const MONTHS_SHORT = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
 const WEEKDAYS = ["Luni", "Marți", "Miercuri", "Joi", "Vineri", "Sâmbătă", "Duminică"];
 const WEEKDAYS_SHORT = ["Lu", "Ma", "Mi", "Jo", "Vi"];
+
+const MONTHS_BY_LANG = {
+  ro: MONTHS,
+  ru: ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+  en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+};
+
+const MONTHS_SHORT_BY_LANG = {
+  ro: MONTHS_SHORT,
+  ru: ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"],
+  en: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+};
+
+const WEEKDAYS_BY_LANG = {
+  ro: WEEKDAYS,
+  ru: ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"],
+  en: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+};
+
+const WEEKDAYS_SHORT_BY_LANG = {
+  ro: WEEKDAYS_SHORT,
+  ru: ["Пн", "Вт", "Ср", "Чт", "Пт"],
+  en: ["Mon", "Tue", "Wed", "Thu", "Fri"],
+};
+
 const BAND_LABELS = { "band-top": "Excelent", "band-good": "Bine", "band-ok": "Suficient", "band-low": "Insuficient", "band-none": "Fără medie" };
+const BAND_KEYS = { "band-top": "band_top", "band-good": "band_good", "band-ok": "band_ok", "band-low": "band_low", "band-none": "band_none" };
 
 const SIMPLE_TAB_TITLES = {
   home: "Acasă",
@@ -104,6 +130,35 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+function currentLang() {
+  return (state && state.lang) || "ro";
+}
+
+function t(key, params = {}) {
+  const lang = currentLang();
+  if (typeof getString === "function") {
+    return getString(key, params, lang);
+  }
+  return key;
+}
+
+function pluralForm(count, lang = currentLang()) {
+  const n = Math.abs(Number(count)) || 0;
+  if (lang === "ru") {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return "one";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "few";
+    return "many";
+  }
+  return n === 1 ? "one" : "many";
+}
+
+function tp(count, baseKey, extraParams = {}) {
+  const form = pluralForm(count);
+  return t(`${baseKey}_${form}`, { count, ...extraParams });
+}
+
 const store = {
   get(key) {
     try {
@@ -142,10 +197,28 @@ class ApiError extends Error {
 const num = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const pad2 = (n) => String(n).padStart(2, "0");
 const canonKey = (id) => (typeof id === "string" || typeof id === "number" ? String(id).trim().toLowerCase() : "");
-const markFmt = new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 });
-const avgFmt = new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtMark = (value) => (value == null || Number.isNaN(Number(value)) ? "" : markFmt.format(value));
-const fmtAvg = (value) => (value == null || Number.isNaN(Number(value)) ? "-" : avgFmt.format(value));
+
+const markFormatters = {
+  ro: new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 }),
+  ru: new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }),
+  en: new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }),
+};
+const avgFormatters = {
+  ro: new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  ru: new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  en: new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+};
+
+const fmtMark = (value) => {
+  if (value == null || Number.isNaN(Number(value))) return "";
+  const fmt = markFormatters[currentLang()] || markFormatters.ro;
+  return fmt.format(value);
+};
+const fmtAvg = (value) => {
+  if (value == null || Number.isNaN(Number(value))) return "-";
+  const fmt = avgFormatters[currentLang()] || avgFormatters.ro;
+  return fmt.format(value);
+};
 const tzFmt = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 
 function todayIso(now = Date.now()) {
@@ -162,39 +235,51 @@ const mondayOf = (iso) => addDays(iso, -weekdayIndex(iso));
 const dayDiff = (from, to) => Math.round((isoMs(to) - isoMs(from)) / DAY_MS);
 const dayNum = (iso) => Number(iso.slice(8, 10));
 const monthIdx = (iso) => Number(iso.slice(5, 7)) - 1;
-const shortDate = (iso) => (validIso(iso) ? dayNum(iso) + " " + (MONTHS_SHORT[monthIdx(iso)] || "") : "");
-const longDate = (iso) => (validIso(iso) ? (WEEKDAYS[weekdayIndex(iso)] || "") + ", " + dayNum(iso) + " " + (MONTHS[monthIdx(iso)] || "") : "");
+
+function shortDate(iso) {
+  if (!validIso(iso)) return "";
+  const months = MONTHS_SHORT_BY_LANG[currentLang()] || MONTHS_SHORT;
+  return dayNum(iso) + " " + (months[monthIdx(iso)] || "");
+}
+
+function longDate(iso) {
+  if (!validIso(iso)) return "";
+  const lang = currentLang();
+  const weekdays = WEEKDAYS_BY_LANG[lang] || WEEKDAYS;
+  const months = MONTHS_BY_LANG[lang] || MONTHS;
+  return (weekdays[weekdayIndex(iso)] || "") + ", " + dayNum(iso) + " " + (months[monthIdx(iso)] || "");
+}
 
 function relativeDay(iso, today) {
   const diff = dayDiff(today, iso);
-  if (diff === 0) return "Astăzi";
-  if (diff === 1) return "Mâine";
-  if (diff === -1) return "Ieri";
-  if (diff > 1) return "Peste " + diff + " zile";
-  return "Acum " + Math.abs(diff) + " zile";
+  if (diff === 0) return t("today");
+  if (diff === 1) return t("tomorrow");
+  if (diff === -1) return t("yesterday");
+  if (diff > 1) return tp(diff, "in_days");
+  return tp(Math.abs(diff), "days_ago");
 }
 
 function minutesText(mins) {
-  if (mins < 60) return mins + " min";
+  if (mins < 60) return t("unit_min", { mins });
   const hours = Math.floor(mins / 60);
   const rest = mins % 60;
-  return rest ? hours + " h " + rest + " min" : hours + " h";
+  return rest ? t("unit_h_min", { hours, rest }) : t("unit_h", { hours });
 }
 
 function agoText(ms) {
   const secs = Math.max(0, Math.floor(ms / 1000));
-  if (secs < 45) return "chiar acum";
+  if (secs < 45) return t("just_now");
   const mins = Math.round(secs / 60);
-  if (mins < 60) return "acum " + Math.max(1, mins) + " min";
+  if (mins < 60) return t("ago_mins", { count: Math.max(1, mins) });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return "acum " + hours + " h";
+  if (hours < 24) return t("ago_hours", { count: hours });
   const days = Math.floor(hours / 24);
-  return "acum " + days + (days === 1 ? " zi" : " zile");
+  return tp(days, "ago_days");
 }
 
 function waitText(secs) {
-  if (secs < 90) return secs + " secunde";
-  return Math.ceil(secs / 60) + " minute";
+  if (secs < 90) return t("wait_seconds", { count: secs });
+  return t("wait_minutes", { count: Math.ceil(secs / 60) });
 }
 
 function initials(name) {
@@ -320,9 +405,9 @@ function errorPanel() {
     "div",
     { class: "empty empty-error", role: "alert" },
     icon("error"),
-    h("p", { class: "empty-title", text: "Datele nu au putut fi încărcate" }),
+    h("p", { class: "empty-title", text: t("data_load_error_title") }),
     h("p", { class: "empty-text", text: state.error }),
-    h("button", { type: "button", class: "btn btn-tonal", on: { click: () => refresh({ force: false }) } }, "Încearcă din nou")
+    h("button", { type: "button", class: "btn btn-tonal", on: { click: () => refresh({ force: false }) } }, t("retry_btn"))
   );
 }
 
@@ -338,7 +423,8 @@ function chip(text, tone, iconName) {
 function bandChip(value) {
   if (value == null || Number.isNaN(Number(value))) return null;
   const band = bandOf(value);
-  return h("span", { class: "chip chip-band " + band, text: BAND_LABELS[band] });
+  const label = BAND_KEYS[band] ? t(BAND_KEYS[band]) : BAND_LABELS[band];
+  return h("span", { class: "chip chip-band " + band, text: label });
 }
 
 function textButton(label, onClick) {
@@ -384,7 +470,7 @@ function isQualifierToken(str) {
 function qualifierFullText(labelOrKey) {
   const k = String(labelOrKey || "").trim().toUpperCase();
   const canon = QUALIFIER_CANONICAL[k];
-  const lang = (typeof state !== "undefined" && state.lang) || "ro";
+  const lang = currentLang();
   if (canon === "FB" || k === "FOARTE BINE") return (typeof getString !== "undefined" ? getString("qual_fb", {}, lang) : null) || "Foarte bine";
   if (canon === "B" || k === "BINE") return (typeof getString !== "undefined" ? getString("qual_b", {}, lang) : null) || "Bine";
   if (canon === "S" || k === "SUFICIENT") return (typeof getString !== "undefined" ? getString("qual_s", {}, lang) : null) || "Suficient";
@@ -424,18 +510,18 @@ function getSubjectScale(subjectName) {
 
 function scaleChip(scale) {
   if (scale === "qualifier") {
-    return h("span", { class: "scale-chip scale-chip-qualifier", role: "note", "aria-label": "Sistem de evaluare: Calificative" }, (typeof getString !== "undefined" ? getString("scale_qualifiers") : null) || "Calificative");
+    return h("span", { class: "scale-chip scale-chip-qualifier", role: "note", "aria-label": t("scale_qualifiers_aria") }, t("scale_qualifiers") || "Calificative");
   }
   if (scale === "descriptor") {
-    return h("span", { class: "scale-chip scale-chip-descriptor", role: "note", "aria-label": "Sistem de evaluare: Descriptori" }, (typeof getString !== "undefined" ? getString("scale_descriptors") : null) || "Descriptori");
+    return h("span", { class: "scale-chip scale-chip-descriptor", role: "note", "aria-label": t("scale_descriptors_aria") }, t("scale_descriptors") || "Descriptori");
   }
   return null;
 }
 
 function emptyMarkText(scale) {
-  if (scale === "qualifier") return (typeof getString !== "undefined" ? getString("no_qualifiers_yet") : null) || "Încă nu sunt calificative";
-  if (scale === "descriptor") return (typeof getString !== "undefined" ? getString("no_descriptors_yet") : null) || "Încă nu sunt descriptori";
-  return (typeof getString !== "undefined" ? getString("no_marks_yet") : null) || "Încă nu sunt note";
+  if (scale === "qualifier") return t("no_qualifiers_yet") || "Încă nu sunt calificative";
+  if (scale === "descriptor") return t("no_descriptors_yet") || "Încă nu sunt descriptori";
+  return t("no_marks_yet") || "Încă nu sunt note";
 }
 
 function score(valueOrMark, size, date, isThesis = false) {
@@ -481,10 +567,10 @@ function score(valueOrMark, size, date, isThesis = false) {
   } else if (isOther) {
     accessibleLabel = labelText + (dateStr ? " (" + dateStr + ")" : "");
   } else {
-    accessibleLabel = (markThesis ? "Teză: " : "Nota ") + labelText + (dateStr ? " (" + dateStr + ")" : "");
+    accessibleLabel = (markThesis ? t("thesis_prefix") : t("grade_prefix")) + labelText + (dateStr ? " (" + dateStr + ")" : "");
   }
   if (markIsNew) {
-    accessibleLabel += " (Nou)";
+    accessibleLabel += " (" + t("new_badge") + ")";
   }
 
   const pillText = isQual ? qualWord : labelText;
@@ -497,14 +583,14 @@ function score(valueOrMark, size, date, isThesis = false) {
       "aria-label": accessibleLabel,
       title: accessibleLabel,
     },
-    markThesis ? h("span", { class: "thesis-tag", text: "Teză" }) : null,
-    markIsNew ? h("span", { class: "badge-new", text: "Nou" }) : null,
+    markThesis ? h("span", { class: "thesis-tag", text: t("thesis_badge") }) : null,
+    markIsNew ? h("span", { class: "badge-new", text: t("new_badge") }) : null,
     pillText
   );
 }
 
 function avgBadge(value) {
-  const label = value == null ? "Fără medie" : "Media " + fmtAvg(value);
+  const label = value == null ? t("band_none") : t("average_prefix", { avg: fmtAvg(value) });
   return h("span", { class: "score score-md " + bandOf(value), role: "img", "aria-label": label, title: label }, fmtAvg(value));
 }
 
@@ -554,7 +640,7 @@ async function api(path, options = {}) {
   try {
     res = await apiFetch(path, init);
   } catch {
-    throw new ApiError("Serverul nu răspunde. Verifică conexiunea.", 0, 0);
+    throw new ApiError(t("err_server_unreachable"), 0, 0);
   }
   if (res.status === 204) return null;
   let payload = null;
@@ -566,10 +652,10 @@ async function api(path, options = {}) {
   if (!res.ok) {
     const errObj = payload && typeof payload.error === "object" ? payload.error : null;
     const code = errObj?.code || null;
-    const message = errObj?.message || (typeof payload?.error === "string" ? payload.error : "Cerere eșuată");
+    const message = errObj?.message || (typeof payload?.error === "string" ? payload.error : t("err_request_failed"));
     const wait = Number(errObj?.retryAfter || payload?.waitSeconds) || 0;
     if (code === "APP_SESSION_INVALID" || (res.status === 401 && options.auth !== false && path !== "/api/auth/login")) {
-      endSession("Sesiunea a expirat. Autentifică-te din nou.");
+      endSession(t("err_session_expired"));
     }
     throw new ApiError(message, res.status, wait, code);
   }
@@ -577,44 +663,44 @@ async function api(path, options = {}) {
 }
 
 function describeError(err, context) {
-  if (!(err instanceof ApiError)) return "A apărut o eroare neașteptată.";
+  if (!(err instanceof ApiError)) return t("err_unexpected");
   if (err.code) {
     switch (err.code) {
       case "APP_SESSION_INVALID":
-        return "Sesiunea a expirat. Autentifică-te din nou.";
+        return t("err_session_expired");
       case "PORTAL_LOGIN_REJECTED":
-        return "Numele de utilizator sau parola sunt incorecte.";
+        return t("err_invalid_credentials");
       case "PORTAL_UNEXPECTED_PAGE":
-        return err.message || "Portalul a returnat o pagină neașteptată.";
+        return currentLang() === "ro" && err.message ? err.message : t("err_unexpected_page");
       case "PORTAL_FORBIDDEN":
-        return "Acces interzis de portalul școlii (posibil blocare de securitate).";
+        return t("err_portal_forbidden");
       case "PORTAL_NOT_FOUND":
-        return "Pagina solicitată nu a fost găsită pe portalul școlii.";
+        return t("err_portal_not_found");
       case "PORTAL_THROTTLED":
-        return "Portalul limitează cererile. Reîncearcă peste " + waitText(err.wait || 60) + ".";
+        return t("err_portal_throttled", { wait: waitText(err.wait || 60) });
       case "PORTAL_MAINTENANCE":
-        return "Portalul școlii este în mentenanță sau temporar indisponibil.";
+        return t("err_portal_maintenance");
       case "STUDENT_NOT_FOUND":
-        return "Elevul nu a fost găsit.";
+        return t("err_student_not_found");
       default:
         return err.message;
     }
   }
   switch (err.status) {
     case 0:
-      return "Serverul nu răspunde. Verifică conexiunea și încearcă din nou.";
+      return t("err_server_unreachable_retry");
     case 400:
-      return "Verifică datele introduse și încearcă din nou.";
+      return t("err_bad_request");
     case 401:
-      return context === "login" ? "Numele de utilizator sau parola sunt incorecte." : "Sesiunea a expirat. Autentifică-te din nou.";
+      return context === "login" ? t("err_invalid_credentials") : t("err_session_expired");
     case 404:
-      return "Elevul selectat nu a fost găsit.";
+      return t("err_selected_student_not_found");
     case 429:
-      return "Portalul limitează cererile. Reîncearcă peste " + waitText(err.wait || 60) + ".";
+      return t("err_portal_throttled", { wait: waitText(err.wait || 60) });
     case 502:
-      return "Portalul școlii nu a putut fi contactat. Reîncearcă mai târziu.";
+      return t("err_portal_unreachable");
     default:
-      return err.message || "Eroare de server. Reîncearcă mai târziu.";
+      return (currentLang() === "ro" && err.message) ? err.message : t("err_server_generic");
   }
 }
 
@@ -625,9 +711,9 @@ function markKey(subject, m) {
   const d = String(m?.date || "").trim();
   const v = m?.value ?? "";
   const l = String(m?.label || "").trim();
-  const t = m?.isThesis ? "t" : "";
+  const tFlag = m?.isThesis ? "t" : "";
   const sem = m?.semester || "";
-  return `${s}:${sem}:${d}:${v}:${l}:${t}`;
+  return `${s}:${sem}:${d}:${v}:${l}:${tFlag}`;
 }
 
 function diffNewMarks(currentCatalog, prevCatalog) {
@@ -838,13 +924,13 @@ function recentMarks(m) {
 }
 
 function sortHomework(list, today) {
-  const items = list.map((t, i) => ({
-    subject: String((t && t.subject) || ""),
-    text: String((t && t.taskDescription) || ""),
-    due: t && validIso(t.dueDate) ? t.dueDate : null,
+  const items = list.map((task, i) => ({
+    subject: String((task && task.subject) || ""),
+    text: String((task && task.taskDescription) || ""),
+    due: task && validIso(task.dueDate) ? task.dueDate : null,
     i,
   }));
-  const rank = (t) => (t.due == null ? 2 : t.due >= today ? 0 : 1);
+  const rank = (task) => (task.due == null ? 2 : task.due >= today ? 0 : 1);
   items.sort((a, b) => {
     const ra = rank(a);
     const rb = rank(b);
@@ -978,8 +1064,8 @@ function renderMetrics(m) {
       "div",
       { class: "chip-row" },
       gpa != null ? bandChip(gpa) : null,
-      m.averages.sem1 != null ? chip("Sem. 1: " + fmtAvg(m.averages.sem1), "neutral") : null,
-      m.averages.sem2 != null ? chip("Sem. 2: " + fmtAvg(m.averages.sem2), "neutral") : null
+      m.averages.sem1 != null ? chip(t("sem_1_short", { avg: fmtAvg(m.averages.sem1) }), "neutral") : null,
+      m.averages.sem2 != null ? chip(t("sem_2_short", { avg: fmtAvg(m.averages.sem2) }), "neutral") : null
     )
   );
 
@@ -994,14 +1080,14 @@ function renderMetrics(m) {
     okBar.style.flexGrow = String(excused);
     badBar.style.flexGrow = String(unexcused);
     absBody.push(h("div", { class: "split-bar", "aria-hidden": "true" }, okBar, badBar));
-    absBody.push(h("p", { class: "legend" }, h("span", { text: "Motivate " + excused }), h("span", { class: "legend-bad", text: "Nemotivate " + unexcused })));
+    absBody.push(h("p", { class: "legend" }, h("span", { text: t("abs_excused_count", { count: excused }) }), h("span", { class: "legend-bad", text: t("abs_unexcused_count", { count: unexcused }) })));
   }
   const absCard = h(
     "article",
     { class: "metric metric-abs" },
-    h("span", { class: "metric-label", text: "Absențe" }),
+    h("span", { class: "metric-label", text: t("tab_absences") }),
     h("p", { class: "metric-value", text: String(total) }),
-    h("p", { class: "metric-note", text: total === 0 ? "Nicio absență în acest an" : "în acest an școlar" }),
+    h("p", { class: "metric-note", text: total === 0 ? t("no_absences_this_year") : t("in_this_school_year") }),
     absBody
   );
 
@@ -1009,7 +1095,7 @@ function renderMetrics(m) {
   const lastCard = h(
     "article",
     { class: "metric metric-last" },
-    h("span", { class: "metric-label", text: "Ultima notă" }),
+    h("span", { class: "metric-label", text: t("last_grade") }),
     last
       ? h(
           "div",
@@ -1017,7 +1103,7 @@ function renderMetrics(m) {
           score(last, "lg", last.date, last.isThesis),
           h("div", { class: "last-text" }, h("p", { class: "last-subject", text: last.subject }), last.date ? h("p", { class: "last-date", text: shortDate(last.date) }) : null)
         )
-      : h("p", { class: "metric-note", text: "Încă nu există note." })
+      : h("p", { class: "metric-note", text: t("no_grades_yet_short") })
   );
 
   setChildren(host, gpaCard, absCard, lastCard);
@@ -1059,19 +1145,19 @@ function renderLive() {
     hero = h(
       "div",
       { class: "live-hero is-active" },
-      h("div", { class: "live-row" }, chip("În desfășurare", "live"), h("span", { class: "live-range", text: r.startLocal + " - " + r.endLocal })),
-      h("h3", { class: "live-title", text: r.subject || "Lecție" }),
+      h("div", { class: "live-row" }, chip(t("live_badge"), "live"), h("span", { class: "live-range", text: r.startLocal + " - " + r.endLocal })),
+      h("h3", { class: "live-title", text: r.subject || t("lesson_fallback") }),
       lessonMeta(r),
-      progress(pct, "Mai sunt " + minutesText(left))
+      progress(pct, t("time_left", { time: minutesText(left) }))
     );
     if (next) {
       const until = Math.max(1, Math.ceil((next.start - now) / 60000));
       nextRow = h(
         "div",
         { class: "next-row" },
-        chip("Urmează", "next"),
-        h("span", { class: "next-text", text: next.raw.subject || "Lecție" }),
-        h("span", { class: "next-when", text: next.raw.startLocal + ", în " + minutesText(until) })
+        chip(t("next_badge"), "next"),
+        h("span", { class: "next-text", text: next.raw.subject || t("lesson_fallback") }),
+        h("span", { class: "next-when", text: t("starts_at_in", { start: next.raw.startLocal, time: minutesText(until) }) })
       );
     }
   } else if (next) {
@@ -1079,33 +1165,33 @@ function renderLive() {
     hero = h(
       "div",
       { class: "live-hero is-break" },
-      h("div", { class: "live-row" }, chip(anyPast ? "Pauză" : "Urmează", "next"), h("span", { class: "live-range", text: next.raw.startLocal + " - " + next.raw.endLocal })),
-      h("h3", { class: "live-title", text: next.raw.subject || "Lecție" }),
+      h("div", { class: "live-row" }, chip(anyPast ? t("break_badge") : t("next_badge"), "next"), h("span", { class: "live-range", text: next.raw.startLocal + " - " + next.raw.endLocal })),
+      h("h3", { class: "live-title", text: next.raw.subject || t("lesson_fallback") }),
       lessonMeta(next.raw),
-      h("p", { class: "live-note", text: (anyPast ? "Următoarea oră începe" : "Prima oră începe") + " în " + minutesText(until) })
+      h("p", { class: "live-note", text: t(anyPast ? "next_lesson_starts_in" : "first_lesson_starts_in", { time: minutesText(until) }) })
     );
   } else if (lessons.length) {
     const lastLesson = lessons[lessons.length - 1];
     hero = h(
       "div",
       { class: "live-hero" },
-      h("div", { class: "live-row" }, chip("Încheiat", "neutral")),
-      h("h3", { class: "live-title", text: "Orele de azi s-au terminat" }),
-      h("p", { class: "live-note", text: "Ultima oră: " + (lastLesson.raw.subject || "Lecție") + ", până la " + lastLesson.raw.endLocal })
+      h("div", { class: "live-row" }, chip(t("ended_badge"), "neutral")),
+      h("h3", { class: "live-title", text: t("lessons_finished_today") }),
+      h("p", { class: "live-note", text: t("last_lesson_info", { subject: lastLesson.raw.subject || t("lesson_fallback"), end: lastLesson.raw.endLocal }) })
     );
   } else {
     const weekend = weekdayIndex(today) > 4;
     hero = h(
       "div",
       { class: "live-hero" },
-      h("div", { class: "live-row" }, chip(weekend ? "Weekend" : "Liber", "neutral")),
-      h("h3", { class: "live-title", text: "Nicio oră în orar azi" }),
-      h("p", { class: "live-note", text: weekend ? "Orarul continuă luni." : "Pentru astăzi nu sunt lecții programate." })
+      h("div", { class: "live-row" }, chip(weekend ? t("weekend_badge") : t("free_day_badge"), "neutral")),
+      h("h3", { class: "live-title", text: t("no_lessons_today_title") }),
+      h("p", { class: "live-note", text: weekend ? t("schedule_resumes_monday") : t("no_lessons_today_sub") })
     );
   }
 
   const children = [
-    h("div", { class: "card-head" }, h("h2", { class: "card-title", text: "Orele de azi" }), h("span", { class: "card-sub", text: longDate(today) })),
+    h("div", { class: "card-head" }, h("h2", { class: "card-title", text: t("todays_lessons") }), h("span", { class: "card-sub", text: longDate(today) })),
     hero,
     nextRow,
   ];
@@ -1121,7 +1207,7 @@ function renderLive() {
             "li",
             { class: "mini-item is-" + l.state + (isNext ? " is-next" : "") },
             h("span", { class: "mini-time", text: l.raw.startLocal }),
-            h("span", { text: l.raw.subject || "Lecție" }),
+            h("span", { text: l.raw.subject || t("lesson_fallback") }),
             l.raw.classroom ? h("span", { class: "mini-room", text: l.raw.classroom }) : null
           );
         })
@@ -1140,7 +1226,7 @@ function renderRecent(m) {
   const rows = recentMarks(m).slice(0, 5);
   setChildren(
     host,
-    h("div", { class: "card-head" }, h("h2", { class: "card-title", text: "Note recente" }), textButton("Toate notele", () => goTab("marks"))),
+    h("div", { class: "card-head" }, h("h2", { class: "card-title", text: t("recent_grades") }), textButton(t("all_marks"), () => goTab("marks"))),
     rows.length
       ? h(
           "ul",
@@ -1150,11 +1236,11 @@ function renderRecent(m) {
               "li",
               { class: "recent-item" },
               score(r, "md", r.date),
-              h("div", { class: "recent-text" }, h("p", { class: "recent-subject", text: r.subject || "Disciplină" }), r.date ? h("p", { class: "recent-date", text: longDate(r.date) }) : null)
+              h("div", { class: "recent-text" }, h("p", { class: "recent-subject", text: r.subject || t("discipline") }), r.date ? h("p", { class: "recent-date", text: longDate(r.date) }) : null)
             )
           )
         )
-      : emptyState("Nicio notă încă", "Notele noi apar aici după sincronizare.")
+      : emptyState(t("no_grades_title"), t("no_grades_sub"))
   );
 }
 
@@ -1167,7 +1253,7 @@ function taskRow(task, today, compact) {
   return h(
     "li",
     { class: "task" + (compact ? " task-compact" : "") },
-    h("div", { class: "task-top" }, h("span", { class: "task-subject", text: task.subject || "Disciplină" }), due),
+    h("div", { class: "task-top" }, h("span", { class: "task-subject", text: task.subject || t("discipline") }), due),
     task.text ? h("p", { class: "task-desc", text: task.text }) : null
   );
 }
@@ -1182,8 +1268,8 @@ function renderHomeworkPreview(m) {
   const items = sortHomework(m.homework, today).slice(0, 4);
   setChildren(
     host,
-    h("div", { class: "card-head" }, h("h2", { class: "card-title", text: "Teme și termene" }), textButton("Toate temele", () => goTab("homework"))),
-    items.length ? h("ul", { class: "task-list" }, items.map((t) => taskRow(t, today, true))) : emptyState("Nicio temă", "Nu ai teme de făcut acum.")
+    h("div", { class: "card-head" }, h("h2", { class: "card-title", text: t("homework_preview") }), textButton(t("all_homework"), () => goTab("homework"))),
+    items.length ? h("ul", { class: "task-list" }, items.map((task) => taskRow(task, today, true))) : emptyState(t("no_homework_title"), t("no_homework_sub"))
   );
 }
 
@@ -1201,12 +1287,12 @@ function avgTile(label, value) {
 function annualTile(value) {
   const el = cookie("cookie cookie-md " + bandOf(value), fmtAvg(value));
   el.setAttribute("role", "img");
-  el.setAttribute("aria-label", value == null ? "Fără medie anuală" : "Media anuală " + fmtAvg(value));
-  return h("div", { class: "avg-tile avg-annual" }, h("span", { class: "avg-label", text: "Media anuală" }), el);
+  el.setAttribute("aria-label", value == null ? t("no_annual_average") : t("annual_average_prefix", { avg: fmtAvg(value) }));
+  return h("div", { class: "avg-tile avg-annual" }, h("span", { class: "avg-label", text: t("annual_average_label") }), el);
 }
 
 function markGroupBlock(group) {
-  const title = group.semester === 1 ? "Semestrul 1" : group.semester === 2 ? "Semestrul 2" : "Note";
+  const title = group.semester === 1 ? t("semester_1") : group.semester === 2 ? t("semester_2") : t("marks_label");
   return h(
     "section",
     { class: "mark-group" },
@@ -1240,7 +1326,7 @@ function subjectCard(s) {
       h(
         "div",
         { class: "subject-title-row" },
-        h("h3", { class: "subject-name", text: toTitleCase(s.subject || s.discipline || "Disciplină") }),
+        h("h3", { class: "subject-name", text: toTitleCase(s.subject || s.discipline || t("discipline")) }),
         scaleChip(scale)
       ),
       teacher ? h("p", { class: "subject-teacher", text: teacher }) : null
@@ -1263,7 +1349,7 @@ function renderMarks() {
   if (summary) setChildren(summary);
 
   if (!m.subjects.length) {
-    setChildren(list, emptyState("Nicio disciplină încă", "Notele apar aici după sincronizarea cu portalul."));
+    setChildren(list, emptyState(t("no_disciplines_title"), t("no_disciplines_sub")));
     return;
   }
 
@@ -1273,9 +1359,9 @@ function renderMarks() {
     h(
       "tr",
       null,
-      h("th", { scope: "col", text: "Disciplină" }),
-      h("th", { scope: "col", text: "Semestrul 1: Note" }),
-      h("th", { scope: "col", text: "Semestrul 2: Note" })
+      h("th", { scope: "col", text: t("discipline") }),
+      h("th", { scope: "col", text: t("semester_1_marks") }),
+      h("th", { scope: "col", text: t("semester_2_marks") })
     )
   );
 
@@ -1305,7 +1391,7 @@ function renderMarks() {
           h(
             "div",
             { class: "subject-title-row" },
-            h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || "Disciplină") }),
+            h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || t("discipline")) }),
             scaleChip(scale)
           ),
           subject.teacher && subject.teacher !== "null" && subject.teacher !== "undefined" ? h("div", { class: "subject-teacher muted", text: subject.teacher }) : null
@@ -1339,14 +1425,15 @@ function buildDaySwitch() {
   ensureDay();
   const days = weekDays();
   const today = todayIso();
+  const shortDays = WEEKDAYS_SHORT_BY_LANG[currentLang()] || WEEKDAYS_SHORT;
   dayUi.tabs.clear();
-  dayUi.prev = h("button", { type: "button", class: "icon-btn tonal day-nav", "aria-label": "Ziua anterioară", on: { click: () => stepDay(-1) } }, icon("chevron_left"));
-  dayUi.next = h("button", { type: "button", class: "icon-btn tonal day-nav", "aria-label": "Ziua următoare", on: { click: () => stepDay(1) } }, icon("chevron_right"));
+  dayUi.prev = h("button", { type: "button", class: "icon-btn tonal day-nav", "aria-label": t("prev_day"), title: t("prev_day"), on: { click: () => stepDay(-1) } }, icon("chevron_left"));
+  dayUi.next = h("button", { type: "button", class: "icon-btn tonal day-nav", "aria-label": t("next_day"), title: t("next_day"), on: { click: () => stepDay(1) } }, icon("chevron_right"));
   const tabs = days.map((iso, i) => {
     const btn = h(
       "button",
       { type: "button", class: "day-tab" + (iso === today ? " is-today" : ""), "aria-label": longDate(iso), on: { click: () => selectDay(iso) } },
-      h("span", { class: "day-name", text: WEEKDAYS_SHORT[i] }),
+      h("span", { class: "day-name", text: shortDays[i] || WEEKDAYS_SHORT[i] }),
       h("span", { class: "day-num", text: String(dayNum(iso)) })
     );
     dayUi.tabs.set(iso, btn);
@@ -1387,17 +1474,17 @@ function lessonCard(l, isNext) {
   const r = l.raw;
   const now = Date.now();
   let badge = null;
-  if (l.state === "active") badge = chip("În desfășurare", "live");
-  else if (isNext) badge = chip("Urmează", "next");
-  else if (l.state === "past") badge = chip("Încheiată", "quiet");
+  if (l.state === "active") badge = chip(t("live_badge"), "live");
+  else if (isNext) badge = chip(t("next_badge"), "next");
+  else if (l.state === "past") badge = chip(t("past_badge"), "quiet");
   const body = [
-    h("div", { class: "lesson-head" }, h("h3", { class: "lesson-name", text: r.subject || "Lecție" }), badge),
+    h("div", { class: "lesson-head" }, h("h3", { class: "lesson-name", text: r.subject || t("lesson_fallback") }), badge),
     lessonMeta(r),
     r.topic ? h("p", { class: "lesson-topic", text: r.topic }) : null,
   ];
   if (l.state === "active") {
     const pct = Math.min(100, Math.max(0, Math.round(((now - l.start) / (l.end - l.start)) * 100)));
-    body.push(progress(pct, "Mai sunt " + minutesText(Math.max(1, Math.ceil((l.end - now) / 60000)))));
+    body.push(progress(pct, t("time_left", { time: minutesText(Math.max(1, Math.ceil((l.end - now) / 60000))) })));
   }
   return h(
     "li",
@@ -1407,7 +1494,7 @@ function lessonCard(l, isNext) {
       { class: "lesson-time" },
       h("span", { class: "lesson-start", text: r.startLocal }),
       h("span", { class: "lesson-end", text: r.endLocal }),
-      r.periodIndex ? h("span", { class: "lesson-index", text: "Ora " + r.periodIndex }) : null
+      r.periodIndex ? h("span", { class: "lesson-index", text: t("lesson_period", { period: r.periodIndex }) }) : null
     ),
     h("div", { class: "lesson-body" }, body)
   );
@@ -1429,11 +1516,11 @@ function renderLessons() {
   setChildren(
     heading,
     h("h2", { class: "day-title", text: longDate(state.day) }),
-    state.day === today ? chip("Astăzi", "info") : null,
-    lessons.length ? chip(lessons.length + (lessons.length === 1 ? " oră" : " ore"), "neutral") : null
+    state.day === today ? chip(t("today"), "info") : null,
+    lessons.length ? chip(tp(lessons.length, "lesson_count"), "neutral") : null
   );
   if (!lessons.length) {
-    setChildren(host, emptyState("Nicio oră în orar", "Pentru această zi nu există lecții programate."));
+    setChildren(host, emptyState(t("no_lessons_title"), t("no_lessons_sub")));
     return;
   }
   const nextIdx = state.day === today ? lessons.findIndex((l) => l.state === "upcoming") : -1;
@@ -1441,7 +1528,7 @@ function renderLessons() {
   lessons.forEach((l, i) => {
     if (i > 0) {
       const gap = Math.round((l.start - lessons[i - 1].end) / 60000);
-      if (gap >= 5) nodes.push(h("li", { class: "break", text: "Pauză " + minutesText(gap) }));
+      if (gap >= 5) nodes.push(h("li", { class: "break", text: t("break_text", { time: minutesText(gap) }) }));
     }
     nodes.push(lessonCard(l, i === nextIdx));
   });
@@ -1469,37 +1556,39 @@ function buildAbsToggle() {
           },
         },
       },
-      "Semestrul " + n
+      t("semester_" + n)
     )
   );
   host.replaceChildren(...buttons);
 }
 
 function statusChip(status) {
-  if (status === "excused" || status === "motivat") return chip("Motivată", "success");
-  if (status === "unexcused" || status === "nemotivat") return chip("Nemotivată", "error");
-  return chip("Neclasificată", "neutral");
+  if (status === "excused" || status === "motivat") return chip(t("abs_status_excused"), "success");
+  if (status === "unexcused" || status === "nemotivat") return chip(t("abs_status_unexcused"), "error");
+  return chip(t("abs_status_unknown"), "neutral");
 }
 
 function absenceRow(r) {
   if (!r) return null;
   const valid = validIso(r.date);
   const time = [r.startTime || r.startLocal, r.endTime || r.endLocal].filter((x) => Boolean(x) && x !== "null" && x !== "undefined").join(" - ");
-  const lessonOra = r.lessonNumber ? ((typeof getString !== "undefined" ? getString("lesson_period", { period: r.lessonNumber }) : null) || "Ora " + r.lessonNumber) : "";
-  const roomText = r.room ? (String(r.room).startsWith("Sala") ? String(r.room) : `Sala ${r.room}`) : null;
+  const lessonOra = r.lessonNumber ? (t("lesson_period", { period: r.lessonNumber }) || "Ora " + r.lessonNumber) : "";
+  const roomStr = r.room ? String(r.room) : "";
+  const roomText = roomStr ? (/^(sala|каб|room)\b/i.test(roomStr) ? roomStr : t("room_prefix", { room: roomStr })) : null;
   const teacher = r.teacher && r.teacher !== "null" && r.teacher !== "undefined" ? r.teacher : null;
   const metaParts = [lessonOra, time, roomText, teacher].filter(Boolean);
   const note = r.reason || r.note;
   const safeNote = note && note !== "null" && note !== "undefined" ? note : null;
+  const shortMonths = MONTHS_SHORT_BY_LANG[currentLang()] || MONTHS_SHORT;
 
   return h(
     "li",
     { class: "absence" },
-    h("div", { class: "abs-date" }, h("span", { class: "abs-day", text: valid ? String(dayNum(r.date)) : "-" }), h("span", { class: "abs-month", text: valid ? (MONTHS_SHORT[monthIdx(r.date)] || "") : "" })),
+    h("div", { class: "abs-date" }, h("span", { class: "abs-day", text: valid ? String(dayNum(r.date)) : "-" }), h("span", { class: "abs-month", text: valid ? (shortMonths[monthIdx(r.date)] || "") : "" })),
     h(
       "div",
       { class: "abs-body" },
-      h("p", { class: "abs-subject", text: r.subject || r.discipline || "Disciplină" }),
+      h("p", { class: "abs-subject", text: r.subject || r.discipline || t("discipline") }),
       metaParts.length ? h("p", { class: "abs-meta", text: metaParts.join(", ") }) : null,
       safeNote ? h("p", { class: "abs-note", text: safeNote }) : null
     ),
@@ -1519,9 +1608,9 @@ function renderAbsences() {
   const sem = absenceSemester(m, state.semester);
   setChildren(
     stats,
-    stat("Total", String(sem.total), "primary"),
-    stat("Motivate", String(sem.motivate), "success"),
-    stat("Nemotivate", String(sem.nemotivate), "error")
+    stat(t("abs_total"), String(sem.total), "primary"),
+    stat(t("abs_excused"), String(sem.motivate), "success"),
+    stat(t("abs_unexcused"), String(sem.nemotivate), "error")
   );
 
   if (!sem.records.length) {
@@ -1529,13 +1618,13 @@ function renderAbsences() {
       list,
       sem.total > 0
         ? emptyState(
-            getString("absences_no_details_title") || "Detaliile nu sunt disponibile pe portal",
-            getString("absences_no_details_sub", { total: sem.total }) ||
+            t("absences_no_details_title") || "Detaliile nu sunt disponibile pe portal",
+            t("absences_no_details_sub", { total: sem.total }) ||
               ("Portalul raportează " + sem.total + " absențe în acest semestru, dar fără detalii pe ore.")
           )
         : emptyState(
-            getString("no_absences_title") || "Nicio absență",
-            getString("no_absences_sub", { sem: state.semester }) ||
+            t("no_absences_title") || "Nicio absență",
+            t("no_absences_sub", { sem: state.semester }) ||
               ("Nu sunt absențe înregistrate în Semestrul " + state.semester + ".")
           )
     );
@@ -1547,13 +1636,21 @@ function renderAbsences() {
   // Reconciliation note if portal summary exceeds detailed records
   const missingCount = sem.total - sem.records.length;
   if (missingCount > 0) {
+    const missingForm = pluralForm(missingCount);
+    const missingLabel = missingForm === "one" ? t("abs_label_singular") : missingForm === "few" ? t("abs_label_few") : t("abs_label_plural");
     sections.push(
       h(
         "div",
         { class: "abs-reconciliation-note", role: "note" },
         icon("info"),
         h("p", {
-          text: "Portalul raportează " + sem.total + " absențe în Semestrul " + state.semester + ", dintre care " + sem.records.length + " au detalii pe ore. Pentru restul de " + missingCount + (missingCount === 1 ? " absență" : " absențe") + ", detaliile nu sunt publicate în orar."
+          text: t("absences_reconciliation", {
+            total: sem.total,
+            sem: state.semester,
+            details: sem.records.length,
+            missing: missingCount,
+            missingLabel,
+          }),
         })
       )
     );
@@ -1562,7 +1659,7 @@ function renderAbsences() {
   // Per-subject summary (collapsible dates), sorted with most absences first
   const bySubject = new Map();
   for (const r of sem.records) {
-    const subj = r.subject || r.discipline || "Disciplină";
+    const subj = r.subject || r.discipline || t("discipline");
     if (!bySubject.has(subj)) bySubject.set(subj, []);
     bySubject.get(subj).push(r);
   }
@@ -1588,9 +1685,9 @@ function renderAbsences() {
             h(
               "div",
               { class: "abs-subject-badges" },
-              chip(records.length + (records.length === 1 ? " absență" : " absențe"), "neutral"),
-              nemotCount ? chip(nemotCount + " nemotivate", "error") : null,
-              motCount ? chip(motCount + " motivate", "success") : null
+              chip(tp(records.length, "abs_count"), "neutral"),
+              nemotCount ? chip(t("abs_unexcused_badge", { count: nemotCount }), "error") : null,
+              motCount ? chip(t("abs_excused_badge", { count: motCount }), "success") : null
             )
           )
         ),
@@ -1601,8 +1698,8 @@ function renderAbsences() {
     sections.push(
       h(
         "section",
-        { class: "abs-section", "aria-label": "Absențe pe discipline" },
-        h("h3", { class: "section-title", text: "Pe discipline" }),
+        { class: "abs-section", "aria-label": t("abs_by_subject_aria") },
+        h("h3", { class: "section-title", text: t("abs_by_subject") }),
         h("div", { class: "abs-subject-grid" }, subjectCards)
       )
     );
@@ -1612,8 +1709,8 @@ function renderAbsences() {
   sections.push(
     h(
       "section",
-      { class: "abs-section", "aria-label": "Toate absențele" },
-      h("h3", { class: "section-title", text: "Cronologic" }),
+      { class: "abs-section", "aria-label": t("abs_all_aria") },
+      h("h3", { class: "section-title", text: t("abs_chronological") }),
       h("ul", { class: "abs-ul" }, sem.records.map(absenceRow))
     )
   );
@@ -1633,7 +1730,7 @@ function renderHomework() {
   const today = todayIso();
   const items = sortHomework(m.homework, today);
   if (!items.length) {
-    setChildren(host, emptyState("Nicio temă", "Temele noi apar aici după sincronizare."));
+    setChildren(host, emptyState(t("no_homework_title"), t("no_homework_list_sub")));
     return;
   }
   const groups = [];
@@ -1652,8 +1749,8 @@ function renderHomework() {
       h(
         "section",
         { class: "task-group" },
-        h("h2", { class: "group-title", text: g.due ? relativeDay(g.due, today) + ", " + longDate(g.due) : "Fără termen" }),
-        h("ul", { class: "task-list" }, g.tasks.map((t) => taskRow(t, today, false)))
+        h("h2", { class: "group-title", text: g.due ? relativeDay(g.due, today) + ", " + longDate(g.due) : t("no_due_date") }),
+        h("ul", { class: "task-list" }, g.tasks.map((task) => taskRow(task, today, false)))
       )
     )
   );
@@ -1672,28 +1769,28 @@ function renderProfile() {
   }
   const s = m.student;
   const meta = m.metadata;
-  const name = toTitleCase(s.fullName || meta.fullName || "Elev");
+  const name = toTitleCase(s.fullName || meta.fullName || t("student_label"));
   const className = s.className || meta.className;
   const school = s.schoolName || meta.schoolName;
   const idx = Math.max(0, state.students.findIndex((x) => x.id === s.id));
   const rows = [
-    ["Școala", school],
-    ["Diriginte", meta.classMaster],
-    ["Anul de studiu", meta.studyYear],
-    ["Data nașterii", meta.birthDate],
+    [t("school_label"), school],
+    [t("class_master_label"), meta.classMaster],
+    [t("study_year_label"), meta.studyYear],
+    [t("birth_date_label"), meta.birthDate],
   ].filter((row) => row[1]);
 
   setChildren(
     card,
     h(
       "section",
-      { class: "profile-card", "aria-label": "Elev" },
+      { class: "profile-card", "aria-label": t("student_label") },
       avatar(s, idx, "xl"),
       h(
         "div",
         null,
         h("h2", { class: "profile-name", text: name }),
-        h("div", { class: "profile-chips" }, className ? chip("Clasa " + className, "info", "school") : null, meta.enrollmentStatus ? chip(meta.enrollmentStatus, "success", "check_circle") : null)
+        h("div", { class: "profile-chips" }, className ? chip(t("class_prefix") + className, "info", "school") : null, meta.enrollmentStatus ? chip(meta.enrollmentStatus, "success", "check_circle") : null)
       )
     ),
     rows.length ? h("dl", { class: "info-grid" }, rows.map((row) => h("div", { class: "info" }, h("dt", { text: row[0] }), h("dd", { text: String(row[1]) })))) : null
@@ -1702,21 +1799,21 @@ function renderProfile() {
   const teachers = m.teachers;
   setChildren(
     grid,
-    h("h2", { class: "section-title", text: "Profesori" }),
+    h("h2", { class: "section-title", text: t("teachers_section") }),
     teachers.length
       ? h(
           "div",
           { class: "teacher-grid" },
-          teachers.map((t, i) =>
+          teachers.map((teacher, i) =>
             h(
               "article",
               { class: "teacher-card" },
-              h("div", { class: "teacher-head" }, avatar({ fullName: t.name }, i + 1, "md"), h("h3", { class: "teacher-name", text: t.name }), t.note ? chip(t.note, "info") : null),
-              Array.isArray(t.subjects) && t.subjects.length ? h("div", { class: "chip-row" }, t.subjects.map((subject) => chip(subject, "neutral"))) : null
+              h("div", { class: "teacher-head" }, avatar({ fullName: teacher.name }, i + 1, "md"), h("h3", { class: "teacher-name", text: teacher.name }), teacher.note ? chip(teacher.note, "info") : null),
+              Array.isArray(teacher.subjects) && teacher.subjects.length ? h("div", { class: "chip-row" }, teacher.subjects.map((subject) => chip(subject, "neutral"))) : null
             )
           )
         )
-      : emptyState("Lista profesorilor nu este disponibilă", "Profesorii apar după ce orarul și notele sunt încărcate.")
+      : emptyState(t("no_teachers_title"), t("no_teachers_sub"))
   );
 }
 
@@ -1747,7 +1844,7 @@ function renderStudents() {
     const cls = s.className || known?.className || null;
     const body = [
       avatar(s, i, "sm"),
-      h("span", { class: "student-text" }, h("span", { class: "student-name", text: toTitleCase(s.fullName || "Elev") }), cls ? h("span", { class: "student-class", text: cls }) : null),
+      h("span", { class: "student-text" }, h("span", { class: "student-name", text: toTitleCase(s.fullName || t("student_label")) }), cls ? h("span", { class: "student-class", text: cls }) : null),
     ];
     return h(
       "button",
@@ -1772,7 +1869,10 @@ function renderHeaderState() {
   if (prog) prog.hidden = !state.syncing && !state.switching;
 
   const off = $("offline-chip");
-  if (off) off.hidden = !state.offline;
+  if (off) {
+    off.textContent = t("offline_badge");
+    off.hidden = !state.offline;
+  }
 
   const subtitle = $("header-student-subtitle");
   if (subtitle) {
@@ -1780,7 +1880,7 @@ function renderHeaderState() {
       const s = state.students.find((x) => String(x.id) === String(state.studentKey));
       const name = s?.fullName || state.data?.student?.fullName || "";
       const cls = s?.className || state.data?.student?.className || "";
-      subtitle.textContent = [name, cls ? `Clasa ${cls}` : ""].filter(Boolean).join(" • ");
+      subtitle.textContent = [name, cls ? `${t("class_prefix")}${cls}` : ""].filter(Boolean).join(" • ");
       subtitle.hidden = !subtitle.textContent;
     } else {
       subtitle.hidden = true;
@@ -1790,9 +1890,9 @@ function renderHeaderState() {
   const avatarEl = $("account-avatar");
   if (avatarEl) {
     if (state.role === "student") {
-      avatarEl.textContent = (state.data?.student?.fullName || "E").slice(0, 1).toUpperCase();
+      avatarEl.textContent = (state.data?.student?.fullName || t("role_student")).slice(0, 1).toUpperCase();
     } else {
-      avatarEl.textContent = "P";
+      avatarEl.textContent = (t("role_parent") || "P").slice(0, 1).toUpperCase();
     }
   }
 
@@ -1800,9 +1900,9 @@ function renderHeaderState() {
   if (syncTimeEl) {
     if (state.syncedAt) {
       const age = Date.now() - state.syncedAt;
-      syncTimeEl.textContent = `Ultima sincronizare: ${agoText(age)}`;
+      syncTimeEl.textContent = t("sync_last_synced", { time: agoText(age) });
     } else {
-      syncTimeEl.textContent = "Nesincronizat";
+      syncTimeEl.textContent = t("sync_unsynced");
     }
   }
 }
@@ -1819,10 +1919,100 @@ function renderTheme() {
   const btn = $("theme-btn");
   if (!btn) return;
   const isDark = state.theme === "dark";
-  const label = isDark ? "Comută la tema luminoasă" : "Comută la tema întunecată";
+  const label = isDark ? t("theme_to_light") : t("theme_to_dark");
   setIcon(btn, isDark ? "light_mode" : "dark_mode");
   btn.setAttribute("aria-label", label);
   btn.title = label;
+}
+
+function getTabLabel(tab) {
+  if (state.simpleMode && tab.simpleKey) return t(tab.simpleKey);
+  return t(tab.shortKey || tab.key);
+}
+
+function getTabTitle(tab) {
+  if (state.simpleMode && tab.simpleKey) return t(tab.simpleKey);
+  return t(tab.key);
+}
+
+function applyLocalization() {
+  for (const el of document.querySelectorAll("[data-string]")) {
+    const key = el.getAttribute("data-string") || (el.dataset && el.dataset.string);
+    if (key) el.textContent = t(key);
+  }
+  for (const el of document.querySelectorAll("[data-aria-label]")) {
+    const key = el.getAttribute("data-aria-label") || (el.dataset && el.dataset.ariaLabel);
+    if (key) el.setAttribute("aria-label", t(key));
+  }
+  for (const el of document.querySelectorAll("[data-title]")) {
+    const key = el.getAttribute("data-title") || (el.dataset && el.dataset.title);
+    if (key) el.setAttribute("title", t(key));
+  }
+
+  // Update known elements by ID for environments without full DOM querySelectorAll
+  const idStringMap = [
+    ["auth-title", "auth_title"],
+    ["settings-dialog-title", "settings_title"],
+    ["offline-chip", "offline_badge"],
+    ["forget-device-btn", "forget_device_btn"],
+  ];
+  for (const [id, key] of idStringMap) {
+    const el = $(id);
+    if (el) el.textContent = t(key);
+  }
+
+  const navContainers = [$("rail-nav"), $("bottom-nav")].filter(Boolean);
+  for (const container of navContainers) {
+    for (const item of container.querySelectorAll(".nav-item")) {
+      const tabId = item.getAttribute("data-tab") || (item.dataset && item.dataset.tab);
+      const tab = TABS.find((x) => x.id === tabId);
+      if (tab) {
+        const lbl = item.querySelector(".nav-label");
+        if (lbl) lbl.textContent = getTabLabel(tab);
+      }
+    }
+  }
+
+  const drawerProfileBtn = $("drawer-profile-btn");
+  if (drawerProfileBtn) {
+    drawerProfileBtn.setAttribute("aria-label", t("tab_profile"));
+    const lbl = drawerProfileBtn.querySelector(".nav-label");
+    if (lbl) lbl.textContent = state.simpleMode ? t("simple_tab_profile") : t("tab_profile_short");
+  }
+
+  const drawerSettingsBtn = $("drawer-settings-btn");
+  if (drawerSettingsBtn) {
+    drawerSettingsBtn.setAttribute("aria-label", t("settings_title"));
+    const lbl = drawerSettingsBtn.querySelector(".nav-label");
+    if (lbl) lbl.textContent = t("settings_title");
+  }
+
+  const togglePwdBtn = $("toggle-password");
+  if (togglePwdBtn) {
+    const isShown = togglePwdBtn.getAttribute("aria-pressed") === "true";
+    const pwdLabel = isShown ? t("hide_password") : t("show_password");
+    togglePwdBtn.setAttribute("aria-label", pwdLabel);
+    togglePwdBtn.setAttribute("title", pwdLabel);
+  }
+
+  const loginLabel = $("login-label");
+  if (loginLabel) {
+    loginLabel.textContent = state.authBusy ? t("login_checking") : t("login_submit");
+  }
+
+  renderTheme();
+  renderHeaderState();
+
+  const authView = $("auth-view");
+  if (authView && !authView.hidden && !state.token) {
+    document.title = t("auth_title") + " - Open SIME";
+  } else {
+    const activeTab = TABS.find((x) => x.id === state.tab) || TABS[0];
+    const title = getTabTitle(activeTab);
+    const pageTitle = $("page-title");
+    if (pageTitle) pageTitle.textContent = title;
+    document.title = title + " - Open SIME";
+  }
 }
 
 function render() {
@@ -1888,14 +2078,26 @@ function bindNavKeyboard(container, orientation = "vertical") {
   });
 }
 
+function openSettingsDialog() {
+  const dialog = $("settings-dialog");
+  if (!dialog) return;
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
 function buildNav() {
   const mk = (tab) =>
     h(
       "button",
       { type: "button", class: "nav-item", "data-tab": tab.id, on: { click: () => goTab(tab.id) } },
       h("span", { class: "nav-pill" }, icon(tab.icon)),
-      h("span", { class: "nav-label", text: tab.label })
+      h("span", { class: "nav-label", text: getTabLabel(tab) })
     );
+  $("rail-nav").replaceChildren();
+  $("bottom-nav").replaceChildren();
   for (const tab of TABS) {
     if (tab.id === "profile") continue;
     $("rail-nav").appendChild(mk(tab));
@@ -1908,9 +2110,7 @@ function buildNav() {
   if (setPill && !setPill.firstChild) setPill.appendChild(icon("settings"));
 
   $("drawer-profile-btn")?.addEventListener("click", () => goTab("profile"));
-  $("drawer-settings-btn")?.addEventListener("click", () => {
-    $("settings-dialog")?.showModal();
-  });
+  $("drawer-settings-btn")?.addEventListener("click", openSettingsDialog);
 
   bindNavKeyboard($("rail-nav"), "vertical");
   bindNavKeyboard(document.querySelector(".drawer-pinned-bottom"), "vertical");
@@ -2064,16 +2264,29 @@ async function loadTabData(tabId, { force = false } = {}) {
 }
 
 function setTab(id) {
-  const tab = TABS.find((t) => t.id === id) || TABS[0];
+  const tab = TABS.find((tItem) => tItem.id === id) || TABS[0];
   state.tab = tab.id;
   store.set(KEYS.tab, tab.id);
   for (const view of document.querySelectorAll(".view")) view.hidden = view.dataset.view !== tab.id;
   for (const item of document.querySelectorAll(".nav-item")) {
-    if (item.dataset.tab === tab.id) item.setAttribute("aria-current", "page");
+    const itemTab = item.getAttribute("data-tab") || (item.dataset && item.dataset.tab);
+    if (itemTab === tab.id) item.setAttribute("aria-current", "page");
     else item.removeAttribute("aria-current");
   }
+  const drawerProf = $("drawer-profile-btn");
+  if (drawerProf) {
+    if (tab.id === "profile") drawerProf.setAttribute("aria-current", "page");
+    else drawerProf.removeAttribute("aria-current");
+  }
+  for (const container of [$("rail-nav"), $("bottom-nav")].filter(Boolean)) {
+    for (const item of container.querySelectorAll(".nav-item")) {
+      const itemTab = item.getAttribute("data-tab") || (item.dataset && item.dataset.tab);
+      if (itemTab === tab.id) item.setAttribute("aria-current", "page");
+      else item.removeAttribute("aria-current");
+    }
+  }
   $("profile-btn").classList.toggle("is-current", tab.id === "profile");
-  const title = (state.simpleMode && SIMPLE_TAB_TITLES[tab.id]) ? SIMPLE_TAB_TITLES[tab.id] : tab.title;
+  const title = getTabTitle(tab);
   $("page-title").textContent = title;
   document.title = title + " - Open SIME";
   if (tab.id === "timetable") renderLessons();
@@ -2132,11 +2345,21 @@ function applySettings() {
   if (reduceMotionCheckbox) reduceMotionCheckbox.checked = Boolean(state.reduceMotion);
 
   applyTheme();
+  applyLocalization();
   setTab(state.tab);
 }
 
+function setLanguage(lang) {
+  if (!lang || !["ro", "ru", "en"].includes(lang)) return;
+  state.lang = lang;
+  store.set(KEYS.lang, state.lang);
+  applySettings();
+  render();
+}
+
 function initSettings() {
-  state.lang = store.get(KEYS.lang) || "ro";
+  const savedLang = store.get(KEYS.lang);
+  state.lang = savedLang && ["ro", "ru", "en"].includes(savedLang) ? savedLang : "ro";
   state.textSize = store.get(KEYS.textSize) || "M";
   state.simpleMode = store.get(KEYS.simpleMode) === "true";
   state.contrast = store.get(KEYS.contrast) === "true";
@@ -2144,16 +2367,14 @@ function initSettings() {
 
   const dialog = $("settings-dialog");
   const openBtn = $("settings-btn");
+  const authOpenBtn = $("auth-settings-btn");
   const closeBtn = $("settings-close-btn");
 
   if (openBtn && dialog) {
-    openBtn.addEventListener("click", () => {
-      if (typeof dialog.showModal === "function") {
-        dialog.showModal();
-      } else {
-        dialog.setAttribute("open", "");
-      }
-    });
+    openBtn.addEventListener("click", openSettingsDialog);
+  }
+  if (authOpenBtn && dialog) {
+    authOpenBtn.addEventListener("click", openSettingsDialog);
   }
 
   if (closeBtn && dialog) {
@@ -2184,10 +2405,7 @@ function initSettings() {
   for (const radio of document.querySelectorAll('input[name="setting-lang"]')) {
     radio.addEventListener("change", (e) => {
       if (e.target.checked) {
-        state.lang = e.target.value;
-        store.set(KEYS.lang, state.lang);
-        applySettings();
-        render();
+        setLanguage(e.target.value);
       }
     });
   }
@@ -2246,9 +2464,9 @@ function initSettings() {
       forgetBtn.disabled = true;
       try {
         await api("/api/auth/forget-device", { method: "POST", auth: false, retry: false });
-        toast(getString("device_forgotten"));
+        toast(t("device_forgotten"));
       } catch {
-        toast(getString("device_forgotten"));
+        toast(t("device_forgotten"));
       } finally {
         forgetBtn.disabled = false;
       }
@@ -2277,7 +2495,7 @@ function setAuthBusy(busy) {
   const btn = $("login-submit");
   btn.disabled = busy || Date.now() < state.authLockUntil;
   btn.classList.toggle("is-busy", busy);
-  $("login-label").textContent = busy ? "Se verifică datele" : "Intră în cont";
+  $("login-label").textContent = busy ? t("login_checking") : t("login_submit");
 }
 
 function lockLogin(seconds) {
@@ -2291,7 +2509,7 @@ function showAuth(message) {
   $("auth-view").hidden = false;
   if (message) showAuthMessage(message, "info");
   else clearAuthMessage();
-  document.title = "Autentificare - Open SIME";
+  document.title = t("auth_title") + " - Open SIME";
   setAuthBusy(false);
 }
 
@@ -2309,7 +2527,7 @@ async function onLogin(event) {
   const role = $("role-parent").checked ? "parent" : "student";
   clearAuthMessage();
   if (!username || !password) {
-    showAuthMessage("Introdu numele de utilizator și parola.", "error");
+    showAuthMessage(t("login_required"), "error");
     (username ? $("password") : $("username")).focus();
     return;
   }
@@ -2520,8 +2738,10 @@ function bindEvents() {
     const show = input.type === "password";
     input.type = show ? "text" : "password";
     const btn = $("toggle-password");
+    const pwdLabel = show ? t("hide_password") : t("show_password");
     btn.setAttribute("aria-pressed", String(show));
-    btn.setAttribute("aria-label", show ? "Ascunde parola" : "Arată parola");
+    btn.setAttribute("aria-label", pwdLabel);
+    btn.setAttribute("title", pwdLabel);
     setIcon(btn, show ? "visibility_off" : "visibility");
   });
   $("theme-btn").addEventListener("click", cycleTheme);
@@ -2565,8 +2785,12 @@ function boot() {
     store.set(KEYS.theme, state.theme);
   }
 
-  for (const el of document.querySelectorAll("[data-icon]")) el.prepend(icon(el.dataset.icon));
-  for (const el of document.querySelectorAll("[data-cookie]")) el.appendChild(cookieSvg("deco-shape"));
+  for (const el of document.querySelectorAll("[data-icon]")) {
+    if (!el.querySelector("svg")) el.prepend(icon(el.dataset.icon));
+  }
+  for (const el of document.querySelectorAll("[data-cookie]")) {
+    if (!el.querySelector("svg")) el.appendChild(cookieSvg("deco-shape"));
+  }
   applyTheme();
   buildNav();
   bindEvents();
@@ -2584,7 +2808,7 @@ function boot() {
 
   if (store.get(KEYS.role) === "parent") $("role-parent").checked = true;
   state.today = todayIso();
-  state.tab = tabFromHash() || (TABS.some((t) => t.id === store.get(KEYS.tab)) ? store.get(KEYS.tab) : "home");
+  state.tab = tabFromHash() || (TABS.some((tItem) => tItem.id === store.get(KEYS.tab)) ? store.get(KEYS.tab) : "home");
 
   const token = store.get(KEYS.token);
   if (token) {
