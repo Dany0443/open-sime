@@ -1,8 +1,13 @@
+#[allow(unused_imports)]
 use serde::Deserialize;
 use std::sync::Mutex;
+#[allow(unused_imports)]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, RunEvent, Url, WindowEvent};
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::process::CommandChild;
+#[allow(unused_imports)]
+use tauri_plugin_shell::process::CommandEvent;
+#[allow(unused_imports)]
 use tauri_plugin_shell::ShellExt;
 
 const SIDECAR_NAME: &str = "open-sime-server";
@@ -16,6 +21,7 @@ struct SidecarState {
   child: Option<CommandChild>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct ReadyPayload {
   url: String,
@@ -25,6 +31,7 @@ struct ReadyPayload {
   instance_id: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct ErrorPayload {
   code: Option<String>,
@@ -142,10 +149,12 @@ fn spawn_production_sidecar(app: &AppHandle) {
     }
   };
 
-  {
-    let state = app.state::<Mutex<SidecarState>>();
-    if let Ok(mut guard) = state.lock() {
-      guard.child = Some(child);
+  if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
+    match state.lock() {
+      Ok(mut guard) => {
+        guard.child = Some(child);
+      }
+      Err(_) => {}
     }
   }
 
@@ -242,7 +251,6 @@ fn spawn_production_sidecar(app: &AppHandle) {
         }
         CommandEvent::Terminated(status) => {
           if !settled {
-            settled = true;
             let code_label = format!(
               "{} (exit={:?})",
               last_error_code, status.code
