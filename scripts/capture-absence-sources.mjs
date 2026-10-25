@@ -19,9 +19,12 @@ function parseArgs() {
   const args = process.argv.slice(2);
   let knownAbsencesFile = null;
   let outFile = null;
+  let includeMarks = false;
 
   for (let i = 0; i < args.length; i += 1) {
-    if (args[i] === "--known-absences" && args[i + 1]) {
+    if (args[i] === "--marks") {
+      includeMarks = true;
+    } else if (args[i] === "--known-absences" && args[i + 1]) {
       knownAbsencesFile = args[i + 1];
       i += 1;
     } else if (args[i] === "--out" && args[i + 1]) {
@@ -30,7 +33,7 @@ function parseArgs() {
     }
   }
 
-  return { knownAbsencesFile, outFile };
+  return { knownAbsencesFile, outFile, includeMarks };
 }
 
 function parseKnownAbsences(filePath) {
@@ -147,6 +150,82 @@ function scanKnownAbsenceMatches(knownList, calendarEvents, apexRegions, reports
   return highlights;
 }
 
+function extractSubjectMarksDiagnostics(reports = [], $root = null) {
+  const diagnostics = [];
+  const allSources = [];
+
+  if ($root) {
+    allSources.push({ source: "dashboard", root: $root });
+  }
+
+  for (const rep of reports) {
+    if (rep && rep.html) {
+      const $rep = cheerio.load(rep.html, { decodeEntities: false }, false);
+      allSources.push({ source: `report_sem${rep.semester || ""}`, root: $rep });
+    }
+  }
+
+  for (const { source, root: $s } of allSources) {
+    $s("table").each((_tIdx, table) => {
+      $s(table).find("tr").each((_rIdx, tr) => {
+        const cells = $s(tr).find("th, td");
+        if (!cells.length) return;
+
+        let subjectName = "";
+        const subjectCell = $s(tr).find("td[headers*='DISCIPLIN'], td[headers*='SUBJECT'], th").first();
+        if (subjectCell.length) {
+          subjectName = subjectCell.text().trim();
+        } else {
+          subjectName = $s(cells[0]).text().trim();
+        }
+
+        const rowData = {
+          source,
+          subject: subjectName,
+          cells: [],
+        };
+
+        cells.each((cIdx, cell) => {
+          const headers = $s(cell).attr("headers") || "";
+          const text = $s(cell).text().trim();
+          const marks = [];
+
+          $s(cell).find("*").each((_eIdx, el) => {
+            if ($s(el).children().length === 0) {
+              const elText = $s(el).text().trim();
+              if (elText) {
+                const attrs = el.attribs || {};
+                marks.push({
+                  tag: el.tagName,
+                  text: elText,
+                  classes: attrs.class || "",
+                  attributes: Object.fromEntries(
+                    Object.entries(attrs).filter(([k]) =>
+                      ["title", "data-date", "data-title", "aria-label", "id"].includes(k) || k.startsWith("data-")
+                    )
+                  ),
+                });
+              }
+            }
+          });
+
+          rowData.cells.push({
+            cellIndex: cIdx,
+            tag: cell.tagName,
+            headers,
+            text,
+            marks,
+          });
+        });
+
+        diagnostics.push(rowData);
+      });
+    });
+  }
+
+  return diagnostics;
+}
+
 async function run() {
   const username = process.env.SIME_USER;
   const password = process.env.SIME_PASS;
@@ -158,7 +237,7 @@ async function run() {
     process.exit(1);
   }
 
-  const { knownAbsencesFile, outFile } = parseArgs();
+  const { knownAbsencesFile, outFile, includeMarks } = parseArgs();
   const knownAbsences = parseKnownAbsences(knownAbsencesFile);
 
   console.log(`Connecting to agenda.sime.md as role: ${role}...`);
@@ -233,6 +312,8 @@ async function run() {
     }
   });
 
+  const marksDiagnostics = includeMarks ? extractSubjectMarksDiagnostics(reports, $) : [];
+
   const rawDump = {
     capturedAt: new Date().toISOString(),
     studentRole: role,
@@ -241,6 +322,7 @@ async function run() {
     apexRegions: absenceApexRegions,
     semesterReports: reports,
     knownAbsenceHighlights: highlights,
+    ...(includeMarks ? { subjectMarksDiagnostics: marksDiagnostics } : {}),
   };
 
   // Run through sanitizeCapture
@@ -255,6 +337,9 @@ async function run() {
 
   // Output format required by spec:
   console.log(`Found ${calFlaggedCount} calendar events with status flags, ${tableMatchCount} table rows matching absences`);
+  if (includeMarks) {
+    console.log(`Extracted diagnostics for ${marksDiagnostics.length} table rows (--marks)`);
+  }
   console.log(`Sanitized dump written to: ${targetPath}`);
 }
 
@@ -266,5 +351,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
   });
 }
 
-export { findAbsenceApexRegions, scanKnownAbsenceMatches };
+export { findAbsenceApexRegions, scanKnownAbsenceMatches, extractSubjectMarksDiagnostics };
 

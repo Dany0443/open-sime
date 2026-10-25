@@ -472,7 +472,7 @@ function parseRecentGradesFromRoot($, root, defaultSemester = null, today = toda
     const day = parseDate(dateText, today);
     const sem = inferSemester(day, defaultSemester);
     const markObj = normalizeMark(rawGrade, null, false, sem);
-    if (!markObj || (markObj.kind !== "numeric" && markObj.kind !== "qualifier")) return;
+    if (!markObj) return;
     markObj.date = day;
     grades.push({
       subject,
@@ -505,7 +505,7 @@ const QUALIFIERS = {
 function normalizeMark(rawText, rawAttr = null, isThesisExplicit = false, semester = null) {
   if (!rawText && rawText !== 0) return null;
   const raw = String(rawText).trim();
-  if (!raw) return null;
+  if (!raw || raw === "-" || raw === "–" || raw === "—") return null;
 
   const date = parseFullDate(rawAttr);
   const isThesis = Boolean(
@@ -566,14 +566,14 @@ function parseMarkCell($, cell, semester = null) {
       (leaf.parent?.attribs?.class && /tez[aă]/i.test(leaf.parent.attribs.class))
     );
     const m = normalizeMark(text, rawAttr, isThesis, semester);
-    if (m && (m.kind === "numeric" || m.kind === "qualifier")) {
+    if (m) {
       marks.push(m);
     }
   }
   if (marks.length) return marks;
   for (const token of textOf(cellNode, " ").split(/[,\s]+/).filter(Boolean)) {
     const m = normalizeMark(token, null, false, semester);
-    if (m && (m.kind === "numeric" || m.kind === "qualifier")) {
+    if (m) {
       marks.push(m);
     }
   }

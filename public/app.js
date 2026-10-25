@@ -358,20 +358,30 @@ function score(valueOrMark, size, date, isThesis = false) {
   let markThesis = isThesis;
   let markIsNew = false;
   let isQual = false;
+  let isOther = false;
+  let markKind = "numeric";
 
   if (valueOrMark && typeof valueOrMark === "object") {
     val = valueOrMark.value;
-    labelText = valueOrMark.label || (val != null ? String(val) : "");
+    labelText = valueOrMark.label || (val != null ? String(val) : (valueOrMark.raw ? String(valueOrMark.raw) : ""));
     markDate = valueOrMark.date || date;
     markThesis = Boolean(valueOrMark.isThesis || isThesis);
     markIsNew = Boolean(valueOrMark.isNew);
-    isQual = valueOrMark.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(labelText).toUpperCase()]);
+    markKind = valueOrMark.kind || (val != null ? "numeric" : (QUALIFIER_NAMES[String(labelText).toUpperCase()] ? "qualifier" : "other"));
+    isQual = markKind === "qualifier" || Boolean(QUALIFIER_NAMES[String(labelText).toUpperCase()]);
+    isOther = markKind === "other" || markKind === "descriptor";
   } else if (typeof valueOrMark === "string" && QUALIFIER_NAMES[valueOrMark.toUpperCase()]) {
     isQual = true;
+    markKind = "qualifier";
     labelText = valueOrMark.toUpperCase();
     val = null;
   } else {
     labelText = val != null ? fmtMark(val) : "";
+    if (val == null && typeof valueOrMark === "string") {
+      labelText = valueOrMark;
+      isOther = true;
+      markKind = "other";
+    }
   }
 
   const band = bandOf(val, labelText);
@@ -380,7 +390,9 @@ function score(valueOrMark, size, date, isThesis = false) {
 
   let accessibleLabel;
   if (isQual) {
-    accessibleLabel = "Calificativ: " + qualFull + " (" + labelText + ")" + (dateStr ? " din " + dateStr : "");
+    accessibleLabel = qualFull + " (" + labelText + ")" + (dateStr ? " din " + dateStr : "");
+  } else if (isOther) {
+    accessibleLabel = labelText + (dateStr ? " (" + dateStr + ")" : "");
   } else {
     accessibleLabel = (markThesis ? "Teză: " : "Nota ") + labelText + (dateStr ? " (" + dateStr + ")" : "");
   }
@@ -391,7 +403,7 @@ function score(valueOrMark, size, date, isThesis = false) {
   return h(
     "span",
     {
-      class: "score score-" + size + " " + band + (markThesis ? " is-thesis" : "") + (isQual ? " is-qualifier" : "") + (markIsNew ? " has-new" : ""),
+      class: "score score-" + size + " " + band + (markThesis ? " is-thesis" : "") + (isQual ? " is-qualifier" : "") + (isOther ? " is-other" : "") + (markIsNew ? " has-new" : ""),
       role: "img",
       "aria-label": accessibleLabel,
       title: accessibleLabel,
@@ -693,14 +705,16 @@ function recentMarks(m) {
   for (const g of m.grades) {
     if (!g) continue;
     const value = num(g.value);
-    const label = g.label || (value != null ? String(value) : g.raw || "");
+    const label = g.label || (value != null ? String(value) : (g.raw != null ? String(g.raw) : ""));
     const isQual = g.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(label).toUpperCase()]);
-    if (value == null && !isQual) continue;
+    const isOther = g.kind === "other" || g.kind === "descriptor" || (value == null && !isQual && Boolean(label));
+    if (value == null && !isQual && !isOther) continue;
     list.push({
       subject: String(g.subject || ""),
       value,
       label,
-      kind: isQual ? "qualifier" : "numeric",
+      raw: g.raw || label,
+      kind: isQual ? "qualifier" : (isOther ? (g.kind || "other") : "numeric"),
       isThesis: Boolean(g.isThesis),
       date: validIso(g.date) ? g.date : null,
       i: list.length,
@@ -711,15 +725,17 @@ function recentMarks(m) {
       for (const d of Array.isArray(s.markDetails) ? s.markDetails : []) {
         if (!d) continue;
         const value = num(d.value);
-        const label = d.label || (value != null ? String(value) : d.raw || "");
+        const label = d.label || (value != null ? String(value) : (d.raw != null ? String(d.raw) : ""));
         const isQual = d.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(label).toUpperCase()]);
-        if (value == null && !isQual) continue;
+        const isOther = d.kind === "other" || d.kind === "descriptor" || (value == null && !isQual && Boolean(label));
+        if (value == null && !isQual && !isOther) continue;
         if (validIso(d.date)) {
           list.push({
             subject: String(s.subject || ""),
             value,
             label,
-            kind: isQual ? "qualifier" : "numeric",
+            raw: d.raw || label,
+            kind: isQual ? "qualifier" : (isOther ? (d.kind || "other") : "numeric"),
             isThesis: Boolean(d.isThesis),
             date: d.date,
             i: list.length,
@@ -756,17 +772,47 @@ function markGroups(subject) {
   if (!details.length && Array.isArray(subject.semesters)) {
     details = [];
     for (const sem of subject.semesters) {
-      for (const mk of Array.isArray(sem.marks) ? sem.marks : []) details.push({ value: mk.value, date: mk.date, isThesis: Boolean(mk.isThesis), semester: sem.semester });
+      for (const mk of Array.isArray(sem.marks) ? sem.marks : []) {
+        details.push({
+          value: mk.value,
+          label: mk.label,
+          raw: mk.raw,
+          kind: mk.kind,
+          date: mk.date,
+          isThesis: Boolean(mk.isThesis),
+          semester: sem.semester,
+        });
+      }
     }
   }
-  if (!details.length && Array.isArray(subject.marks)) details = subject.marks.map((value) => ({ value, date: null, isThesis: false, semester: 0 }));
+  if (!details.length && Array.isArray(subject.marks)) {
+    details = subject.marks.map((value) => ({
+      value: typeof value === "number" ? value : null,
+      label: String(value ?? ""),
+      raw: String(value ?? ""),
+      kind: typeof value === "number" ? "numeric" : (QUALIFIER_NAMES[String(value).toUpperCase()] ? "qualifier" : "other"),
+      date: null,
+      isThesis: false,
+      semester: 0,
+    }));
+  }
   const groups = new Map();
   for (const d of details) {
-    const value = num(d && d.value);
-    if (value == null) continue;
+    if (!d) continue;
+    const value = num(d.value);
+    const label = d.label || (value != null ? String(value) : (d.raw != null ? String(d.raw) : ""));
+    const kind = d.kind || (value != null ? "numeric" : (QUALIFIER_NAMES[String(label).toUpperCase()] ? "qualifier" : "other"));
+    if (value == null && !label) continue;
     const key = d.semester === 1 || d.semester === 2 ? d.semester : 0;
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({ value, date: validIso(d.date) ? d.date : null, isThesis: Boolean(d.isThesis) });
+    groups.get(key).push({
+      value,
+      label,
+      raw: d.raw || label,
+      kind,
+      date: validIso(d.date) ? d.date : null,
+      isThesis: Boolean(d.isThesis),
+    });
   }
   const out = [];
   for (const key of [1, 2, 0]) {
