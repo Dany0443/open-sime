@@ -1,4 +1,4 @@
-const CACHE_NAME = "open-sime-v1";
+const CACHE_NAME = "open-sime-v2";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -26,8 +26,8 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // NEVER cache auth endpoints - pass straight to network
-  if (url.pathname.startsWith("/api/auth/")) {
+  // NEVER cache auth endpoints or health check - pass straight to network
+  if (url.pathname.startsWith("/api/auth/") || url.pathname === "/api/health") {
     return;
   }
 
@@ -58,22 +58,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static shell & assets
+  // Static shell & assets: network-first with cache fallback so desktop sidecar updates never serve stale UI
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        fetch(event.request).then((res) => {
-          if (res.ok) caches.open(CACHE_NAME).then((c) => c.put(event.request, res));
-        }).catch(() => {});
-        return cached;
-      }
-      return fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         if (response.ok && event.request.method === "GET") {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });

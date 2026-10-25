@@ -1145,29 +1145,42 @@ test("M3 Expressive Motion & Switch Selection: unselected pill vs selected round
   );
 });
 
-test("Tauri 2 Phase 1: configuration, scripts, capabilities, and icons in sime-desktop", () => {
+test("Tauri 2 Desktop: configuration, sidecar externalBin, scripts, capabilities, and icons in sime-desktop", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
   assert.equal(pkg.scripts.start, "node server.js");
+  assert.equal(pkg.scripts["sidecar:build"], "node scripts/build-sidecar.mjs");
   assert.equal(pkg.scripts.tauri, "tauri");
   assert.equal(pkg.scripts["tauri:dev"], "tauri dev");
+  assert.equal(pkg.scripts["tauri:build"], "tauri build");
   assert.ok(pkg.devDependencies["@tauri-apps/cli"], "Must include @tauri-apps/cli v2 in devDependencies");
+  assert.ok(pkg.devDependencies["@tauri-apps/plugin-shell"], "Must include @tauri-apps/plugin-shell in devDependencies");
 
   const tauriConf = JSON.parse(fs.readFileSync(path.join(__dirname, "../src-tauri/tauri.conf.json"), "utf8"));
   assert.equal(tauriConf.productName, "Open SIME");
   assert.equal(tauriConf.identifier, "md.sime.opensime");
   assert.equal(tauriConf.build.beforeDevCommand, "npm start");
   assert.equal(tauriConf.build.devUrl, "http://127.0.0.1:3000");
-  assert.equal(tauriConf.build.frontendDist, "../public");
+  assert.equal(tauriConf.build.beforeBuildCommand, "npm run sidecar:build");
+  assert.equal(tauriConf.build.frontendDist, "../dist-tauri");
   assert.equal(tauriConf.app.windows[0].title, "Open SIME");
   assert.equal(tauriConf.app.windows[0].label, "main");
+  assert.equal(tauriConf.app.windows[0].visible, false);
   assert.ok(tauriConf.app.windows[0].width >= 800);
   assert.ok(tauriConf.app.windows[0].height >= 600);
+  assert.equal(tauriConf.bundle.active, true);
+  assert.deepEqual(tauriConf.bundle.externalBin, ["binaries/open-sime-server"]);
 
   const cap = JSON.parse(fs.readFileSync(path.join(__dirname, "../src-tauri/capabilities/default.json"), "utf8"));
   assert.ok(cap.windows.includes("main"));
   assert.ok(cap.permissions.includes("core:default"));
+  const spawnPerm = cap.permissions.find((p) => typeof p === "object" && p.identifier === "shell:allow-spawn");
+  assert.ok(spawnPerm, "Capabilities must include shell:allow-spawn for the sidecar");
+  assert.ok(spawnPerm.allow.some((a) => a.name === "binaries/open-sime-server" && a.sidecar === true));
 
-  assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/Cargo.toml")), "Must have src-tauri/Cargo.toml");
+  const cargoToml = fs.readFileSync(path.join(__dirname, "../src-tauri/Cargo.toml"), "utf8");
+  assert.ok(cargoToml.includes("tauri-plugin-shell"), "Cargo.toml must include tauri-plugin-shell");
+
+  assert.ok(fs.existsSync(path.join(__dirname, "../dist-tauri/index.html")), "Must have dist-tauri/index.html fallback shell");
   assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/build.rs")), "Must have src-tauri/build.rs");
   assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/src/lib.rs")), "Must have src-tauri/src/lib.rs");
   assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/src/main.rs")), "Must have src-tauri/src/main.rs");

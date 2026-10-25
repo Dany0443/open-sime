@@ -19,6 +19,9 @@ skills-lock.json
 node_modules/
 sime-desktop/node_modules/
 
-# Tauri / Rust build artifacts
+# Tauri / Rust / Sidecar build artifacts
 sime-desktop/src-tauri/target/
 sime-desktop/src-tauri/gen/schemas/
+sime-desktop/src-tauri/binaries/
+sime-desktop/.sidecar-staging/
+*.exe

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ro">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' http://127.0.0.1:17321; base-uri 'none'; form-action 'none'"
+    />
+    <title>Open SIME</title>
+    <link rel="stylesheet" href="loader.css" />
+  </head>
+  <body>
+    <main class="shell" role="main" aria-live="polite">
+      <div class="card" id="status-card">
+        <h1 class="title">Open SIME</h1>
+        <p class="subtitle" id="status-title">Se pornește serviciul local Open SIME…</p>
+        <p class="detail" id="status-detail">
+          Aplicația pregătește conexiunea securizată pe 127.0.0.1.
+        </p>
+        <pre class="code" id="status-code" hidden></pre>
+      </div>
+    </main>
+    <script src="loader.js"></script>
+  </body>
+</html>
+

@@ -1,36 +1,33 @@
 # Open SIME Desktop / Web (`sime-desktop`)
 
-This directory contains the **Open SIME** web application (`server.js` + `public/`) and its **Tauri 2** desktop shell (`src-tauri/`).
+This directory contains the **Open SIME** web application (`server.js` + `public/`) and its **Tauri 2** desktop application (`src-tauri/`).
 
 ## Commands
 
 Run inside `sime-desktop/`:
 
 ```bash
-npm install         # Install Node.js dependencies and @tauri-apps/cli v2
-npm run check       # Syntax check server and client files
-npm test            # Run automated test suite (node:test)
-npm start           # Start local web server on http://127.0.0.1:3000
-npm run tauri:dev   # Launch Tauri 2 desktop development window (auto-starts Express on 127.0.0.1:3000)
-npm run tauri:info  # Inspect Tauri environment, Rust toolchain, and WebView2 status
+npm install           # Install Node.js dependencies and Tauri CLI / sidecar tooling
+npm run check         # Syntax check server, client, loader, and build scripts
+npm test              # Run automated test suite (node:test)
+npm start             # Start local web server on http://127.0.0.1:3000
+npm run sidecar:build # Build self-contained Node.js sidecar executable into src-tauri/binaries/
+npm run tauri:dev     # Launch Tauri 2 desktop development window (auto-starts Express on 127.0.0.1:3000)
+npm run tauri:build   # Build production Tauri 2 desktop application with bundled Node.js sidecar
+npm run tauri:info    # Inspect Tauri environment, Rust toolchain, and WebView2 status
 ```
 
-## Tauri 2 Configuration (Phase 1 — Development Mode)
+## Documentation
 
-- **Configuration**: [`src-tauri/tauri.conf.json`](./src-tauri/tauri.conf.json)
-  - `productName`: `"Open SIME"`
-  - `identifier`: `"md.sime.opensime"`
-  - `build.beforeDevCommand`: `"npm start"` (automatically launches the local Express server)
-  - `build.devUrl`: `"http://127.0.0.1:3000"`
-  - `build.frontendDist`: `"../public"` (points strictly to the static frontend assets directory so neither the project root nor `node_modules/` is bundled)
-  - `bundle.active`: `false` (Phase 1 is development-mode integration; production Node.js sidecar and installer bundling are deferred to a later phase)
-- **Prerequisites for `npm run tauri:dev`**:
-  - Node.js `>= 20`
-  - Rust toolchain (`rustup`, `cargo`, `rustc >= 1.77.2`) and platform WebView (WebView2 on Windows)
+See [`../docs/desktop-builds.md`](../docs/desktop-builds.md) for full details on:
+- Sidecar packaging (`esbuild` + `@yao-pkg/pkg`) and target-triple naming (`src-tauri/binaries/open-sime-server-<target-triple>`)
+- Startup readiness verification, port `17321` loopback binding, port conflict handling, and clean process shutdown
+- OS application-data directory storage (`%APPDATA%\md.sime.opensime`, `~/Library/Application Support/md.sime.opensime`, `~/.local/share/md.sime.opensime`)
 
 ## Environment Variables
 
-- `SIME_WEB_HOST`: Bind address (default `127.0.0.1`)
-- `SIME_WEB_PORT`: Port number (default `3000`)
+- `SIME_WEB_HOST`: Bind address (default `127.0.0.1`; forced to `127.0.0.1` in production mode)
+- `SIME_WEB_PORT`: Port number (default `3000` in dev mode, `17321` in production sidecar mode)
+- `SIME_DATA_DIR`: Override directory for persistent remember-tokens and encryption key
 - `SIME_DEBUG=1`: Enables `/api/debug/parser-health` (never returns personal data)
 - `SIME_REMEMBER_SECRET`: Optional secret for encrypting remember-me tokens

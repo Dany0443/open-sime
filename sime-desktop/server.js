@@ -4,12 +4,49 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import * as cheerio from "cheerio";
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const MODULE_DIR =
+  typeof __dirname === "string"
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
+const ROOT = process.env.SIME_STATIC_ROOT
+  ? path.resolve(process.env.SIME_STATIC_ROOT)
+  : MODULE_DIR;
+const APP_IDENTIFIER = "md.sime.opensime";
+const DEFAULT_DEV_PORT = 3000;
+const DEFAULT_PROD_PORT = 17321;
+
+function isProductionSidecar(argv = process.argv, env = process.env) {
+  return (
+    Boolean(process.pkg) ||
+    env.SIME_DESKTOP_PRODUCTION === "1" ||
+    (Array.isArray(argv) && argv.includes("--production"))
+  );
+}
+
+function resolveDataDir(env = process.env, platform = process.platform, argv = process.argv) {
+  if (env.SIME_DATA_DIR) {
+    return path.resolve(env.SIME_DATA_DIR);
+  }
+  if (isProductionSidecar(argv, env)) {
+    const home = os.homedir();
+    if (platform === "win32") {
+      const base = env.APPDATA || path.join(home, "AppData", "Roaming");
+      return path.join(base, APP_IDENTIFIER);
+    }
+    if (platform === "darwin") {
+      return path.join(home, "Library", "Application Support", APP_IDENTIFIER);
+    }
+    const base = env.XDG_DATA_HOME || path.join(home, ".local", "share");
+    return path.join(base, APP_IDENTIFIER);
+  }
+  return path.join(ROOT, "data");
+}
 
 // errors
 
@@ -2769,26 +2806,35 @@ function decryptRememberToken(token, secret) {
   }
 }
 
-const REMEMBER_STORE_PATH = process.env.SIME_REMEMBER_STORE || path.join(ROOT, "data", "remember-tokens.json");
-const REMEMBER_KEY_PATH = process.env.SIME_REMEMBER_KEY_FILE || path.join(ROOT, "data", "remember-secret.key");
+function getRememberStorePath(env = process.env, platform = process.platform, argv = process.argv) {
+  if (env.SIME_REMEMBER_STORE) return path.resolve(env.SIME_REMEMBER_STORE);
+  return path.join(resolveDataDir(env, platform, argv), "remember-tokens.json");
+}
+
+function getRememberKeyPath(env = process.env, platform = process.platform, argv = process.argv) {
+  if (env.SIME_REMEMBER_KEY_FILE) return path.resolve(env.SIME_REMEMBER_KEY_FILE);
+  return path.join(resolveDataDir(env, platform, argv), "remember-secret.key");
+}
+
 let memRememberKey = null;
 
 function getRememberSecretKey() {
   if (process.env.SIME_REMEMBER_SECRET) {
     return deriveRememberKey(process.env.SIME_REMEMBER_SECRET);
   }
+  const keyPath = getRememberKeyPath();
   try {
-    if (fs.existsSync(REMEMBER_KEY_PATH)) {
-      const existing = fs.readFileSync(REMEMBER_KEY_PATH);
+    if (fs.existsSync(keyPath)) {
+      const existing = fs.readFileSync(keyPath);
       if (existing.length === 32) return existing;
       return deriveRememberKey(existing);
     }
-    const dir = path.dirname(REMEMBER_KEY_PATH);
+    const dir = path.dirname(keyPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
     const generated = crypto.randomBytes(32);
-    fs.writeFileSync(REMEMBER_KEY_PATH, generated, { mode: 0o600 });
+    fs.writeFileSync(keyPath, generated, { mode: 0o600 });
     return generated;
   } catch {
     if (!memRememberKey) {
@@ -2799,9 +2845,10 @@ function getRememberSecretKey() {
 }
 
 function loadRememberTokens() {
+  const storePath = getRememberStorePath();
   try {
-    if (!fs.existsSync(REMEMBER_STORE_PATH)) return {};
-    const raw = fs.readFileSync(REMEMBER_STORE_PATH, "utf8");
+    if (!fs.existsSync(storePath)) return {};
+    const raw = fs.readFileSync(storePath, "utf8");
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
@@ -2810,12 +2857,13 @@ function loadRememberTokens() {
 }
 
 function saveRememberTokens(tokens) {
+  const storePath = getRememberStorePath();
   try {
-    const dir = path.dirname(REMEMBER_STORE_PATH);
+    const dir = path.dirname(storePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
-    fs.writeFileSync(REMEMBER_STORE_PATH, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+    fs.writeFileSync(storePath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
   } catch {
     // Fail closed or keep in memory if file cannot be written
   }
@@ -2912,6 +2960,14 @@ function createApp() {
     next();
   });
   app.use(express.json({ limit: "4kb" }));
+
+  app.get("/api/health", (_req, res) => {
+    res.json({
+      ok: true,
+      service: "open-sime-server",
+      instanceId: process.env.SIME_INSTANCE_ID || null,
+    });
+  });
 
   app.get("/api/auth/config", (_req, res) => {
     res.json({
@@ -3325,9 +3381,28 @@ function createApp() {
     });
   });
 
+  const STATIC_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+  };
+
+  const readEmbeddedAsset = (assetKey) => {
+    const map = globalThis.__SIME_EMBEDDED_ASSETS__;
+    if (!map || typeof map !== "object") return null;
+    const b64 = map[assetKey];
+    return typeof b64 === "string" ? Buffer.from(b64, "base64") : null;
+  };
+
   app.get("/", (_req, res) => {
     res.set("Content-Type", "text/html; charset=utf-8");
-    res.sendFile(path.join(ROOT, "index.html"));
+    const embedded = readEmbeddedAsset("/index.html");
+    if (embedded) return res.send(embedded);
+    return res.sendFile(path.join(ROOT, "index.html"));
   });
   app.get("/sw.js", (_req, res) => {
     res.set({
@@ -3335,7 +3410,18 @@ function createApp() {
       "Service-Worker-Allowed": "/",
       "Cache-Control": "no-cache",
     });
-    res.sendFile(path.join(ROOT, "public", "sw.js"));
+    const embedded = readEmbeddedAsset("/public/sw.js");
+    if (embedded) return res.send(embedded);
+    return res.sendFile(path.join(ROOT, "public", "sw.js"));
+  });
+  app.use("/public", (req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    const assetKey = "/public" + req.path;
+    const embedded = readEmbeddedAsset(assetKey);
+    if (!embedded) return next();
+    const ext = path.extname(assetKey).toLowerCase();
+    if (STATIC_MIME[ext]) res.set("Content-Type", STATIC_MIME[ext]);
+    return res.send(embedded);
   });
   app.use(
     "/public",
@@ -3441,12 +3527,103 @@ export {
   parseMarkCell,
   unescapeJs,
   weekStart,
+  APP_IDENTIFIER,
+  DEFAULT_DEV_PORT,
+  DEFAULT_PROD_PORT,
+  isProductionSidecar,
+  resolveDataDir,
+  getRememberStorePath,
+  getRememberKeyPath,
+  startServer,
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const port = Number(process.env.SIME_WEB_PORT) || 3000;
-  const host = process.env.SIME_WEB_HOST || "127.0.0.1";
-  app.listen(port, host, () => {
-    console.log(`Listening on http://${host}:${port}`);
+function parseCliOptions(argv = process.argv, env = process.env) {
+  const production = isProductionSidecar(argv, env);
+  const watchStdin = (Array.isArray(argv) && argv.includes("--watch-stdin")) || env.SIME_WATCH_STDIN === "1";
+  let portArg = null;
+  let hostArg = null;
+  if (Array.isArray(argv)) {
+    for (let i = 0; i < argv.length; i += 1) {
+      if (argv[i] === "--port" && argv[i + 1]) portArg = argv[i + 1];
+      else if (argv[i]?.startsWith("--port=")) portArg = argv[i].slice(7);
+      else if (argv[i] === "--host" && argv[i + 1]) hostArg = argv[i + 1];
+      else if (argv[i]?.startsWith("--host=")) hostArg = argv[i].slice(7);
+    }
+  }
+  const rawPort = portArg ?? env.SIME_WEB_PORT;
+  const defaultPort = production ? DEFAULT_PROD_PORT : DEFAULT_DEV_PORT;
+  const port = rawPort !== undefined && rawPort !== "" ? Number(rawPort) : defaultPort;
+  const host = hostArg ?? env.SIME_WEB_HOST ?? "127.0.0.1";
+  return { production, watchStdin, port, host };
+}
+
+function startServer(options = {}) {
+  const { production, watchStdin, port, host } = { ...parseCliOptions(), ...options };
+  if (production && host !== "127.0.0.1") {
+    const errPayload = { code: "INVALID_HOST", host: scrubLog(String(host)), message: "Production desktop backend must bind only to 127.0.0.1" };
+    console.error(`SIME_SIDECAR_ERROR ${JSON.stringify(errPayload)}`);
+    process.exit(1);
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    const errPayload = { code: "INVALID_PORT", port: scrubLog(String(port)), message: "Port must be an integer between 1 and 65535" };
+    console.error(`SIME_SIDECAR_ERROR ${JSON.stringify(errPayload)}`);
+    process.exit(1);
+  }
+  const server = app.listen({ port, host, exclusive: true }, () => {
+    const addr = server.address();
+    const actualPort = typeof addr === "object" && addr ? addr.port : port;
+    const url = `http://${host}:${actualPort}`;
+    console.log(`Listening on ${url}`);
+    console.log(
+      `SIME_SIDECAR_READY ${JSON.stringify({
+        url,
+        host,
+        port: actualPort,
+        pid: process.pid,
+        instanceId: process.env.SIME_INSTANCE_ID || null,
+      })}`
+    );
   });
+
+  server.on("error", (err) => {
+    const code = err?.code || "LISTEN_FAILED";
+    const message = scrubLog(err?.message || "Failed to start HTTP server");
+    console.error(`SIME_SIDECAR_ERROR ${JSON.stringify({ code, port, host, message })}`);
+    process.exit(1);
+  });
+
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const forceTimer = setTimeout(() => process.exit(0), 3000);
+    forceTimer.unref();
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  if (watchStdin && process.stdin) {
+    process.stdin.resume();
+    process.stdin.once("end", shutdown);
+    process.stdin.once("close", shutdown);
+    process.stdin.once("error", shutdown);
+  }
+  return server;
+}
+
+const isDirectRun = (() => {
+  if (Boolean(process.pkg) || globalThis.__SIME_SIDECAR_MAIN__ === true) return true;
+  try {
+    if (!process.argv[1] || !import.meta.url) return false;
+    return path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (isDirectRun) {
+  startServer();
 }
