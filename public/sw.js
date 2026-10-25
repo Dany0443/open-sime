@@ -7,8 +7,6 @@ const SHELL_ASSETS = [
   "/public/strings.js",
   "/public/manifest.json",
   "/public/assets/favicon.svg",
-  "/public/assets/icon-192.png",
-  "/public/assets/icon-512.png",
 ];
 
 self.addEventListener("install", (event) => {

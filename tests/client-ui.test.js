@@ -257,9 +257,11 @@ test("UI Branding: Site name is 'Open SIME' across HTML title, brand mark, manif
   assert.ok(html.includes("<span>Open SIME</span>"), "Auth brand mark must be 'Open SIME'");
   assert.ok(html.includes('<span class="brand-name">Open SIME</span>'), "Rail/drawer brand name must be 'Open SIME'");
 
-  // 2. manifest.json name and short_name
+  // 2. manifest.json name, short_name, and unified favicon.svg icon
   assert.equal(manifest.name, "Open SIME", "manifest.json name must be 'Open SIME'");
   assert.equal(manifest.short_name, "Open SIME", "manifest.json short_name must be 'Open SIME'");
+  assert.ok(Array.isArray(manifest.icons) && manifest.icons.length > 0, "manifest must define icons");
+  assert.ok(manifest.icons.every((ico) => ico.src.includes("favicon.svg")), "manifest icons must only reference favicon.svg");
 
   // 3. strings.js app_title
   assert.ok(stringsJs.includes('app_title: "Open SIME"'), "strings.js must define app_title as 'Open SIME'");
@@ -697,4 +699,6 @@ test("Service Worker: public/sw.js never caches /api/auth and caches shell", () 
   assert.ok(swJs.includes("index.html"), "sw.js pre-caches index.html shell");
   assert.ok(swJs.includes("app.js"), "sw.js pre-caches app.js");
   assert.ok(swJs.includes("style.css"), "sw.js pre-caches style.css");
+  assert.ok(swJs.includes("favicon.svg"), "sw.js pre-caches favicon.svg");
+  assert.ok(!swJs.includes(".png"), "sw.js must not reference removed png icons");
 });
