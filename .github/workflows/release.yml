@@ -479,3 +479,4 @@ jobs:
             --draft=false \
             --prerelease=false
           echo "✓ Release ${{ github.ref_name }} published successfully with all signed platform installers."
+

@@ -124,3 +124,4 @@ jobs:
             sime-desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
           if-no-files-found: error
           retention-days: 7
+

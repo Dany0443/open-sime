@@ -92,3 +92,4 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   assert.ok(content.includes("xcrun stapler validate"), "Release must verify macOS notarization ticket");
   assert.ok(content.includes("--appimage-signature"), "Release must verify Linux AppImage signature");
 });
+

@@ -118,3 +118,4 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "
   console.log("✓ All required release signing secrets are present.");
   process.exit(0);
 }
+
