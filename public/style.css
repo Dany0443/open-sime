@@ -50,6 +50,11 @@
 
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --ease-spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+  --dur-fast: 160ms;
+  --dur-med: 220ms;
+  --dur-slow: 300ms;
+  --trans-fast: 160ms var(--ease);
+  --trans-med: 220ms var(--ease);
   --nav-h: 80px;
 }
 
@@ -117,6 +122,7 @@ body {
   font-size: 1rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  transition: background-color var(--trans-med), color var(--trans-med);
 }
 
 button, input {
@@ -214,11 +220,33 @@ ul, ol {
 }
 
 @keyframes view-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(6px); }
 }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(12px) scale(0.96); }
+}
+
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+}
+
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+
+@keyframes sun-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes sun-spin-reverse {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
 }
 
 .btn, .icon-btn, .text-btn, .seg-btn, .student-chip, .day-tab {
@@ -260,7 +288,7 @@ ul, ol {
   font-size: 0.875rem;
   font-weight: 600;
   line-height: 1.25;
-  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, box-shadow 0.2s;
+  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, box-shadow 0.2s, transform 0.15s var(--ease);
 }
 
 .btn:active {
@@ -287,11 +315,18 @@ ul, ol {
   display: block;
 }
 
-.btn-tonal {
+.btn-tonal,
+.btn.tonal {
   min-height: 48px;
   padding: 0 24px;
   background: var(--secondary-container);
   color: var(--on-secondary-container);
+}
+
+.btn-tonal:disabled,
+.btn.tonal:disabled {
+  background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
 }
 
 .btn-outlined {
@@ -317,7 +352,7 @@ ul, ol {
   min-height: 48px;
   border-radius: 50%;
   color: var(--on-surface-variant);
-  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s;
+  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, color 0.15s var(--ease);
 }
 
 .icon-btn:active {
@@ -343,6 +378,11 @@ ul, ol {
   color: var(--primary);
   font-size: 0.875rem;
   font-weight: 600;
+  transition: border-radius 0.25s var(--ease-spring), background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.text-btn:active {
+  border-radius: var(--shape-md);
 }
 
 .chip {
@@ -357,6 +397,7 @@ ul, ol {
   font-weight: 700;
   line-height: 1.5;
   white-space: nowrap;
+  transition: background-color var(--trans-fast), color var(--trans-fast);
 }
 
 .chip .icon {
@@ -462,6 +503,11 @@ ul, ol {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1;
+  transition: transform var(--trans-fast), box-shadow var(--trans-fast), background-color var(--trans-fast);
+}
+
+.score:hover {
+  transform: translateY(-1px);
 }
 
 .score-sm {
@@ -575,6 +621,7 @@ ul, ol {
   border-radius: var(--shape-xl);
   background: var(--surface-container-low);
   text-align: center;
+  animation: view-in var(--dur-med) var(--ease);
 }
 
 .empty > .btn {
@@ -605,6 +652,7 @@ ul, ol {
   padding: 20px;
   border-radius: var(--shape-xl);
   background: var(--surface-container-low);
+  transition: background-color var(--trans-med), box-shadow var(--trans-med);
 }
 
 .card-head {
@@ -686,6 +734,26 @@ ul, ol {
   pointer-events: none;
 }
 
+.auth-deco .deco-shape,
+.metric-deco .deco-shape {
+  transform-origin: 50% 50%;
+  transform-box: view-box;
+  will-change: transform;
+}
+
+.auth-deco.deco-a .deco-shape {
+  animation: sun-spin 52s linear infinite;
+}
+
+.auth-deco.deco-b .deco-shape {
+  animation: sun-spin-reverse 44s linear infinite;
+}
+
+.brand-mark .deco-shape,
+.cookie-shape {
+  animation: none;
+}
+
 .deco-a {
   top: -180px;
   left: -200px;
@@ -711,6 +779,8 @@ ul, ol {
   padding: 32px 28px;
   border-radius: var(--shape-xxl);
   background: var(--surface-container-low);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.06);
+  transition: background-color var(--trans-med), box-shadow var(--trans-med);
 }
 
 .auth-brand {
@@ -720,6 +790,10 @@ ul, ol {
   font-family: var(--font-display);
   font-size: 1.25rem;
   font-weight: 800;
+}
+
+.auth-settings-btn {
+  margin-left: auto;
 }
 
 .brand-mark {
@@ -752,10 +826,17 @@ ul, ol {
 .seg {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
   border-radius: var(--shape-full);
   background: var(--surface-container-high);
+}
+
+.seg > label {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .seg input {
@@ -772,11 +853,13 @@ ul, ol {
   align-items: center;
   justify-content: center;
   min-height: 48px;
-  padding: 0 20px;
+  padding: 4px 16px;
   border-radius: var(--shape-full);
   color: var(--on-surface-variant);
   font-size: 0.875rem;
   font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
   transition: background-color 0.2s, color 0.2s, border-radius 0.3s var(--ease-spring);
 }
 
@@ -800,7 +883,11 @@ ul, ol {
   border-radius: var(--shape-md);
   background: var(--surface-container-lowest);
   box-shadow: inset 0 0 0 1px var(--outline);
-  transition: box-shadow 0.15s;
+  transition: box-shadow 0.15s, background-color var(--trans-fast);
+}
+
+.field:hover:not(:focus-within) {
+  box-shadow: inset 0 0 0 1px var(--on-surface);
 }
 
 .field:focus-within {
@@ -852,6 +939,7 @@ ul, ol {
   background: var(--error-container);
   color: var(--on-error-container);
   font-size: 0.9375rem;
+  animation: banner-in var(--dur-fast) var(--ease);
 }
 
 .banner-info {
@@ -917,7 +1005,7 @@ ul, ol {
   padding: calc(8px + env(safe-area-inset-top)) 16px 8px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--outline-variant);
-  transition: box-shadow 0.2s ease;
+  transition: background-color var(--trans-med), border-color var(--trans-med), box-shadow 0.2s ease;
 }
 
 .topbar-main {
@@ -1004,7 +1092,7 @@ ul, ol {
   border: none;
   cursor: pointer;
   padding: 0;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, border-radius 0.3s var(--ease-spring);
 }
 
 .account-btn:hover {
@@ -1030,6 +1118,8 @@ ul, ol {
   border: 1px solid var(--outline-variant);
   border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.16);
+  transform-origin: top right;
+  animation: menu-in var(--dur-fast) var(--ease);
 }
 
 .account-menu[hidden] {
@@ -1105,7 +1195,7 @@ ul, ol {
   background: var(--surface-container-high);
   color: var(--on-surface);
   text-align: left;
-  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s;
+  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, color 0.2s;
 }
 
 .student-chip:active {
@@ -1168,6 +1258,7 @@ ul, ol {
   gap: 2px;
   padding: 10px 6px calc(12px + env(safe-area-inset-bottom));
   background: var(--surface-container);
+  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 50%, transparent);
 }
 
 .nav-item {
@@ -1180,6 +1271,15 @@ ul, ol {
   color: var(--on-surface-variant);
   font-size: 0.75rem;
   font-weight: 650;
+  transition: color var(--trans-fast);
+}
+
+.nav-item .nav-label {
+  max-width: 100%;
+  padding-inline: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-pill {
@@ -1188,7 +1288,7 @@ ul, ol {
   width: 36px;
   height: 32px;
   border-radius: var(--shape-md);
-  transition: width 0.4s var(--ease-spring), background-color 0.2s;
+  transition: width 0.4s var(--ease-spring), background-color 0.2s, color 0.2s;
 }
 
 .nav-item:hover .nav-pill {
@@ -1227,6 +1327,7 @@ ul, ol {
   padding: 20px;
   overflow: hidden;
   border-radius: var(--shape-xl);
+  transition: background-color var(--trans-med), color var(--trans-med), transform var(--trans-fast);
 }
 
 .metric-label {
@@ -1268,6 +1369,11 @@ ul, ol {
   color: var(--primary);
   opacity: 0.16;
   pointer-events: none;
+}
+
+.metric-gpa .metric-deco .deco-shape,
+.metric-deco .deco-shape {
+  animation: sun-spin 38s linear infinite;
 }
 
 .metric-gpa > :not(.metric-deco) {
@@ -1362,6 +1468,7 @@ ul, ol {
   padding: 20px;
   border-radius: var(--shape-xl);
   background: var(--surface-container-high);
+  transition: background-color var(--trans-med), color var(--trans-med);
 }
 
 .live-hero.is-active {
@@ -1449,6 +1556,7 @@ ul, ol {
   inset: 0 auto 0 0;
   width: var(--p, 0%);
   background: var(--primary);
+  transition: width 0.5s var(--ease);
 }
 
 .mini-list {
@@ -1466,6 +1574,7 @@ ul, ol {
   padding: 8px 12px;
   border-radius: 14px;
   font-size: 0.9375rem;
+  transition: background-color var(--trans-fast), color var(--trans-fast);
 }
 
 .mini-time {
@@ -1511,6 +1620,11 @@ ul, ol {
   padding: 10px 14px 10px 10px;
   border-radius: var(--shape-lg);
   background: var(--surface-container);
+  transition: background-color var(--trans-fast), transform var(--trans-fast);
+}
+
+.recent-item:hover {
+  background: var(--surface-container-high);
 }
 
 .recent-text {
@@ -1534,6 +1648,11 @@ ul, ol {
   padding: 14px 16px;
   border-radius: var(--shape-lg);
   background: var(--surface-container);
+  transition: background-color var(--trans-fast);
+}
+
+.task:hover {
+  background: var(--surface-container-high);
 }
 
 .task-top {
@@ -1587,6 +1706,7 @@ ul, ol {
   padding: 16px;
   border-radius: var(--shape-sm);
   background: var(--surface-container-high);
+  transition: background-color var(--trans-fast), color var(--trans-fast);
 }
 
 .stat:first-child {
@@ -1600,6 +1720,9 @@ ul, ol {
 .stat-label {
   font-size: 0.8125rem;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stat-value {
@@ -1639,6 +1762,11 @@ ul, ol {
   padding: 20px;
   border-radius: var(--shape-xl);
   background: var(--surface-container-low);
+  transition: background-color var(--trans-fast), box-shadow var(--trans-fast);
+}
+
+.subject:hover {
+  background: var(--surface-container);
 }
 
 .subject-name {
@@ -1800,6 +1928,7 @@ ul, ol {
   padding: 16px;
   border-radius: var(--shape-lg);
   background: var(--surface-container);
+  transition: background-color var(--trans-fast), color var(--trans-fast), border-radius var(--trans-med);
 }
 
 .lesson.is-past {
@@ -1902,6 +2031,11 @@ ul, ol {
   padding: 12px 16px 12px 12px;
   border-radius: var(--shape-lg);
   background: var(--surface-container);
+  transition: background-color var(--trans-fast);
+}
+
+.absence:hover {
+  background: var(--surface-container-high);
 }
 
 .abs-date {
@@ -1984,7 +2118,11 @@ ul, ol {
   border-radius: var(--shape-lg);
   background: var(--surface-container);
   overflow: hidden;
-  transition: background var(--trans-fast);
+  transition: background-color var(--trans-fast);
+}
+
+.abs-subject-card:hover {
+  background: var(--surface-container-high);
 }
 
 .abs-subject-summary {
@@ -1992,6 +2130,7 @@ ul, ol {
   cursor: pointer;
   padding: 12px 16px;
   user-select: none;
+  transition: background-color var(--trans-fast);
 }
 
 .abs-subject-summary::-webkit-details-marker {
@@ -2020,6 +2159,7 @@ ul, ol {
 
 .abs-subject-list {
   padding: 0 12px 12px 12px;
+  animation: view-in var(--dur-fast) var(--ease);
 }
 
 .profile-card {
@@ -2031,6 +2171,7 @@ ul, ol {
   border-radius: var(--shape-xxl);
   background: var(--primary-container);
   color: var(--on-primary-container);
+  transition: background-color var(--trans-med), color var(--trans-med);
 }
 
 .profile-name {
@@ -2060,6 +2201,7 @@ ul, ol {
   padding: 14px 18px;
   border-radius: var(--shape-md);
   background: var(--surface-container-low);
+  transition: background-color var(--trans-fast);
 }
 
 .info dt {
@@ -2094,6 +2236,11 @@ ul, ol {
   padding: 16px;
   border-radius: var(--shape-lg);
   background: var(--surface-container-low);
+  transition: background-color var(--trans-fast);
+}
+
+.teacher-card:hover {
+  background: var(--surface-container);
 }
 
 .teacher-head {
@@ -2287,6 +2434,10 @@ ul, ol {
     line-height: 1;
     text-align: center;
     color: var(--on-surface-variant);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .drawer .nav-item[aria-current="page"] .nav-label,
@@ -2441,6 +2592,8 @@ ul, ol {
     color: inherit;
     text-align: left;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .drawer-pinned-bottom {
@@ -2560,15 +2713,29 @@ ul, ol {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .view, .toast {
+  .view,
+  .toast,
+  .empty,
+  .banner,
+  .account-menu,
+  .settings-dialog,
+  .abs-subject-list,
+  .skeleton {
     animation: none;
+  }
+
+  .auth-deco.deco-a .deco-shape,
+  .auth-deco.deco-b .deco-shape,
+  .metric-gpa .metric-deco .deco-shape,
+  .metric-deco .deco-shape {
+    animation: none !important;
   }
 
   .chip-live::before, .sync-busy .sync-dot, .student-chip.is-loading .avatar {
     animation: none;
   }
 
-  .progress-fill, .nav-pill, .btn, .icon-btn, .seg-btn, .day-tab, .student-chip {
+  .progress-fill, .nav-pill, .btn, .icon-btn, .seg-btn, .day-tab, .student-chip, .score {
     transition-duration: 0.01ms;
   }
 
@@ -2582,8 +2749,9 @@ ul, ol {
 .marks-table-surface { overflow-x: auto; background: var(--surface-container-low); border-radius: var(--shape-lg); border: 1px solid var(--outline-variant); }
 .marks-table { width: 100%; min-width: 600px; border-collapse: collapse; text-align: left; }
 .marks-table th { position: sticky; top: 0; z-index: 1; padding: 12px 16px; background: var(--surface-container-high); color: var(--on-surface-variant); font-size: .75rem; font-weight: 700; white-space: nowrap; }
-.marks-table td { padding: 12px 16px; border-top: 1px solid var(--outline-variant); vertical-align: middle; }
+.marks-table td { padding: 12px 16px; border-top: 1px solid var(--outline-variant); vertical-align: middle; transition: background-color var(--trans-fast); }
 .marks-table tbody tr:nth-child(even) { background: var(--surface-container); }
+.marks-table tbody tr:hover td { background: var(--surface-container-high); }
 .marks-table .subject-name { font-size: 1rem; font-weight: 700; }
 .grade-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 
@@ -2737,6 +2905,7 @@ ul, ol {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 0;
+  flex-wrap: wrap;
 }
 
 .setting-action-row strong {
@@ -2850,6 +3019,10 @@ html[data-simple-mode="true"] .score-md {
   margin: auto;
 }
 
+.settings-dialog[open] {
+  animation: dialog-in var(--dur-med) var(--ease);
+}
+
 .settings-dialog::backdrop {
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(2px);
@@ -2891,9 +3064,16 @@ html[data-simple-mode="true"] .score-md {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 10px 0;
+  padding: 10px 8px;
+  margin-inline: -8px;
+  border-radius: var(--shape-sm);
   cursor: pointer;
   border-bottom: 1px solid var(--surface-container-highest);
+  transition: background-color var(--trans-fast);
+}
+
+.setting-toggle-row:hover {
+  background: color-mix(in srgb, var(--on-surface) 5%, transparent);
 }
 
 .setting-toggle-row:last-child {
