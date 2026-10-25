@@ -43,6 +43,7 @@ const STRINGS = {
     all_homework: "Toate temele",
     recent_grades: "Note recente",
     homework_preview: "Teme și termene",
+    general_average_estimated: "Media generală (estimată)",
 
     // Empty States
     no_grades_title: "Nicio notă încă",
@@ -146,6 +147,7 @@ const STRINGS = {
     all_homework: "Все задания",
     recent_grades: "Последние оценки",
     homework_preview: "Задания и сроки",
+    general_average_estimated: "Средний балл (расчётный)",
 
     // Empty States
     no_grades_title: "Пока нет оценок",
@@ -249,6 +251,7 @@ const STRINGS = {
     all_homework: "All homework",
     recent_grades: "Recent grades",
     homework_preview: "Homework & Deadlines",
+    general_average_estimated: "General GPA (estimated)",
 
     // Empty States
     no_grades_title: "No grades yet",

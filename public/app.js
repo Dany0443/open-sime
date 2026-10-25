@@ -58,7 +58,7 @@ const ICONS = {
 };
 
 const MONTHS = ["ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie"];
-const MONTHS_SHORT = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "noi", "dec"];
+const MONTHS_SHORT = ["ian", "feb", "mar", "apr", "mai", "iun", "iul", "aug", "sep", "oct", "nov", "dec"];
 const WEEKDAYS = ["Luni", "Marți", "Miercuri", "Joi", "Vineri", "Sâmbătă", "Duminică"];
 const WEEKDAYS_SHORT = ["Lu", "Ma", "Mi", "Jo", "Vi"];
 const BAND_LABELS = { "band-top": "Excelent", "band-good": "Bine", "band-ok": "Suficient", "band-low": "Insuficient", "band-none": "Fără medie" };
@@ -652,15 +652,40 @@ function model() {
 function recentMarks(m) {
   const list = [];
   for (const g of m.grades) {
-    const value = num(g && g.value);
-    if (value == null) continue;
-    list.push({ subject: String(g.subject || ""), value, date: validIso(g.date) ? g.date : null, i: list.length });
+    if (!g) continue;
+    const value = num(g.value);
+    const label = g.label || (value != null ? String(value) : g.raw || "");
+    const isQual = g.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(label).toUpperCase()]);
+    if (value == null && !isQual) continue;
+    list.push({
+      subject: String(g.subject || ""),
+      value,
+      label,
+      kind: isQual ? "qualifier" : "numeric",
+      isThesis: Boolean(g.isThesis),
+      date: validIso(g.date) ? g.date : null,
+      i: list.length,
+    });
   }
   if (!list.length) {
     for (const s of m.subjects) {
       for (const d of Array.isArray(s.markDetails) ? s.markDetails : []) {
-        const value = num(d && d.value);
-        if (value != null && validIso(d.date)) list.push({ subject: String(s.subject || ""), value, date: d.date, i: list.length });
+        if (!d) continue;
+        const value = num(d.value);
+        const label = d.label || (value != null ? String(value) : d.raw || "");
+        const isQual = d.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(label).toUpperCase()]);
+        if (value == null && !isQual) continue;
+        if (validIso(d.date)) {
+          list.push({
+            subject: String(s.subject || ""),
+            value,
+            label,
+            kind: isQual ? "qualifier" : "numeric",
+            isThesis: Boolean(d.isThesis),
+            date: d.date,
+            i: list.length,
+          });
+        }
       }
     }
   }
@@ -771,7 +796,7 @@ function renderMetrics(m) {
     "article",
     { class: "metric metric-gpa" },
     h("span", { class: "metric-deco", "aria-hidden": "true" }, cookieSvg("deco-shape")),
-    h("span", { class: "metric-label", text: "Media generală" }),
+    h("span", { class: "metric-label", text: getString("general_average_estimated", {}, state.lang || "ro") || "Media generală (estimată)" }),
     h("p", { class: "metric-value", text: fmtAvg(gpa) }),
     h(
       "div",
@@ -813,7 +838,10 @@ function renderMetrics(m) {
       ? h(
           "div",
           { class: "last-row" },
-          cookie("cookie cookie-lg " + bandOf(last.value), fmtMark(last.value)),
+          cookie(
+            "cookie cookie-lg " + bandOf(last.value, last.label),
+            last.kind === "qualifier" || last.value == null ? (last.label || "") : fmtMark(last.value)
+          ),
           h("div", { class: "last-text" }, h("p", { class: "last-subject", text: last.subject }), last.date ? h("p", { class: "last-date", text: shortDate(last.date) }) : null)
         )
       : h("p", { class: "metric-note", text: "Încă nu există note." })
@@ -947,7 +975,7 @@ function renderRecent(m) {
             h(
               "li",
               { class: "recent-item" },
-              score(r.value, "md", r.date),
+              score(r, "md", r.date),
               h("div", { class: "recent-text" }, h("p", { class: "recent-subject", text: r.subject }), r.date ? h("p", { class: "recent-date", text: longDate(r.date) }) : null)
             )
           )
