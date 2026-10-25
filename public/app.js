@@ -144,8 +144,8 @@ const pad2 = (n) => String(n).padStart(2, "0");
 const canonKey = (id) => (typeof id === "string" || typeof id === "number" ? String(id).trim().toLowerCase() : "");
 const markFmt = new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 });
 const avgFmt = new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtMark = (value) => markFmt.format(value);
-const fmtAvg = (value) => (value == null ? "-" : avgFmt.format(value));
+const fmtMark = (value) => (value == null || Number.isNaN(Number(value)) ? "" : markFmt.format(value));
+const fmtAvg = (value) => (value == null || Number.isNaN(Number(value)) ? "-" : avgFmt.format(value));
 const tzFmt = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 
 function todayIso(now = Date.now()) {
@@ -162,8 +162,8 @@ const mondayOf = (iso) => addDays(iso, -weekdayIndex(iso));
 const dayDiff = (from, to) => Math.round((isoMs(to) - isoMs(from)) / DAY_MS);
 const dayNum = (iso) => Number(iso.slice(8, 10));
 const monthIdx = (iso) => Number(iso.slice(5, 7)) - 1;
-const shortDate = (iso) => dayNum(iso) + " " + MONTHS_SHORT[monthIdx(iso)];
-const longDate = (iso) => WEEKDAYS[weekdayIndex(iso)] + ", " + dayNum(iso) + " " + MONTHS[monthIdx(iso)];
+const shortDate = (iso) => (validIso(iso) ? dayNum(iso) + " " + (MONTHS_SHORT[monthIdx(iso)] || "") : "");
+const longDate = (iso) => (validIso(iso) ? (WEEKDAYS[weekdayIndex(iso)] || "") + ", " + dayNum(iso) + " " + (MONTHS[monthIdx(iso)] || "") : "");
 
 function relativeDay(iso, today) {
   const diff = dayDiff(today, iso);
@@ -228,11 +228,17 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 function append(parent, kids) {
   for (const kid of kids) {
-    if (kid == null || kid === false) continue;
+    if (kid == null || kid === false || Number.isNaN(kid)) continue;
     if (Array.isArray(kid)) append(parent, kid);
     else if (kid instanceof Node) parent.appendChild(kid);
-    else parent.appendChild(document.createTextNode(String(kid)));
+    else if (typeof kid !== "object") parent.appendChild(document.createTextNode(String(kid)));
   }
+}
+
+function setChildren(parent, ...kids) {
+  parent.replaceChildren();
+  append(parent, kids);
+  return parent;
 }
 
 function h(tag, attrs, ...kids) {
@@ -240,7 +246,7 @@ function h(tag, attrs, ...kids) {
   if (attrs) {
     for (const key of Object.keys(attrs)) {
       const value = attrs[key];
-      if (value == null || value === false) continue;
+      if (value == null || value === false || Number.isNaN(value)) continue;
       if (key === "class") el.className = value;
       else if (key === "text") el.textContent = String(value);
       else if (key === "on") for (const type of Object.keys(value)) el.addEventListener(type, value[type]);
@@ -324,10 +330,12 @@ function pending(height) {
 }
 
 function chip(text, tone, iconName) {
-  return h("span", { class: "chip chip-" + tone }, iconName ? icon(iconName) : null, text);
+  if (text == null || text === false || Number.isNaN(text) || text === "") return null;
+  return h("span", { class: "chip chip-" + (tone || "neutral") }, iconName ? icon(iconName) : null, text);
 }
 
 function bandChip(value) {
+  if (value == null || Number.isNaN(Number(value))) return null;
   const band = bandOf(value);
   return h("span", { class: "chip chip-band " + band, text: BAND_LABELS[band] });
 }
@@ -411,9 +419,10 @@ function metaItem(name, text) {
 }
 
 function lessonMeta(raw) {
+  if (!raw) return null;
   const items = [];
-  if (raw.classroom) items.push(metaItem("room", raw.classroom));
-  if (raw.teacher) items.push(metaItem("person", raw.teacher));
+  if (raw.classroom && raw.classroom !== "null" && raw.classroom !== "undefined") items.push(metaItem("room", raw.classroom));
+  if (raw.teacher && raw.teacher !== "null" && raw.teacher !== "undefined") items.push(metaItem("person", raw.teacher));
   return items.length ? h("p", { class: "meta-row" }, items) : null;
 }
 
@@ -877,7 +886,7 @@ function renderMetrics(m) {
       : h("p", { class: "metric-note", text: "Încă nu există note." })
   );
 
-  host.replaceChildren(gpaCard, absCard, lastCard);
+  setChildren(host, gpaCard, absCard, lastCard);
 }
 
 function dayTrack(lessons, now) {
@@ -985,17 +994,18 @@ function renderLive() {
       )
     );
   }
-  host.replaceChildren(...children.filter(Boolean));
+  setChildren(host, children);
 }
 
 function renderRecent(m) {
   const host = $("home-marks");
   if (!m) {
-    host.replaceChildren(pending(220));
+    setChildren(host, pending(220));
     return;
   }
   const rows = recentMarks(m).slice(0, 5);
-  host.replaceChildren(
+  setChildren(
+    host,
     h("div", { class: "card-head" }, h("h2", { class: "card-title", text: "Note recente" }), textButton("Toate notele", () => goTab("marks"))),
     rows.length
       ? h(
@@ -1006,7 +1016,7 @@ function renderRecent(m) {
               "li",
               { class: "recent-item" },
               score(r, "md", r.date),
-              h("div", { class: "recent-text" }, h("p", { class: "recent-subject", text: r.subject }), r.date ? h("p", { class: "recent-date", text: longDate(r.date) }) : null)
+              h("div", { class: "recent-text" }, h("p", { class: "recent-subject", text: r.subject || "Disciplină" }), r.date ? h("p", { class: "recent-date", text: longDate(r.date) }) : null)
             )
           )
         )
@@ -1031,12 +1041,13 @@ function taskRow(task, today, compact) {
 function renderHomeworkPreview(m) {
   const host = $("home-homework");
   if (!m) {
-    host.replaceChildren(pending(200));
+    setChildren(host, pending(200));
     return;
   }
   const today = todayIso();
   const items = sortHomework(m.homework, today).slice(0, 4);
-  host.replaceChildren(
+  setChildren(
+    host,
     h("div", { class: "card-head" }, h("h2", { class: "card-title", text: "Teme și termene" }), textButton("Toate temele", () => goTab("homework"))),
     items.length ? h("ul", { class: "task-list" }, items.map((t) => taskRow(t, today, true))) : emptyState("Nicio temă", "Nu ai teme de făcut acum.")
   );
@@ -1045,7 +1056,8 @@ function renderHomeworkPreview(m) {
 // rendering: marks
 
 function stat(label, value, variant) {
-  return h("div", { class: "stat stat-" + variant }, h("span", { class: "stat-label", text: label }), h("span", { class: "stat-value", text: value }));
+  const safeVal = value == null || Number.isNaN(Number(value)) ? "0" : String(value);
+  return h("div", { class: "stat stat-" + (variant || "neutral") }, h("span", { class: "stat-label", text: label }), h("span", { class: "stat-value", text: safeVal }));
 }
 
 function avgTile(label, value) {
@@ -1081,7 +1093,9 @@ function markGroupBlock(group) {
 }
 
 function subjectCard(s) {
+  if (!s) return null;
   const groups = markGroups(s);
+  const teacher = s.teacher && s.teacher !== "null" && s.teacher !== "undefined" ? s.teacher : null;
   return h(
     "article",
     { class: "subject" },
@@ -1089,7 +1103,7 @@ function subjectCard(s) {
       "header",
       null,
       h("h3", { class: "subject-name", text: toTitleCase(s.subject || s.discipline || "Disciplină") }),
-      s.teacher ? h("p", { class: "subject-teacher", text: s.teacher }) : null
+      teacher ? h("p", { class: "subject-teacher", text: teacher }) : null
     ),
     groups.length ? h("div", { class: "mark-groups" }, groups.map(markGroupBlock)) : h("p", { class: "muted", text: "Nu există note încă." })
   );
@@ -1101,15 +1115,15 @@ function renderMarks() {
   const list = $("marks-list");
   const m = model();
   if (!m) {
-    if (summary) summary.replaceChildren();
-    list.replaceChildren(pending(260));
+    if (summary) setChildren(summary);
+    setChildren(list, pending(260));
     return;
   }
   // Remove all averages from Reușita tab
-  if (summary) summary.replaceChildren();
+  if (summary) setChildren(summary);
 
   if (!m.subjects.length) {
-    list.replaceChildren(emptyState("Nicio disciplină încă", "Notele apar aici după sincronizarea cu portalul."));
+    setChildren(list, emptyState("Nicio disciplină încă", "Notele apar aici după sincronizarea cu portalul."));
     return;
   }
 
@@ -1145,7 +1159,7 @@ function renderMarks() {
           "div",
           null,
           h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || "Disciplină") }),
-          subject.teacher ? h("div", { class: "subject-teacher muted", text: subject.teacher }) : null
+          subject.teacher && subject.teacher !== "null" && subject.teacher !== "undefined" ? h("div", { class: "subject-teacher muted", text: subject.teacher }) : null
         )
       ),
       marksCell(pills(sem(1))),
@@ -1175,7 +1189,7 @@ function renderMarks() {
     h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-low is-qualifier", text: "I" }), "Insuficient")
   );
 
-  list.replaceChildren(tableSurface, cardsSurface, legend);
+  setChildren(list, tableSurface, cardsSurface, legend);
 }
 
 // rendering: timetable
@@ -1266,20 +1280,21 @@ function renderLessons() {
   const heading = $("day-heading");
   const m = model();
   if (!m) {
-    heading.replaceChildren();
-    host.replaceChildren(pending(300));
+    setChildren(heading);
+    setChildren(host, pending(300));
     return;
   }
   const now = Date.now();
   const today = todayIso(now);
   const lessons = lessonList(m.days[state.day], now);
-  heading.replaceChildren(
+  setChildren(
+    heading,
     h("h2", { class: "day-title", text: longDate(state.day) }),
     state.day === today ? chip("Astăzi", "info") : null,
     lessons.length ? chip(lessons.length + (lessons.length === 1 ? " oră" : " ore"), "neutral") : null
   );
   if (!lessons.length) {
-    host.replaceChildren(emptyState("Nicio oră în orar", "Pentru această zi nu există lecții programate."));
+    setChildren(host, emptyState("Nicio oră în orar", "Pentru această zi nu există lecții programate."));
     return;
   }
   const nextIdx = state.day === today ? lessons.findIndex((l) => l.state === "upcoming") : -1;
@@ -1291,7 +1306,7 @@ function renderLessons() {
     }
     nodes.push(lessonCard(l, i === nextIdx));
   });
-  host.replaceChildren(h("ol", { class: "lesson-ol" }, nodes));
+  setChildren(host, h("ol", { class: "lesson-ol" }, nodes));
 }
 
 // rendering: absences
@@ -1328,18 +1343,21 @@ function statusChip(status) {
 }
 
 function absenceRow(r) {
+  if (!r) return null;
   const valid = validIso(r.date);
-  const time = [r.startLocal, r.endLocal].filter(Boolean).join(" - ");
+  const time = [r.startLocal, r.endLocal].filter((x) => Boolean(x) && x !== "null" && x !== "undefined").join(" - ");
+  const teacher = r.teacher && r.teacher !== "null" && r.teacher !== "undefined" ? r.teacher : null;
+  const note = r.note && r.note !== "null" && r.note !== "undefined" ? r.note : null;
   return h(
     "li",
     { class: "absence" },
-    h("div", { class: "abs-date" }, h("span", { class: "abs-day", text: valid ? String(dayNum(r.date)) : "-" }), h("span", { class: "abs-month", text: valid ? MONTHS_SHORT[monthIdx(r.date)] : "" })),
+    h("div", { class: "abs-date" }, h("span", { class: "abs-day", text: valid ? String(dayNum(r.date)) : "-" }), h("span", { class: "abs-month", text: valid ? (MONTHS_SHORT[monthIdx(r.date)] || "") : "" })),
     h(
       "div",
       { class: "abs-body" },
       h("p", { class: "abs-subject", text: r.subject || r.discipline || "Disciplină" }),
-      time || r.teacher ? h("p", { class: "abs-meta", text: [time, r.teacher].filter(Boolean).join(", ") }) : null,
-      r.note ? h("p", { class: "abs-note", text: r.note }) : null
+      time || teacher ? h("p", { class: "abs-meta", text: [time, teacher].filter(Boolean).join(", ") }) : null,
+      note ? h("p", { class: "abs-note", text: note }) : null
     ),
     statusChip(r.status)
   );
@@ -1350,19 +1368,21 @@ function renderAbsences() {
   const list = $("abs-list");
   const m = model();
   if (!m) {
-    stats.replaceChildren();
-    list.replaceChildren(pending(240));
+    setChildren(stats);
+    setChildren(list, pending(240));
     return;
   }
   const sem = absenceSemester(m, state.semester);
-  stats.replaceChildren(
+  setChildren(
+    stats,
     stat("Total", String(sem.total), "primary"),
     stat("Motivate", String(sem.motivate), "success"),
     stat("Nemotivate", String(sem.nemotivate), "error")
   );
 
   if (!sem.records.length) {
-    list.replaceChildren(
+    setChildren(
+      list,
       sem.total > 0
         ? emptyState("Detaliile nu sunt disponibile", "Portalul raportează " + sem.total + " absențe în acest semestru, dar fără detalii pe ore.")
         : emptyState("Nicio absență", "Nu sunt absențe înregistrate în Semestrul " + state.semester + ".")
@@ -1442,7 +1462,7 @@ function renderAbsences() {
     )
   );
 
-  list.replaceChildren(...sections);
+  setChildren(list, sections);
 }
 
 // rendering: homework
@@ -1451,13 +1471,13 @@ function renderHomework() {
   const host = $("homework-list");
   const m = model();
   if (!m) {
-    host.replaceChildren(pending(260));
+    setChildren(host, pending(260));
     return;
   }
   const today = todayIso();
   const items = sortHomework(m.homework, today);
   if (!items.length) {
-    host.replaceChildren(emptyState("Nicio temă", "Temele noi apar aici după sincronizare."));
+    setChildren(host, emptyState("Nicio temă", "Temele noi apar aici după sincronizare."));
     return;
   }
   const groups = [];
@@ -1470,8 +1490,9 @@ function renderHomework() {
     }
     group.tasks.push(task);
   }
-  host.replaceChildren(
-    ...groups.map((g) =>
+  setChildren(
+    host,
+    groups.map((g) =>
       h(
         "section",
         { class: "task-group" },
@@ -1489,8 +1510,8 @@ function renderProfile() {
   const grid = $("teacher-grid");
   const m = model();
   if (!m) {
-    card.replaceChildren(pending(220));
-    grid.replaceChildren();
+    setChildren(card, pending(220));
+    setChildren(grid);
     return;
   }
   const s = m.student;
@@ -1506,7 +1527,8 @@ function renderProfile() {
     ["Data nașterii", meta.birthDate],
   ].filter((row) => row[1]);
 
-  card.replaceChildren(
+  setChildren(
+    card,
     h(
       "section",
       { class: "profile-card", "aria-label": "Elev" },
@@ -1522,7 +1544,8 @@ function renderProfile() {
   );
 
   const teachers = m.teachers;
-  grid.replaceChildren(
+  setChildren(
+    grid,
     h("h2", { class: "section-title", text: "Profesori" }),
     teachers.length
       ? h(

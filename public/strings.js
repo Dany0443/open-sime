@@ -317,7 +317,7 @@ function getString(key, params = {}, lang = "ro") {
   let str = dict[key] || STRINGS.ro[key] || key;
   if (params && typeof params === "object") {
     for (const [k, v] of Object.entries(params)) {
-      str = str.replaceAll(`{${k}}`, String(v));
+      str = str.replaceAll(`{${k}}`, v == null || Number.isNaN(v) ? "" : String(v));
     }
   }
   return str;
