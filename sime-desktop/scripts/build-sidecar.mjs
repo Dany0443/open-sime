@@ -124,6 +124,47 @@ function collectEmbeddedAssets(desktopRoot) {
   return assets;
 }
 
+async function stampWindowsPeMetadata(exePath, desktopRoot) {
+  try {
+    const ResEdit = await import("resedit");
+    const buf = fs.readFileSync(exePath);
+    const exe = ResEdit.NtExecutable.from(buf);
+    const res = ResEdit.NtExecutableResource.from(exe);
+    const viList = ResEdit.Resource.VersionInfo.fromEntries(res.entries);
+    if (viList && viList.length > 0) {
+      const vi = viList[0];
+      const langs = vi.getAllLanguagesForStringValues();
+      for (const lang of langs) {
+        vi.setStringValue(lang, "ProductName", "Open SIME");
+        vi.setStringValue(lang, "FileDescription", "Open SIME Backend");
+        vi.setStringValue(lang, "CompanyName", "Open SIME Contributors");
+        vi.setStringValue(lang, "InternalName", "open-sime-server");
+        vi.setStringValue(lang, "OriginalFilename", "open-sime-server.exe");
+        vi.setStringValue(lang, "LegalCopyright", "Open SIME Contributors");
+      }
+      vi.outputToResourceEntries(res.entries);
+    }
+
+    const icoPath = path.join(desktopRoot, "src-tauri", "icons", "icon.ico");
+    if (fs.existsSync(icoPath)) {
+      const icoBuf = fs.readFileSync(icoPath);
+      const iconFile = ResEdit.Data.IconFile.from(icoBuf);
+      ResEdit.Resource.IconGroupEntry.replaceIconsForResource(
+        res.entries,
+        1,
+        1033,
+        iconFile.icons.map((item) => item.data)
+      );
+    }
+
+    res.outputResource(exe);
+    const newBuf = Buffer.from(exe.generate());
+    fs.writeFileSync(exePath, newBuf);
+  } catch (err) {
+    console.warn(`Warning: failed to stamp Windows PE metadata on ${exePath}: ${err.message}`);
+  }
+}
+
 export async function buildSidecar(options = {}) {
   const targetTriple = options.targetTriple || resolveTargetTriple();
   const targetInfo = TARGET_MAP[targetTriple];
@@ -178,6 +219,10 @@ export async function buildSidecar(options = {}) {
 
     if (!fs.existsSync(outputPath)) {
       throw new Error(`Expected sidecar binary was not created at ${outputPath}`);
+    }
+
+    if (targetInfo.ext === ".exe") {
+      await stampWindowsPeMetadata(outputPath, DESKTOP_ROOT);
     }
 
     const stat = fs.statSync(outputPath);

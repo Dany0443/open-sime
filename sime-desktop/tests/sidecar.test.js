@@ -222,6 +222,20 @@ test("Packaged Sidecar Binary: runs standalone without Node.js in PATH and serve
   }
   assert.ok(fs.existsSync(exePath), "Compiled Windows x64 sidecar binary must exist");
 
+  // Verify stamped PE VersionInfo metadata for Task Manager grouping
+  const ResEdit = await import("resedit");
+  const exeBuf = fs.readFileSync(exePath);
+  const pe = ResEdit.NtExecutable.from(exeBuf);
+  const peRes = ResEdit.NtExecutableResource.from(pe);
+  const viList = ResEdit.Resource.VersionInfo.fromEntries(peRes.entries);
+  assert.ok(viList.length > 0, "Windows executable must contain VersionInfo resource");
+  const vi = viList[0];
+  const lang = vi.getAllLanguagesForStringValues()[0];
+  const strings = vi.getStringValues(lang);
+  assert.equal(strings.ProductName, "Open SIME", "ProductName must match Open SIME for Task Manager grouping");
+  assert.equal(strings.FileDescription, "Open SIME Backend", "FileDescription must be Open SIME Backend");
+  assert.equal(strings.CompanyName, "Open SIME Contributors", "CompanyName must be Open SIME Contributors");
+
   const emptyWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), "sime-exe-workdir-"));
   const fakeAppData = fs.mkdtempSync(path.join(os.tmpdir(), "sime-exe-appdata-"));
 

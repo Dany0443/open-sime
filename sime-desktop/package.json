@@ -26,6 +26,7 @@
     "@tauri-apps/cli": "^2.12.4",
     "@tauri-apps/plugin-shell": "^2.5.0",
     "@yao-pkg/pkg": "^6.24.0",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "resedit": "^3.1.0"
   }
 }
