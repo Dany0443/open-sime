@@ -253,13 +253,14 @@ ul, ol {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 56px;
-  padding: 0 28px;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 24px;
   border-radius: var(--shape-full);
-  font-size: 1rem;
-  font-weight: 700;
-  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, box-shadow 0.2s;
 }
 
 .btn:active {
@@ -287,10 +288,23 @@ ul, ol {
 }
 
 .btn-tonal {
-  min-height: 44px;
-  padding: 0 20px;
+  min-height: 48px;
+  padding: 0 24px;
   background: var(--secondary-container);
   color: var(--on-secondary-container);
+}
+
+.btn-outlined {
+  min-height: 48px;
+  padding: 0 24px;
+  border: 1px solid var(--outline);
+  background: transparent;
+  color: var(--primary);
+}
+
+.btn-outlined:disabled {
+  border-color: color-mix(in srgb, var(--on-surface) 12%, transparent);
+  color: color-mix(in srgb, var(--on-surface) 38%, transparent);
 }
 
 .icon-btn {
@@ -322,12 +336,13 @@ ul, ol {
 .text-btn {
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  justify-content: center;
+  min-height: 48px;
   padding: 0 16px;
   border-radius: var(--shape-full);
   color: var(--primary);
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .chip {
@@ -756,11 +771,12 @@ ul, ol {
   flex: 1;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
+  min-height: 48px;
   padding: 0 20px;
   border-radius: var(--shape-full);
   color: var(--on-surface-variant);
-  font-weight: 700;
+  font-size: 0.875rem;
+  font-weight: 600;
   transition: background-color 0.2s, color 0.2s, border-radius 0.3s var(--ease-spring);
 }
 
@@ -1083,7 +1099,8 @@ ul, ol {
   align-items: center;
   gap: 10px;
   max-width: min(78vw, 340px);
-  padding: 6px 18px 6px 6px;
+  min-height: 48px;
+  padding: 4px 16px 4px 6px;
   border-radius: var(--shape-full);
   background: var(--surface-container-high);
   color: var(--on-surface);
@@ -2554,6 +2571,13 @@ ul, ol {
   .progress-fill, .nav-pill, .btn, .icon-btn, .seg-btn, .day-tab, .student-chip {
     transition-duration: 0.01ms;
   }
+
+  .btn:active,
+  .icon-btn:active,
+  .seg-btn:active,
+  .student-chip:active {
+    border-radius: inherit;
+  }
 }
 .marks-table-surface { overflow-x: auto; background: var(--surface-container-low); border-radius: var(--shape-lg); border: 1px solid var(--outline-variant); }
 .marks-table { width: 100%; min-width: 600px; border-collapse: collapse; text-align: left; }
@@ -2682,8 +2706,10 @@ html[data-contrast="high"] {
 
 html[data-contrast="high"] .card,
 html[data-contrast="high"] .btn,
+html[data-contrast="high"] .btn-outlined,
 html[data-contrast="high"] .icon-btn,
 html[data-contrast="high"] .seg-btn,
+html[data-contrast="high"] .student-chip,
 html[data-contrast="high"] .score,
 html[data-contrast="high"] .stat-pill,
 html[data-contrast="high"] .subject {
