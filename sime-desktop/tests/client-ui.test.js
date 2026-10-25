@@ -1144,3 +1144,33 @@ test("M3 Expressive Motion & Switch Selection: unselected pill vs selected round
     "Reduced motion block must collapse transition durations"
   );
 });
+
+test("Tauri 2 Phase 1: configuration, scripts, capabilities, and icons in sime-desktop", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
+  assert.equal(pkg.scripts.start, "node server.js");
+  assert.equal(pkg.scripts.tauri, "tauri");
+  assert.equal(pkg.scripts["tauri:dev"], "tauri dev");
+  assert.ok(pkg.devDependencies["@tauri-apps/cli"], "Must include @tauri-apps/cli v2 in devDependencies");
+
+  const tauriConf = JSON.parse(fs.readFileSync(path.join(__dirname, "../src-tauri/tauri.conf.json"), "utf8"));
+  assert.equal(tauriConf.productName, "Open SIME");
+  assert.equal(tauriConf.identifier, "md.sime.opensime");
+  assert.equal(tauriConf.build.beforeDevCommand, "npm start");
+  assert.equal(tauriConf.build.devUrl, "http://127.0.0.1:3000");
+  assert.equal(tauriConf.build.frontendDist, "../public");
+  assert.equal(tauriConf.app.windows[0].title, "Open SIME");
+  assert.equal(tauriConf.app.windows[0].label, "main");
+  assert.ok(tauriConf.app.windows[0].width >= 800);
+  assert.ok(tauriConf.app.windows[0].height >= 600);
+
+  const cap = JSON.parse(fs.readFileSync(path.join(__dirname, "../src-tauri/capabilities/default.json"), "utf8"));
+  assert.ok(cap.windows.includes("main"));
+  assert.ok(cap.permissions.includes("core:default"));
+
+  assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/Cargo.toml")), "Must have src-tauri/Cargo.toml");
+  assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/build.rs")), "Must have src-tauri/build.rs");
+  assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/src/lib.rs")), "Must have src-tauri/src/lib.rs");
+  assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/src/main.rs")), "Must have src-tauri/src/main.rs");
+  assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/icons/icon.ico")), "Must have src-tauri/icons/icon.ico");
+  assert.ok(fs.existsSync(path.join(__dirname, "../src-tauri/icons/128x128.png")), "Must have src-tauri/icons/128x128.png");
+});
