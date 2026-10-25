@@ -3,6 +3,7 @@
 const TZ = "Europe/Chisinau";
 const KEYS = {
   token: "open-sime.token",
+  student: "open-sime.student",
   data: "open-sime.data",
   sync: "open-sime.sync",
   theme: "open-sime.theme",
@@ -73,6 +74,7 @@ const SIMPLE_TAB_TITLES = {
 
 const state = {
   token: null,
+  studentKey: "",
   data: null,
   students: [],
   tab: "home",
@@ -551,13 +553,25 @@ function diffNewMarks(currentCatalog, prevCatalog) {
 
 function setData(data, syncedAt) {
   state.data = data;
+  state.studentKey = data.studentKey || (data.student && data.student.id) || state.studentKey || "";
   const list = Array.isArray(data.students) ? data.students.filter((s) => s && s.id) : [];
   if (data.student && data.student.id && !list.some((s) => s.id === data.student.id)) list.unshift(data.student);
-  if (list.length) state.students = list;
+  if (list.length) {
+    const merged = list.map((s) => {
+      const prev = state.students.find((x) => x.id === s.id);
+      return {
+        ...s,
+        className: s.className || prev?.className || null,
+        schoolName: s.schoolName || prev?.schoolName || null,
+        fullName: s.fullName || prev?.fullName || s.id,
+      };
+    });
+    state.students = merged;
+  }
   state.syncedAt = syncedAt || Date.now();
   if (!state.semesterTouched) state.semester = defaultSemester(data);
 
-  const studentId = data.student?.id || state.student || "";
+  const studentId = state.studentKey;
   if (studentId && Array.isArray(data.catalog) && data.catalog.length) {
     const marksKey = "open-sime.prev-marks." + studentId;
     let prevCatalog = null;
@@ -578,12 +592,15 @@ function setData(data, syncedAt) {
 
 function persist() {
   if (!state.data) return;
-  store.set(KEYS.data, JSON.stringify(state.data));
+  const key = state.studentKey ? `${KEYS.data}.${state.studentKey}` : KEYS.data;
+  store.set(key, JSON.stringify(state.data));
   store.set(KEYS.sync, String(state.syncedAt));
+  if (state.studentKey) store.set(KEYS.student, state.studentKey);
 }
 
-function loadCached() {
-  const raw = store.get(KEYS.data);
+function loadCached(targetKey) {
+  const k = targetKey || state.studentKey || store.get(KEYS.student);
+  const raw = (k && store.get(`${KEYS.data}.${k}`)) || store.get(KEYS.data);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -1486,12 +1503,14 @@ function renderStudents() {
     return;
   }
   const hadFocus = host.contains(document.activeElement);
-  const currentId = state.switching || (state.data && state.data.student && state.data.student.id) || "";
+  const currentId = state.studentKey || state.switching || (state.data && state.data.student && state.data.student.id) || "";
   const nodes = list.map((s, i) => {
     const active = String(s.id) === String(currentId);
+    const known = state.students.find((x) => String(x.id) === String(s.id));
+    const cls = s.className || known?.className || null;
     const body = [
       avatar(s, i, "sm"),
-      h("span", { class: "student-text" }, h("span", { class: "student-name", text: toTitleCase(s.fullName || "Elev") }), s.className ? h("span", { class: "student-class", text: s.className }) : null),
+      h("span", { class: "student-text" }, h("span", { class: "student-name", text: toTitleCase(s.fullName || "Elev") }), cls ? h("span", { class: "student-class", text: cls }) : null),
     ];
     return h(
       "button",
@@ -1634,7 +1653,9 @@ const TAB_TTLS = {
 
 async function loadTabData(tabId, { force = false } = {}) {
   if (!state.token || !tabId || tabId === "home") return;
-  const student = (state.data && state.data.student && state.data.student.id) || "";
+  const student = state.studentKey || (state.data && state.data.student && state.data.student.id) || "";
+  if (!student) return;
+  const currentSeq = state.seq;
   const subKey = tabId === "timetable" ? `${tabId}:${student}:${state.day || todayIso()}` : `${tabId}:${student}`;
   const now = Date.now();
   const lastLoaded = tabLoadedAt.get(subKey) || 0;
@@ -1649,14 +1670,15 @@ async function loadTabData(tabId, { force = false } = {}) {
 
   const promise = (async () => {
     try {
-      const q = student ? `?student=${encodeURIComponent(student)}` : "";
+      const q = `?student=${encodeURIComponent(student)}`;
       if (tabId === "marks") {
         const res = await api(`/api/catalog${q}`);
+        if (currentSeq !== state.seq || student !== state.studentKey) return;
+        if (res && res.studentKey && res.studentKey !== student) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
-          const studentId = student || state.data.student?.id || "";
-          if (studentId && Array.isArray(res.data) && res.data.length) {
-            const marksKey = "open-sime.prev-marks." + studentId;
+          if (Array.isArray(res.data) && res.data.length) {
+            const marksKey = "open-sime.prev-marks." + student;
             let prevCatalog = null;
             try {
               const prev = store.get(marksKey);
@@ -1676,8 +1698,10 @@ async function loadTabData(tabId, { force = false } = {}) {
         }
       } else if (tabId === "timetable") {
         const d = state.day || todayIso();
-        const schedQ = `?date=${encodeURIComponent(d)}${student ? `&student=${encodeURIComponent(student)}` : ""}`;
+        const schedQ = `?date=${encodeURIComponent(d)}&student=${encodeURIComponent(student)}`;
         const res = await api(`/api/schedule${schedQ}`);
+        if (currentSeq !== state.seq || student !== state.studentKey) return;
+        if (res && res.studentKey && res.studentKey !== student) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
           state.data.schedule = res.data;
@@ -1690,6 +1714,8 @@ async function loadTabData(tabId, { force = false } = {}) {
         }
       } else if (tabId === "absences") {
         const res = await api(`/api/absences${q}`);
+        if (currentSeq !== state.seq || student !== state.studentKey) return;
+        if (res && res.studentKey && res.studentKey !== student) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
           state.data.absente = res.data;
@@ -1702,17 +1728,36 @@ async function loadTabData(tabId, { force = false } = {}) {
           api(`/api/teachers${q}`),
           api(`/api/profile${q}`),
         ]);
+        if (currentSeq !== state.seq || student !== state.studentKey) return;
         if (!state.data) state.data = {};
         if (teachersRes.status === "fulfilled" && teachersRes.value && teachersRes.value.data) {
-          state.data.teachers = teachersRes.value.data.teachers || teachersRes.value.data;
+          if (!teachersRes.value.studentKey || teachersRes.value.studentKey === student) {
+            state.data.teachers = teachersRes.value.data.teachers || teachersRes.value.data;
+          }
         }
         if (profileRes.status === "fulfilled" && profileRes.value && profileRes.value.data) {
-          state.data.metadata = profileRes.value.data.metadata || profileRes.value.data;
+          if (!profileRes.value.studentKey || profileRes.value.studentKey === student) {
+            state.data.metadata = profileRes.value.data.metadata || profileRes.value.data;
+          }
+          if (Array.isArray(profileRes.value.students)) {
+            for (const updated of profileRes.value.students) {
+              const found = state.students.find((s) => s.id === updated.id);
+              if (found) {
+                if (updated.className) found.className = updated.className;
+                if (updated.schoolName) found.schoolName = updated.schoolName;
+              } else {
+                state.students.push(updated);
+              }
+            }
+            renderStudents();
+          }
         }
         modelSource = null;
         if (state.tab === "profile") renderProfile();
       } else if (tabId === "homework") {
         const res = await api(`/api/homework${q}`);
+        if (currentSeq !== state.seq || student !== state.studentKey) return;
+        if (res && res.studentKey && res.studentKey !== student) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
           state.data.homework = res.data.homework || res.data;
@@ -1722,7 +1767,7 @@ async function loadTabData(tabId, { force = false } = {}) {
       }
       tabLoadedAt.set(subKey, Date.now());
     } catch (err) {
-      if (!state.data) {
+      if (currentSeq === state.seq && student === state.studentKey && !state.data) {
         toast(describeError(err, "data"));
       }
     } finally {
@@ -2007,6 +2052,7 @@ async function onLogin(event) {
 function endSession(message) {
   state.seq += 1;
   state.token = null;
+  state.studentKey = "";
   state.data = null;
   state.students = [];
   state.switching = null;
@@ -2018,6 +2064,7 @@ function endSession(message) {
   state.limitedUntil = 0;
   state.syncedAt = 0;
   store.del(KEYS.token);
+  store.del(KEYS.student);
   store.del(KEYS.data);
   store.del(KEYS.sync);
   tabLoadedAt.clear();
@@ -2089,11 +2136,12 @@ async function refresh({ force = false, background = false } = {}) {
 }
 
 async function switchStudent(id) {
-  const current = state.data && state.data.student && state.data.student.id;
+  const current = state.studentKey || (state.data && state.data.student && state.data.student.id);
   if (!id || state.switching === id || (current && String(current) === String(id))) return;
-  const previous = { data: state.data, syncedAt: state.syncedAt, stale: state.stale };
+  const previous = { data: state.data, syncedAt: state.syncedAt, stale: state.stale, studentKey: state.studentKey };
   state.seq += 1;
   const seq = state.seq;
+  state.studentKey = id;
   state.switching = id;
   state.data = null;
   state.error = "";
@@ -2110,11 +2158,13 @@ async function switchStudent(id) {
       store.set(KEYS.token, res.token);
     }
     const ageMs = ((res.cache && num(res.cache.ageSeconds)) || 0) * 1000;
+    state.studentKey = res.studentKey || res.student?.id || id;
     state.switching = null;
     state.stale = Boolean(res.cache && res.cache.stale);
     state.offline = false;
     tabLoadedAt.clear();
-    if (!Array.isArray(res.data.students) && Array.isArray(res.students)) res.data.students = res.students;
+    const students = Array.isArray(res.students) ? res.students : res.data?.students;
+    if (Array.isArray(students)) state.students = students;
     setData(res.data, Date.now() - ageMs);
     render();
     if (state.tab && state.tab !== "home") loadTabData(state.tab, { force: true });
@@ -2126,6 +2176,7 @@ async function switchStudent(id) {
       return;
     }
     if (err instanceof ApiError && err.status === 429) state.limitedUntil = Date.now() + Math.min(err.wait || 60, 3600) * 1000;
+    state.studentKey = previous.studentKey;
     state.data = previous.data;
     state.syncedAt = previous.syncedAt;
     state.stale = previous.stale;

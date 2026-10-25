@@ -33,6 +33,9 @@ self.addEventListener("fetch", (event) => {
 
   // API data endpoints (overview, catalog, schedule, absences, teachers, homework)
   if (url.pathname.startsWith("/api/")) {
+    if (event.request.method !== "GET") {
+      return;
+    }
     event.respondWith(
       fetch(event.request)
         .then((response) => {
@@ -43,7 +46,7 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => {
-          return caches.match(event.request).then((cached) => {
+          return caches.match(event.request, { ignoreSearch: false }).then((cached) => {
             if (cached) return cached;
             return new Response(JSON.stringify({ error: { code: "OFFLINE", message: "Ești offline" } }), {
               status: 503,

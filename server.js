@@ -40,6 +40,8 @@ class SimeUnexpectedPageError extends SimeError {
 }
 class SimeParseError extends SimeError {}
 class SimeStudentNotFoundError extends SimeError {}
+// The portal answered with a different student than the one requested; never serve that page
+class SimeStudentMismatchError extends SimeStudentNotFoundError {}
 
 // endpoints
 
@@ -1869,9 +1871,14 @@ class SimeClient {
     this.http = http || new SimeHttp({ gate: gateFor(accKey), breaker: br, globalBreaker });
     this.auth = auth || new SimeAuth(username, password, role, br);
     this.studentUrls = new Map();
-    this.knownStudents = new Map();
+    this.knownStudents = new Map(); // canonical key -> { id, fullName, className, schoolName }
     this.portalIds = new Set();
     this.pages = new Map();
+    // One stable key per child for the life of this client. Ids come in two formats (nav-tree id
+    // and P1_ELEVE_ID of the page), so every alias is mapped to the first key we settled on.
+    this.aliases = new Map();
+    this.studentPages = new Map(); // canonical key -> that student's own dashboard page
+    this.currentKey = ""; // student the portal (global per APEX session) is on, per the last fetched page
     this.reloginFlight = null;
   }
 
@@ -1880,6 +1887,8 @@ class SimeClient {
     this.studentUrls.clear();
     this.portalIds.clear();
     this.pages.clear();
+    this.studentPages.clear();
+    this.currentKey = "";
     this.http.clearCookies();
   }
 
@@ -1904,6 +1913,7 @@ class SimeClient {
     if (!isDashboard($)) throw new SimeSessionExpiredError("Portal returned a non-dashboard page");
     const page = { url: this.auth.portalUrl, html: res.html, $, fetchedAt: Date.now() };
     this.pages.set(this.auth.portalUrl, page);
+    this.noteFetched(page);
     this.registerStudents(page);
     return res;
   }
@@ -1925,50 +1935,86 @@ class SimeClient {
     }
 
     const data = parseFullPortal(page.html, todayChisinau(), { extraReports });
-    const effectiveId = data.metadata.id || requestedStudentId || data.student?.id || "";
-    const effectiveKey = studentKey(effectiveId);
-    if (effectiveId) {
-      data.metadata.id = effectiveId;
-      const prev = this.knownStudents.get(effectiveKey) || this.knownStudents.get(effectiveId);
+    // Invariant: the page we parse must be the requested student's own page
+    const pageKey = page.studentKey || this.learnPage(page);
+    if (requestedStudentId && this.canon(requestedStudentId) !== pageKey) {
+      throw new SimeStudentMismatchError(`Portal page belongs to another student than ${requestedStudentId}`);
+    }
+    this.registerStudents(page);
+    const own = this.knownStudents.get(pageKey);
+    if (pageKey) {
+      data.metadata.id = pageKey;
       data.student = {
-        id: effectiveId,
-        fullName: data.metadata.fullName || prev?.fullName || data.student?.fullName || effectiveId,
-        className: data.metadata.className || prev?.className || null,
-        schoolName: data.metadata.schoolName || prev?.schoolName || null,
+        id: pageKey,
+        fullName: data.metadata.fullName || own?.fullName || pageKey,
+        className: data.metadata.className || own?.className || null,
+        schoolName: data.metadata.schoolName || own?.schoolName || null,
       };
+      data.studentKey = pageKey;
     }
-    for (const s of data.students) {
-      if (!s?.id) continue;
-      const k = studentKey(s.id);
-      const prev = this.knownStudents.get(k) || this.knownStudents.get(s.id);
-      const merged = {
-        id: s.id,
-        fullName: s.fullName || prev?.fullName || s.id,
-        className: s.className || prev?.className || null,
-        schoolName: s.schoolName || prev?.schoolName || null,
-      };
-      this.knownStudents.set(k, merged);
-      if (s.id !== k) this.knownStudents.set(s.id, merged);
-    }
-    if (data.student?.id) {
-      const curK = studentKey(data.student.id);
-      this.knownStudents.set(curK, data.student);
-      if (data.student.id !== curK) this.knownStudents.set(data.student.id, data.student);
-    }
-    const dedupedStudents = [];
-    for (const s of data.students) {
-      const k = studentKey(s.id);
-      const n = normalizeName(s.fullName);
-      const existing = dedupedStudents.find((x) => (k && studentKey(x.id) === k) || (n && normalizeName(x.fullName) === n));
-      if (existing) {
-        existing.className = existing.className || s.className;
-        existing.schoolName = existing.schoolName || s.schoolName;
-      } else {
-        dedupedStudents.push(s);
-      }
-    }
-    data.students = dedupedStudents;
+    data.students = this.listStudents();
     return data;
+  }
+
+  // Canonical key for any alias of a student ("" when this account has no such student)
+  canon(id) {
+    return this.aliases.get(studentKey(id)) || "";
+  }
+
+  // Known students with canonical ids, in first-seen order, with the best class/school we have
+  listStudents() {
+    return [...this.knownStudents.values()].map((s) => ({ ...s }));
+  }
+
+  // Test and route seam: makes already-known students addressable without a portal page
+  seedStudents(list) {
+    for (const s of Array.isArray(list) ? list : []) {
+      const k = studentKey(s?.id);
+      if (!k) continue;
+      if (!this.aliases.has(k)) this.aliases.set(k, k);
+      this.mergeKnown(this.aliases.get(k), s);
+    }
+  }
+
+  mergeKnown(key, s) {
+    const prev = this.knownStudents.get(key);
+    this.knownStudents.set(key, {
+      id: key,
+      fullName: s.fullName || prev?.fullName || key,
+      className: s.className || prev?.className || null,
+      schoolName: s.schoolName || prev?.schoolName || null,
+    });
+  }
+
+  // Learns the ids on a dashboard page and returns the canonical key of the page's own student
+  learnPage(page) {
+    const profile = parseStudentProfile(page.$);
+    const links = parseStudentLinks(page.$);
+    const pageId = studentKey(profile.id);
+    const name = normalizeName(profile.fullName);
+    const cur = links.find((l) => l.isCurrent) || (name ? links.find((l) => normalizeName(l.name) === name) : undefined);
+    const curNav = cur ? studentKey(cur.studentId) : "";
+    const key = (pageId && this.aliases.get(pageId)) || (curNav && this.aliases.get(curNav)) || pageId || curNav;
+    if (key) {
+      for (const id of [pageId, curNav, key]) if (id && !this.aliases.has(id)) this.aliases.set(id, key);
+    }
+    for (const l of links) {
+      const k = studentKey(l.studentId);
+      if (k && !this.aliases.has(k)) this.aliases.set(k, k);
+    }
+    return key || "";
+  }
+
+  // A page really came from the portal: it is that student's page, and the portal is now on them
+  noteFetched(page) {
+    const key = this.learnPage(page);
+    page.studentKey = key;
+    if (key) {
+      this.studentPages.set(key, page);
+      this.currentKey = key;
+    }
+    this.registerStudents(page);
+    return key;
   }
 
   // Authenticates and returns { html, data: parseFullPortal(html) }, or null when credentials are rejected
@@ -1979,6 +2025,7 @@ class SimeClient {
       const $ = cheerio.load(res.html);
       const page = { url: this.auth.portalUrl, html: res.html, $, fetchedAt: Date.now() };
       this.pages.set(this.auth.portalUrl, page);
+      this.noteFetched(page);
       this.registerStudents(page);
       const data = await this.enrichPortalPage(page);
       if (!data.student?.id && !data.students.length) {
@@ -2036,6 +2083,7 @@ class SimeClient {
     }
     const page = { url, html: resp.text, $, fetchedAt: Date.now() };
     this.pages.set(url, page);
+    this.noteFetched(page);
     return page;
   }
 
@@ -2050,12 +2098,15 @@ class SimeClient {
     const profile = parseStudentProfile(page.$);
     const links = parseStudentLinks(page.$);
     const { students, linkMap } = mergeStudents(profile, links);
+    this.learnPage(page);
 
     for (const [key, info] of linkMap) {
       try {
         const resolved = resolveSimeUrl(info.href);
         this.studentUrls.set(key, resolved);
         this.portalIds.add(key);
+        const canonical = this.canon(key);
+        if (canonical) this.studentUrls.set(canonical, resolved);
       } catch (err) {
         if (err instanceof SimeNetworkError) continue;
         throw err;
@@ -2073,78 +2124,48 @@ class SimeClient {
     for (const s of students) {
       const k = studentKey(s.id);
       this.portalIds.add(k);
-      this.knownStudents.set(k, s);
-      if (s.id !== k) this.knownStudents.set(s.id, s);
+      const canonical = this.canon(k) || k;
+      this.mergeKnown(canonical, s);
     }
 
-    return students;
+    return this.listStudents();
+  }
+
+  // Fetches one student's own dashboard through their checksummed nav href. APEX keeps ONE current
+  // student per session, so the page is verified to be theirs; one retry, then STUDENT_MISMATCH.
+  async fetchStudentPage(key, { gated = false } = {}) {
+    const href = this.studentUrls.get(key);
+    if (!href) throw new SimeStudentNotFoundError(`No switch URL with checksum found for student: ${key}`);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const page = await this.fetchDashboard(formatSwitchUrl(href, this.auth.sessionId), { gated: gated && attempt === 0, bypassCache: true });
+      if (page.studentKey === key) return page;
+    }
+    throw new SimeStudentMismatchError(`Portal did not switch to student ${key}`);
   }
 
   // Switches active student via nav-tree checksum href and parses full student state
   async switchStudent(studentId, { gated = false } = {}) {
     const cleanId = String(studentId || "").trim();
     if (!cleanId) throw new SimeStudentNotFoundError("Student ID is required");
-    const key = studentKey(cleanId);
     return this.withRetry(async () => {
       await this.ensureLogin();
-      const navUrl = this.studentUrls.get(key) || this.studentUrls.get(cleanId);
-      if (!navUrl) {
-        throw new SimeStudentNotFoundError(`No switch URL with checksum found for student: ${cleanId}`);
-      }
-      const targetUrl = formatSwitchUrl(navUrl, this.auth.sessionId);
-      let page = await this.fetchDashboard(targetUrl, { gated, bypassCache: true });
-      let parsedProfile = parseStudentProfile(page.$);
-      let parsedKey = studentKey(parsedProfile.id);
-      const pageLinks = parseStudentLinks(page.$);
-      const currentLink = pageLinks.find((l) => l.isCurrent);
-
-      let matches =
-        parsedKey === key ||
-        normalizeName(parsedProfile.fullName) === normalizeName(cleanId) ||
-        Boolean(currentLink && studentKey(currentLink.studentId) === key);
-
-      if (!matches) {
-        const retryLink = pageLinks.find(
-          (l) => studentKey(l.studentId) === key || normalizeName(l.name) === normalizeName(cleanId),
-        );
-        if (retryLink?.href) {
-          const retryUrl = formatSwitchUrl(resolveSimeUrl(retryLink.href), this.auth.sessionId);
-          page = await this.fetchDashboard(retryUrl, { gated: false, bypassCache: true });
-          parsedProfile = parseStudentProfile(page.$);
-          parsedKey = studentKey(parsedProfile.id);
-          const retryPageLinks = parseStudentLinks(page.$);
-          const retryCurrentLink = retryPageLinks.find((l) => l.isCurrent);
-          matches =
-            parsedKey === key ||
-            normalizeName(parsedProfile.fullName) === normalizeName(cleanId) ||
-            Boolean(retryCurrentLink && studentKey(retryCurrentLink.studentId) === key);
-        }
-        if (!matches) {
-          throw new SimeStudentNotFoundError(`Failed to switch to student ${cleanId}`);
-        }
-      }
-
-      this.studentUrls.set(cleanId, page.url);
-      this.studentUrls.set(key, page.url);
-      if (parsedKey) {
-        this.studentUrls.set(parsedKey, page.url);
-        this.portalIds.add(parsedKey);
-      }
-      this.registerStudents(page);
-      return this.enrichPortalPage(page, cleanId);
+      const key = this.canon(cleanId);
+      if (!key) throw new SimeStudentNotFoundError(`No such student: ${cleanId}`);
+      const page = await this.fetchStudentPage(key, { gated });
+      return this.enrichPortalPage(page, key);
     });
   }
 
-  async loadStudent(studentId, { gated = false, bypassCache = false } = {}) {
-    const key = studentKey(studentId);
-    const isCurrent = !key || this.portalIds.has(key) || (studentId && this.portalIds.has(studentId));
-    const portal = await this.loadPortal({ gated: gated && isCurrent, bypassCache });
-    if (isCurrent) return portal;
-    const url = this.studentUrls.get(key) || (studentId ? this.studentUrls.get(studentId) : null);
-    if (!url) {
-      throw new SimeStudentNotFoundError(`No dashboard URL found for student: ${studentId}`);
-    }
-    return this.fetchDashboard(formatSwitchUrl(url, this.auth.sessionId), { gated, bypassCache });
+  // The requested student's own page. `assertCurrent` is for AJAX calls: the portal's current student
+  // is global, so it must be re-asserted to be this student right before fetching.
+  async loadStudent(studentId, { gated = false, bypassCache = false, assertCurrent = false } = {}) {
+    await this.ensureLogin();
+    const key = this.canon(studentId);
+    if (!key) throw new SimeStudentNotFoundError(`No such student: ${studentId}`);
+    const own = this.studentPages.get(key);
+    const fresh = own && Date.now() - own.fetchedAt < PAGE_TTL_MS;
+    if (!bypassCache && fresh && (!assertCurrent || this.currentKey === key)) return own;
+    return this.fetchStudentPage(key, { gated });
   }
 
   fetchStudentPortalHtml(studentId, { gated = false, bypassCache = false } = {}) {
@@ -2200,7 +2221,7 @@ class SimeClient {
   }
 
   async calendarRange(studentId, startIso, endIso) {
-    const page = await this.loadStudent(studentId);
+    const page = await this.loadStudent(studentId, { assertCurrent: true });
     const ajaxId = findCalendarAjaxId(page.html);
     if (ajaxId === null) throw new SimeParseError("Calendar widget not found on the dashboard");
     const entries = [];
@@ -2248,7 +2269,7 @@ class SimeClient {
 
   getCatalog(studentId) {
     return this.withRetry(async () => {
-      const page = await this.loadStudent(studentId);
+      const page = await this.loadStudent(studentId, { assertCurrent: true });
       const data = await this.enrichPortalPage(page, studentId);
       if (data.reusita.disciplines.length) return data.reusita;
       const reports = [];
@@ -2337,7 +2358,7 @@ function serialize(session, fn) {
 }
 
 function storeStudentSessionState(session, studentId, data) {
-  const id = String(studentId || data.student?.id || data.metadata?.id || "");
+  const id = String(studentId || data.studentKey || data.student?.id || data.metadata?.id || "");
   const now = Date.now();
   const payload = { ...data, cachedAt: now };
   const record = {
@@ -2353,10 +2374,8 @@ function storeStudentSessionState(session, studentId, data) {
     session.students[id] = record;
     session.cache.set(`overview:${id}`, { at: now, data: payload });
   }
-  session.cache.set("overview:", { at: now, data: payload });
   if (Array.isArray(payload.students) && payload.students.length) {
     session.studentList = payload.students;
-    session.cache.set("students", { at: now, data: payload.students });
   }
   return record;
 }
@@ -2384,12 +2403,25 @@ function cached(session, key, ttl, producer) {
   });
 }
 
-async function resolveStudent(session, requested) {
-  const { data } = await cached(session, "students", TTL.students, () => session.client.getStudents());
-  const target = requested || session.defaultStudentId || "";
-  const student = target ? data.find((s) => s.id === target) || session.students[target]?.metadata : data[0];
-  if (!student) throw new SimeStudentNotFoundError("No matching student");
-  return { student, students: data };
+function resolveStudentKey(session, requested) {
+  const reqStr = typeof requested === "string" ? requested.trim().slice(0, 128) : "";
+  const students = session.client.listStudents();
+  if (!reqStr) {
+    if (students.length > 1) {
+      return { error: { status: 400, code: "INVALID_REQUEST", message: "student parameter is required" } };
+    }
+    const single = students[0]?.id || session.defaultStudentId || "";
+    if (!single) {
+      return { error: { status: 400, code: "INVALID_REQUEST", message: "student parameter is required" } };
+    }
+    const canon = session.client.canon(single) || single;
+    return { key: canon };
+  }
+  const canonical = session.client.canon(reqStr);
+  if (!canonical) {
+    return { error: { status: 404, code: "STUDENT_NOT_FOUND", message: "Elevul nu a fost găsit." } };
+  }
+  return { key: canonical };
 }
 
 function makeErrorPayload(code, message, retryAfter = null) {
@@ -2422,6 +2454,9 @@ function sendError(res, err, token) {
   }
   if (err instanceof SimeNotFoundError) {
     return res.status(502).json(makeErrorPayload("PORTAL_NOT_FOUND", "Pagina solicitată nu a fost găsită pe portalul școlii."));
+  }
+  if (err instanceof SimeStudentMismatchError) {
+    return res.status(409).json(makeErrorPayload("STUDENT_MISMATCH", "Portalul a returnat alt elev decât cel selectat."));
   }
   if (err instanceof SimeStudentNotFoundError) {
     return res.status(404).json(makeErrorPayload("STUDENT_NOT_FOUND", "Elevul nu a fost găsit."));
@@ -2464,11 +2499,22 @@ function dataRoute(app, name, ttl, build, { keyFor = () => "", validate = () => 
     try {
       const problem = validate(req);
       if (problem) return res.status(400).json(makeErrorPayload("INVALID_REQUEST", problem));
-      const requested = typeof req.query.student === "string" ? req.query.student.slice(0, 128) : "";
-      const { student, students } = await resolveStudent(req.session, requested);
-      const key = `${name}:${student.id}:${keyFor(req)}`;
-      const result = await cached(req.session, key, ttl, () => build(req.session.client, student, req, students));
-      return res.json({ data: result.data, student, students, cache: { ageSeconds: result.ageSeconds, stale: result.stale } });
+      const resKey = resolveStudentKey(req.session, req.query.student);
+      if (resKey.error) {
+        return res.status(resKey.error.status).json(makeErrorPayload(resKey.error.code, resKey.error.message));
+      }
+      const canonicalKey = resKey.key;
+      const key = `${name}:${canonicalKey}:${keyFor(req)}`;
+      const result = await cached(req.session, key, ttl, () => build(req.session.client, { id: canonicalKey }, req));
+      const students = req.session.client.listStudents();
+      const student = students.find((s) => s.id === canonicalKey) || { id: canonicalKey };
+      return res.json({
+        studentKey: canonicalKey,
+        data: result.data,
+        student,
+        students,
+        cache: { ageSeconds: result.ageSeconds, stale: result.stale },
+      });
     } catch (err) {
       return sendError(res, err, req.token);
     }
@@ -2692,6 +2738,15 @@ function createApp() {
   });
 
   app.post("/api/auth/logout", requireSession, (req, res) => {
+    if (req.session) {
+      req.session.cache.clear();
+      for (const k of Object.keys(req.session.students)) {
+        delete req.session.students[k];
+      }
+      if (req.session.client?.studentPages) {
+        req.session.client.studentPages.clear();
+      }
+    }
     sessions.delete(req.token);
     res.setHeader("Set-Cookie", "sime_remember=; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=0");
     res.status(204).end();
@@ -2751,31 +2806,31 @@ function createApp() {
 
   app.get("/api/overview", requireSession, async (req, res) => {
     try {
-      const requested = typeof req.query.student === "string" ? req.query.student.trim().slice(0, 128) : "";
+      const resKey = resolveStudentKey(req.session, req.query.student);
+      if (resKey.error) {
+        return res.status(resKey.error.status).json(makeErrorPayload(resKey.error.code, resKey.error.message));
+      }
+      const canonicalKey = resKey.key;
       const force = req.query.force === "1" || req.query.force === "true";
-      const targetId = requested || req.session.defaultStudentId || "";
-      const studentEntry = targetId ? req.session.students[targetId] : undefined;
-      const key = `overview:${targetId}`;
-      const hit = studentEntry
-        ? { at: studentEntry.cachedAt, data: studentEntry.data }
-        : req.session.cache.get(key) || (!requested ? req.session.cache.get("overview:") : undefined);
+      const key = `overview:${canonicalKey}`;
+      const hit = req.session.cache.get(key);
       const now = Date.now();
 
       if (!force && hit && now - hit.at < TTL.overview) {
+        const students = req.session.client.listStudents();
+        const student = students.find((s) => s.id === canonicalKey) || hit.data.student || { id: canonicalKey };
         return res.json({
           role: req.session.role,
+          studentKey: canonicalKey,
           data: hit.data,
-          student: hit.data.student,
-          students: hit.data.students,
+          student,
+          students,
           cache: { ageSeconds: Math.floor((now - hit.at) / 1000), stale: false },
         });
       }
 
       const result = await serialize(req.session, async () => {
-        const curStudentEntry = targetId ? req.session.students[targetId] : undefined;
-        const currentHit = curStudentEntry
-          ? { at: curStudentEntry.cachedAt, data: curStudentEntry.data }
-          : req.session.cache.get(key) || (!requested ? req.session.cache.get("overview:") : undefined);
+        const currentHit = req.session.cache.get(key);
         if (!force && currentHit && Date.now() - currentHit.at < TTL.overview) {
           return { data: currentHit.data, ageSeconds: Math.floor((Date.now() - currentHit.at) / 1000), stale: false };
         }
@@ -2785,16 +2840,25 @@ function createApp() {
         const shortWindow = Date.now() - (req.session.lastSyncAt || 0) < TTL.overview;
         const shouldGate = force || shortWindow;
         try {
-          const isSwitching = Boolean(targetId && targetId !== req.session.defaultStudentId);
+          const isSwitching = Boolean(canonicalKey && canonicalKey !== req.session.client.currentKey);
           const data = isSwitching
-            ? await req.session.client.switchStudent(targetId, { gated: shouldGate })
-            : await req.session.client.fetchStudentPortalData(targetId, { gated: shouldGate, bypassCache: true });
+            ? await req.session.client.switchStudent(canonicalKey, { gated: shouldGate })
+            : await req.session.client.fetchStudentPortalData(canonicalKey, { gated: shouldGate, bypassCache: true });
           const at = Date.now();
           req.session.lastSyncAt = at;
-          const resolvedId = data.student?.id || targetId;
-          if (resolvedId) req.session.defaultStudentId = resolvedId;
-          const record = storeStudentSessionState(req.session, resolvedId, data);
-          return { data: record.data, ageSeconds: 0, stale: false };
+          req.session.defaultStudentId = canonicalKey;
+          const entry = { at, data };
+          req.session.cache.set(key, entry);
+          req.session.students[canonicalKey] = {
+            metadata: data.metadata,
+            reusita: data.reusita,
+            absente: data.absente,
+            orar: data.orar,
+            homework: data.homework,
+            cachedAt: at,
+            data,
+          };
+          return { data, ageSeconds: 0, stale: false };
         } catch (err) {
           if (currentHit && isUpstreamFailure(err)) {
             return { data: currentHit.data, ageSeconds: Math.floor((Date.now() - currentHit.at) / 1000), stale: true };
@@ -2803,11 +2867,15 @@ function createApp() {
         }
       });
 
+      const students = req.session.client.listStudents();
+      const student = students.find((s) => s.id === canonicalKey) || result.data.student || { id: canonicalKey };
+
       return res.json({
         role: req.session.role,
+        studentKey: canonicalKey,
         data: result.data,
-        student: result.data.student,
-        students: result.data.students,
+        student,
+        students,
         cache: { ageSeconds: result.ageSeconds, stale: result.stale },
       });
     } catch (err) {
@@ -2968,6 +3036,7 @@ export {
   SimeParseError,
   SimeRateLimitError,
   SimeSessionExpiredError,
+  SimeStudentMismatchError,
   SimeStudentNotFoundError,
   SimeUnexpectedPageError,
   studentKey,

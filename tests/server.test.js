@@ -441,7 +441,7 @@ test("zero-waterfall login, <5ms unified overview cache, 4-strike login lockout,
     assert.equal(portalFetches, 1);
 
     const t0 = performance.now();
-    const ovRes = await realFetch(`${baseUrl}/api/overview`, {
+    const ovRes = await realFetch(`${baseUrl}/api/overview?student=${encodeURIComponent(loginPayload.data.student.id)}`, {
       headers: { Authorization: `Bearer ${loginPayload.token}` },
     });
     const elapsedMs = performance.now() - t0;
