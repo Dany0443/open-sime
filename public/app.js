@@ -1627,6 +1627,29 @@ function goTab(id) {
   else setTab(id);
 }
 
+function bindNavKeyboard(container, orientation = "vertical") {
+  if (!container) return;
+  container.addEventListener("keydown", (e) => {
+    const items = [...container.querySelectorAll(".nav-item, button")];
+    const currentIndex = items.indexOf(document.activeElement);
+    if (currentIndex === -1) return;
+
+    let nextIndex = -1;
+    if (orientation === "vertical") {
+      if (e.key === "ArrowDown") nextIndex = (currentIndex + 1) % items.length;
+      else if (e.key === "ArrowUp") nextIndex = (currentIndex - 1 + items.length) % items.length;
+    } else {
+      if (e.key === "ArrowRight") nextIndex = (currentIndex + 1) % items.length;
+      else if (e.key === "ArrowLeft") nextIndex = (currentIndex - 1 + items.length) % items.length;
+    }
+
+    if (nextIndex !== -1) {
+      e.preventDefault();
+      items[nextIndex].focus();
+    }
+  });
+}
+
 function buildNav() {
   const mk = (tab) =>
     h(
@@ -1636,9 +1659,24 @@ function buildNav() {
       h("span", { class: "nav-label", text: tab.label })
     );
   for (const tab of TABS) {
+    if (tab.id === "profile") continue;
     $("rail-nav").appendChild(mk(tab));
-    if (!tab.railOnly) $("bottom-nav").appendChild(mk(tab));
+    $("bottom-nav").appendChild(mk(tab));
   }
+
+  const profPill = $("drawer-profile-btn")?.querySelector(".nav-pill");
+  if (profPill && !profPill.firstChild) profPill.appendChild(icon("person"));
+  const setPill = $("drawer-settings-btn")?.querySelector(".nav-pill");
+  if (setPill && !setPill.firstChild) setPill.appendChild(icon("settings"));
+
+  $("drawer-profile-btn")?.addEventListener("click", () => goTab("profile"));
+  $("drawer-settings-btn")?.addEventListener("click", () => {
+    $("settings-dialog")?.showModal();
+  });
+
+  bindNavKeyboard($("rail-nav"), "vertical");
+  bindNavKeyboard(document.querySelector(".drawer-pinned-bottom"), "vertical");
+  bindNavKeyboard($("bottom-nav"), "horizontal");
 }
 
 const tabLoadedAt = new Map();

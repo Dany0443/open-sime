@@ -59,12 +59,22 @@
   </main>
 
   <div id="shell" class="shell" hidden>
-    <aside class="rail" aria-label="Navigare principală">
-      <div class="rail-brand">
-        <span class="brand-mark" data-cookie aria-hidden="true"></span>
+    <aside class="rail drawer" aria-label="Navigare principală">
+      <div class="rail-brand drawer-brand">
+        <img class="brand-icon" src="/public/assets/favicon.svg" width="40" height="40" alt="" aria-hidden="true">
         <span class="brand-name">open-sime</span>
       </div>
-      <nav id="rail-nav" class="rail-nav" aria-label="Secțiuni"></nav>
+      <nav id="rail-nav" class="rail-nav drawer-nav" aria-label="Secțiuni"></nav>
+      <div class="drawer-pinned-bottom">
+        <button id="drawer-profile-btn" class="nav-item drawer-item" type="button" data-tab="profile" aria-label="Profil și profesori">
+          <span class="nav-pill" aria-hidden="true"></span>
+          <span class="nav-label">Profil</span>
+        </button>
+        <button id="drawer-settings-btn" class="nav-item drawer-item" type="button" aria-label="Setări">
+          <span class="nav-pill" aria-hidden="true"></span>
+          <span class="nav-label">Setări</span>
+        </button>
+      </div>
     </aside>
 
     <div class="main-col">
