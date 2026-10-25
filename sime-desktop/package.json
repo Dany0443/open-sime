@@ -12,7 +12,9 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:info": "tauri info",
-    "check": "node --check server.js && node --check public/app.js && node --check public/strings.js && node --check public/sw.js && node --check dist-tauri/loader.js && node --check scripts/build-sidecar.mjs",
+    "check": "node --check server.js && node --check public/app.js && node --check public/strings.js && node --check public/sw.js && node --check dist-tauri/loader.js && node --check scripts/build-sidecar.mjs && node --check scripts/check-versions.mjs && node --check scripts/check-release-secrets.mjs && node scripts/check-versions.mjs",
+    "check:versions": "node scripts/check-versions.mjs",
+    "check:release-secrets": "node scripts/check-release-secrets.mjs",
     "test": "node --test tests/*.test.js"
   },
   "engines": {

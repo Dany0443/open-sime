@@ -228,6 +228,12 @@ export async function buildSidecar(options = {}) {
 
     if (targetInfo.ext === ".exe") {
       await stampWindowsPeMetadata(outputPath, DESKTOP_ROOT);
+    } else {
+      try {
+        fs.chmodSync(outputPath, 0o755);
+      } catch {
+        // Ignore chmod errors on environments without POSIX permissions
+      }
     }
 
     const stat = fs.statSync(outputPath);

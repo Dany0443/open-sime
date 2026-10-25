@@ -30,6 +30,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Education",
+    "shortDescription": "Client neoficial pentru agenda.sime.md / Unofficial client for agenda.sime.md",
+    "longDescription": "Open SIME este un client prietenos, rapid și privat pentru agenda electronică școlară agenda.sime.md, destinat elevilor și părinților.",
+    "copyright": "Open SIME Contributors",
+    "publisher": "Open SIME Contributors",
     "externalBin": [
       "binaries/open-sime-server"
     ],
@@ -39,6 +44,43 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "languages": [
+          "Romanian",
+          "Russian",
+          "English"
+        ],
+        "displayLanguageSelector": false
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "dmg": {
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        }
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37",
+          "libayatana-appindicator3-1 | libappindicator3-1"
+        ]
+      }
+    }
   }
 }

@@ -16,6 +16,8 @@ import {
   resolveDataDir,
 } from "../server.js";
 import { buildSidecar, getSidecarOutputPath, resolveTargetTriple } from "../scripts/build-sidecar.mjs";
+import { readProjectVersions, validateVersions, parseCliArgs } from "../scripts/check-versions.mjs";
+import { validateReleaseSecrets } from "../scripts/check-release-secrets.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_ROOT = path.resolve(__dirname, "..");
@@ -60,6 +62,33 @@ test("Sidecar Build Script: target triple resolution and binary naming across al
     )
   );
   assert.throws(() => getSidecarOutputPath("invalid-target-triple"), /Unsupported Rust target triple/);
+});
+
+test("Version Consistency: package.json, tauri.conf.json, and Cargo.toml versions match and CLI validation works", () => {
+  const versions = readProjectVersions(DESKTOP_ROOT);
+  assert.ok(versions.packageJson, "package.json version must be present");
+  assert.equal(versions.packageJson, versions.tauriConf, "tauri.conf.json version must match package.json");
+  assert.equal(versions.packageJson, versions.cargoToml, "Cargo.toml version must match package.json");
+
+  // Validating matching version succeeds
+  const res = validateVersions({ desktopRoot: DESKTOP_ROOT, tag: `v${versions.packageJson}` });
+  assert.equal(res.version, versions.packageJson);
+
+  // Mismatch with tag or expected version throws
+  assert.throws(
+    () => validateVersions({ desktopRoot: DESKTOP_ROOT, tag: "v999.0.0" }),
+    /does not match expected version/
+  );
+  assert.throws(
+    () => validateVersions({ desktopRoot: DESKTOP_ROOT, expectedVersion: "0.0.1" }),
+    /does not match expected version/
+  );
+
+  // CLI argument parsing
+  assert.deepEqual(parseCliArgs(["node", "check.js", "--tag", "v1.2.3"]), { tag: "v1.2.3" });
+  assert.deepEqual(parseCliArgs(["node", "check.js", "--tag=v1.2.3"]), { tag: "v1.2.3" });
+  assert.deepEqual(parseCliArgs(["node", "check.js", "--expected", "1.2.3"]), { expectedVersion: "1.2.3" });
+  assert.deepEqual(parseCliArgs(["node", "check.js", "--expected=1.2.3"]), { expectedVersion: "1.2.3" });
 });
 
 test("Sidecar Storage: OS application-data directory resolution for remember-tokens and keys", () => {
@@ -306,3 +335,48 @@ test("Packaged Sidecar Binary: runs standalone without Node.js in PATH and serve
     fs.rmSync(fakeAppData, { recursive: true, force: true });
   }
 });
+
+test("Release Secrets: validateReleaseSecrets validates required signing secrets", () => {
+  // 1. Empty environment fails and reports all missing secrets
+  const emptyRes = validateReleaseSecrets({});
+  assert.equal(emptyRes.valid, false);
+  assert.ok(emptyRes.missing.length >= 6);
+  assert.ok(emptyRes.missing.some((m) => m.secret === "WINDOWS_CERTIFICATE"));
+  assert.ok(emptyRes.missing.some((m) => m.secret === "APPLE_CERTIFICATE"));
+  assert.ok(emptyRes.missing.some((m) => m.platform === "Linux"));
+  assert.ok(emptyRes.missing.some((m) => m.platform === "Release"));
+
+  // 2. Full valid environment passes
+  const validEnv = {
+    WINDOWS_CERTIFICATE: "base64-dummy-pfx",
+    WINDOWS_CERTIFICATE_PASSWORD: "secret-password",
+    APPLE_CERTIFICATE: "base64-dummy-p12",
+    APPLE_CERTIFICATE_PASSWORD: "cert-password",
+    APPLE_SIGNING_IDENTITY: "Developer ID Application: Open SIME (TEAM123456)",
+    APPLE_TEAM_ID: "TEAM123456",
+    APPLE_API_KEY: "KEY12345",
+    APPLE_API_ISSUER: "uuid-issuer-here",
+    APPLE_API_KEY_BASE64: "base64-dummy-p8",
+    LINUX_GPG_PRIVATE_KEY: "-----BEGIN PGP PRIVATE KEY BLOCK-----...",
+    LINUX_GPG_PASSPHRASE: "gpg-passphrase",
+    RELEASE_GPG_PRIVATE_KEY: "-----BEGIN PGP PRIVATE KEY BLOCK-----...",
+    RELEASE_GPG_PASSPHRASE: "gpg-passphrase",
+  };
+  const validRes = validateReleaseSecrets(validEnv);
+  assert.equal(validRes.valid, true);
+  assert.equal(validRes.missing.length, 0);
+
+  // 3. Apple ID fallback for notarization works
+  const appleIdEnv = {
+    ...validEnv,
+    APPLE_API_KEY: "",
+    APPLE_API_ISSUER: "",
+    APPLE_API_KEY_BASE64: "",
+    APPLE_ID: "developer@example.com",
+    APPLE_PASSWORD: "app-specific-pwd",
+  };
+  const appleIdRes = validateReleaseSecrets(appleIdEnv);
+  assert.equal(appleIdRes.valid, true);
+  assert.equal(appleIdRes.missing.length, 0);
+});
+

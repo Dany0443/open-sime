@@ -1,0 +1,481 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-release:
+    name: Validate Tag, Versions, Secrets & Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sime-desktop/package-lock.json
+
+      - name: Install dependencies
+        working-directory: sime-desktop
+        run: npm ci
+
+      - name: Verify versions match git tag
+        working-directory: sime-desktop
+        run: node scripts/check-versions.mjs --tag "${{ github.ref_name }}"
+
+      - name: Validate required signing credentials
+        working-directory: sime-desktop
+        run: node scripts/check-release-secrets.mjs
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+
+      - name: Syntax and lint checks
+        working-directory: sime-desktop
+        run: npm run check
+
+      - name: Run test suite
+        working-directory: sime-desktop
+        run: npm test
+
+  build-windows:
+    name: Build & Sign Windows x64 (NSIS)
+    needs: validate-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sime-desktop/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: sime-desktop/src-tauri
+
+      - name: Install dependencies
+        working-directory: sime-desktop
+        run: npm ci
+
+      - name: Import Authenticode certificate
+        id: import-cert
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certBytes = [System.Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+              $certBytes,
+              $env:WINDOWS_CERTIFICATE_PASSWORD,
+              [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+          )
+          $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+              [System.Security.Cryptography.X509Certificates.StoreName]::My,
+              [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+          )
+          $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+          $store.Add($cert)
+          $store.Close()
+          Write-Output "THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          Write-Host "Authenticode certificate imported. Subject: $($cert.Subject), Thumbprint: $($cert.Thumbprint)"
+
+      - name: Build Node.js sidecar executable
+        working-directory: sime-desktop
+        run: node scripts/build-sidecar.mjs --target x86_64-pc-windows-msvc
+
+      - name: Sign sidecar executable
+        shell: pwsh
+        working-directory: sime-desktop
+        run: |
+          $sidecar = "src-tauri/binaries/open-sime-server-x86_64-pc-windows-msvc.exe"
+          $cert = Get-Item "Cert:\CurrentUser\My\$env:THUMBPRINT"
+          Set-AuthenticodeSignature -FilePath $sidecar -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+          $sig = Get-AuthenticodeSignature -FilePath $sidecar
+          if ($sig.Status -ne "Valid") {
+              Write-Error "Sidecar signing failed with status: $($sig.Status)"
+              exit 1
+          }
+          Write-Host "Sidecar Authenticode signature valid."
+
+      - name: Build signed Tauri NSIS package
+        working-directory: sime-desktop
+        run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis --config "{\`"bundle\`":{\`"windows\`":{\`"certificateThumbprint\`":\`"$env:THUMBPRINT\`"}}}"
+
+      - name: Verify NSIS installer signature and rename
+        shell: pwsh
+        working-directory: sime-desktop
+        run: |
+          $installer = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $installer) {
+              Write-Error "NSIS installer output not found in target bundle directory."
+              exit 1
+          }
+
+          # Ensure the installer is signed (sign with cert if bundler didn't invoke signtool directly)
+          $sig = Get-AuthenticodeSignature -FilePath $installer.FullName
+          if ($sig.Status -ne "Valid") {
+              $cert = Get-Item "Cert:\CurrentUser\My\$env:THUMBPRINT"
+              Set-AuthenticodeSignature -FilePath $installer.FullName -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+              $sig = Get-AuthenticodeSignature -FilePath $installer.FullName
+          }
+
+          if ($sig.Status -ne "Valid") {
+              Write-Error "NSIS installer signature verification failed: $($sig.Status) - $($sig.StatusMessage)"
+              exit 1
+          }
+          Write-Host "Verified Authenticode signature for $($installer.Name): $($sig.SignerCertificate.Subject)"
+
+          Move-Item -Path $installer.FullName -Destination "./Open-SIME-windows-x64-setup.exe" -Force
+          Write-Host "Final installer staged as Open-SIME-windows-x64-setup.exe"
+
+      - name: Remove certificate from store (cleanup)
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:THUMBPRINT) {
+              $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+                  [System.Security.Cryptography.X509Certificates.StoreName]::My,
+                  [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+              )
+              $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+              $targetCert = $store.Certificates | Where-Object { $_.Thumbprint -eq $env:THUMBPRINT }
+              if ($targetCert) {
+                  $store.Remove($targetCert)
+                  Write-Host "Certificate $env:THUMBPRINT removed from CurrentUser\My"
+              }
+              $store.Close()
+          }
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: sime-desktop/Open-SIME-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  build-macos:
+    name: Build, Sign & Notarize macOS (${{ matrix.name }})
+    needs: validate-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: intel
+            target: x86_64-apple-darwin
+            artifact_name: Open-SIME-macos-intel.dmg
+          - name: apple-silicon
+            target: aarch64-apple-darwin
+            artifact_name: Open-SIME-macos-apple-silicon.dmg
+
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sime-desktop/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: sime-desktop/src-tauri
+
+      - name: Install dependencies
+        working-directory: sime-desktop
+        run: npm ci
+
+      - name: Setup temporary macOS signing keychain
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+      - name: Setup App Store Connect API Key for notarization
+        if: env.APPLE_API_KEY_BASE64 != '' && env.APPLE_API_KEY != ''
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APPLE_API_KEY_BASE64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8
+          echo "APPLE_API_KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> $GITHUB_ENV
+
+      - name: Build Node.js sidecar executable
+        working-directory: sime-desktop
+        run: node scripts/build-sidecar.mjs --target ${{ matrix.target }}
+
+      - name: Sign sidecar executable
+        working-directory: sime-desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            "src-tauri/binaries/open-sime-server-${{ matrix.target }}"
+
+      - name: Build signed and notarized DMG
+        working-directory: sime-desktop
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: npx tauri build --target ${{ matrix.target }} --bundles dmg
+
+      - name: Rename and verify DMG
+        working-directory: sime-desktop
+        run: |
+          DMG_FILE=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" | head -n 1)
+          if [ -z "$DMG_FILE" ]; then
+            echo "Error: DMG file not found in bundle output."
+            exit 1
+          fi
+
+          mv "$DMG_FILE" "./${{ matrix.artifact_name }}"
+          echo "Staged DMG as ./${{ matrix.artifact_name }}"
+
+          # Attempt stapling if not stapled by bundler
+          xcrun stapler staple "./${{ matrix.artifact_name }}" || true
+
+          # Strict signature and Gatekeeper assessment verification
+          codesign --verify --deep --strict --verbose=2 "./${{ matrix.artifact_name }}"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "./${{ matrix.artifact_name }}"
+          xcrun stapler validate "./${{ matrix.artifact_name }}"
+          echo "Verified macOS code signature and notarization for ${{ matrix.artifact_name }}"
+
+      - name: Cleanup temporary credentials
+        if: always()
+        run: |
+          rm -rf ~/.appstoreconnect/private_keys
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: sime-desktop/${{ matrix.artifact_name }}
+          if-no-files-found: error
+          retention-days: 1
+
+  build-linux:
+    name: Build & Sign Linux x64 (AppImage & deb)
+    needs: validate-release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sime-desktop/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: sime-desktop/src-tauri
+
+      - name: Install Linux build dependencies & FUSE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2
+
+      - name: Install dependencies
+        working-directory: sime-desktop
+        run: npm ci
+
+      - name: Import GPG private key
+        env:
+          GPG_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY || secrets.RELEASE_GPG_PRIVATE_KEY }}
+        run: |
+          echo "$GPG_KEY" | gpg --batch --import
+
+      - name: Build Node.js sidecar executable
+        working-directory: sime-desktop
+        run: node scripts/build-sidecar.mjs --target x86_64-unknown-linux-gnu
+
+      - name: Build signed Linux AppImage and deb
+        working-directory: sime-desktop
+        env:
+          SIGN: "1"
+          APPIMAGETOOL_FORCE_SIGN: "1"
+          APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE || secrets.RELEASE_GPG_PASSPHRASE }}
+        run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb
+
+      - name: Rename and verify Linux artifacts
+        working-directory: sime-desktop
+        run: |
+          APPIMAGE_FILE=$(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage -name "*.AppImage" | head -n 1)
+          DEB_FILE=$(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -name "*.deb" | head -n 1)
+
+          if [ -z "$APPIMAGE_FILE" ] || [ -z "$DEB_FILE" ]; then
+            echo "Error: Linux bundles not found in bundle output."
+            exit 1
+          fi
+
+          mv "$APPIMAGE_FILE" ./Open-SIME-linux-x64.AppImage
+          mv "$DEB_FILE" ./Open-SIME-linux-x64.deb
+          chmod +x ./Open-SIME-linux-x64.AppImage
+
+          # Verify embedded signature in AppImage
+          ./Open-SIME-linux-x64.AppImage --appimage-signature
+          echo "Verified embedded AppImage signature."
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            sime-desktop/Open-SIME-linux-x64.AppImage
+            sime-desktop/Open-SIME-linux-x64.deb
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-release:
+    name: Aggregate Artifacts, Sign Checksums & Publish Release
+    needs: [validate-release, build-windows, build-macos, build-linux]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create release assets directory
+        run: mkdir -p release-assets
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Verify all required release files are present
+        run: |
+          REQUIRED_FILES=(
+            "Open-SIME-windows-x64-setup.exe"
+            "Open-SIME-macos-intel.dmg"
+            "Open-SIME-macos-apple-silicon.dmg"
+            "Open-SIME-linux-x64.AppImage"
+            "Open-SIME-linux-x64.deb"
+          )
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "release-assets/$file" ]; then
+              echo "Error: Missing required release file: $file"
+              exit 1
+            fi
+            echo "✓ Found: $file ($(wc -c < "release-assets/$file") bytes)"
+          done
+
+      - name: Generate SHA-256 checksums manifest
+        working-directory: release-assets
+        run: |
+          sha256sum Open-SIME-* > checksums.txt
+          echo "=== SHA-256 Checksums ==="
+          cat checksums.txt
+
+      - name: Create detached GPG signature for checksums
+        working-directory: release-assets
+        env:
+          GPG_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY || secrets.LINUX_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE || secrets.LINUX_GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_KEY" | gpg --batch --import
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --detach-sign --armor --output checksums.txt.sig checksums.txt
+          gpg --verify checksums.txt.sig checksums.txt
+          echo "✓ Detached GPG signature created and verified."
+
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            release-assets/Open-SIME-windows-x64-setup.exe \
+            release-assets/Open-SIME-macos-intel.dmg \
+            release-assets/Open-SIME-macos-apple-silicon.dmg \
+            release-assets/Open-SIME-linux-x64.AppImage \
+            release-assets/Open-SIME-linux-x64.deb \
+            release-assets/checksums.txt \
+            release-assets/checksums.txt.sig \
+            --title "Open SIME ${{ github.ref_name }}" \
+            --notes "Production release ${{ github.ref_name }} of Open SIME for Windows, macOS, and Linux. See checksums.txt and checksums.txt.sig for verification." \
+            --draft=false \
+            --prerelease=false
+          echo "✓ Release ${{ github.ref_name }} published successfully with all signed platform installers."

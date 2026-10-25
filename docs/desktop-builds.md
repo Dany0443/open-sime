@@ -1,6 +1,6 @@
-# Open SIME Desktop Builds & Sidecar Architecture
+# Open SIME Desktop Builds & Distribution Guide
 
-This document explains how **Open SIME** packages its Node.js backend as a self-contained **Tauri 2** sidecar for production desktop builds while keeping local web development (`npm start`) and Tauri development mode (`npm run tauri:dev`) unchanged.
+This document explains how **Open SIME** packages its Node.js backend as a self-contained **Tauri 2** sidecar for production desktop builds, maintains version consistency, and automates cross-platform building, code signing, signature verification, and releases via GitHub Actions.
 
 ---
 
@@ -100,34 +100,239 @@ In local web development (`npm start`), data defaults to `sime-desktop/data/` un
 
 ---
 
-## 5. Building and Troubleshooting
+## 5. Version Synchronization
 
-### Local Development
+Version consistency across all components is strictly enforced by `sime-desktop/scripts/check-versions.mjs`.
 
+Three files must keep identical semver versions:
+1. `sime-desktop/package.json` (`"version": "X.Y.Z"`)
+2. `sime-desktop/src-tauri/tauri.conf.json` (`"version": "X.Y.Z"`)
+3. `sime-desktop/src-tauri/Cargo.toml` (`version = "X.Y.Z"`)
+
+To check version consistency locally:
 ```bash
 cd sime-desktop
-npm install
-npm run check
-npm test
-npm start           # Web app at http://127.0.0.1:3000
-npm run tauri:dev   # Desktop window in development mode
+npm run check:versions
 ```
 
-### Production Build
+To validate that the project version matches a target git release tag:
+```bash
+node scripts/check-versions.mjs --tag v1.0.0
+# Or with explicit expected version:
+node scripts/check-versions.mjs --expected 1.0.0
+```
 
-Prerequisites:
-- Node.js `>= 20`
-- Rust toolchain (`rustup`, `cargo`, `rustc >= 1.77.2`)
-- Platform C/C++ build tools (Visual Studio C++ Build Tools + WebView2 on Windows; Xcode Command Line Tools on macOS; `webkit2gtk` development packages on Linux)
+`npm run check` runs this validation automatically on every syntax check.
+
+---
+
+## 6. GitHub Actions Workflows
+
+Two independent, purpose-built workflows live under `.github/workflows/`:
+
+```
+.github/
+└── workflows/
+    ├── ci.yml       # Preview CI (pull requests & main branch pushes)
+    └── release.yml  # Signed Production Releases (triggered on v* tags)
+```
+
+### 6.1. Continuous Integration (`ci.yml`)
+
+- **Triggers**:
+  - Pull requests targeting `main`
+  - Direct pushes to `main`
+  - Manual triggers (`workflow_dispatch`)
+- **Permissions**: `contents: read` (strictly read-only; no release creation permissions).
+- **Secrets Policy**: Does **not** require, expose, or access any signing credentials. Safe for untrusted pull requests and forks.
+- **Jobs**:
+  1. `checks`: Runs on `ubuntu-22.04`. Executes `npm run check` (file syntax and version validation) and `npm test` (full 112+ test suite).
+  2. `build-preview`: Matrix job building all 4 platform targets (`windows-latest`, `macos-latest` Intel, `macos-latest` Apple Silicon, `ubuntu-22.04`). Packages unsigned preview installers and uploads them as GitHub Actions workflow artifacts (retained for 7 days).
+
+### 6.2. Production Release Workflow (`release.yml`)
+
+- **Triggers**:
+  - Pushed version tags matching `v*` (e.g. `v1.0.0`, `v1.2.3`)
+  - Manual dispatch (`workflow_dispatch`)
+- **Permissions**: `contents: write` (required to publish the GitHub Release).
+- **Execution Flow**:
+  - **Fail-Fast Validation**: The `validate-release` job runs before any build runner starts. It validates tag-version equality, verifies that all unit tests pass, and checks that all required signing secrets exist in the repository. If any secret is missing, it aborts immediately with a clear error report.
+  - **No Race Conditions**: All platform matrix jobs upload their signed installers as GitHub Actions artifacts. The final `publish-release` job executes only after all 4 builds succeed, downloads all 5 files, computes SHA-256 checksums, signs the manifest with GPG, and publishes everything to a single GitHub Release in one atomic operation.
+  - **Zero Unsigned Production Artifacts**: If signing, notarization, or signature verification fails on any platform, the pipeline terminates and no release is published.
+
+---
+
+## 7. Supported Platforms and Release Artifacts
+
+Every official release produces exactly 5 platform installers plus the checksum manifest and its detached signature:
+
+| Platform / Target | Rust Triple | Distribution Format | Final Release Filename |
+| --- | --- | --- | --- |
+| **Windows x64** | `x86_64-pc-windows-msvc` | NSIS Installer (`.exe`) | `Open-SIME-windows-x64-setup.exe` |
+| **macOS Intel** | `x86_64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-macos-intel.dmg` |
+| **macOS Apple Silicon** | `aarch64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-macos-apple-silicon.dmg` |
+| **Linux x64 (Primary)** | `x86_64-unknown-linux-gnu` | Portable AppImage (`.AppImage`) | `Open-SIME-linux-x64.AppImage` |
+| **Linux x64 (Secondary)**| `x86_64-unknown-linux-gnu` | Debian Package (`.deb`) | `Open-SIME-linux-x64.deb` |
+| **Checksum Manifest** | N/A | SHA-256 Text File | `checksums.txt` |
+| **Manifest Signature** | N/A | Detached ASCII-Armored GPG Signature | `checksums.txt.sig` |
+
+---
+
+## 8. Code Signing and GitHub Secrets Configuration
+
+Official production releases require real signing credentials configured in **Settings > Secrets and variables > Actions > Repository secrets**.
+
+### 8.1. Windows (Authenticode)
+
+- **`WINDOWS_CERTIFICATE`**: Base64-encoded Authenticode PFX certificate file.
+  To encode your certificate file:
+  ```powershell
+  [Convert]::ToBase64String([IO.File]::ReadAllBytes("MyCertificate.pfx")) | Out-File -FilePath "cert-base64.txt" -Encoding ascii
+  ```
+- **`WINDOWS_CERTIFICATE_PASSWORD`**: Password protecting the PFX certificate.
+- **Signing Process**:
+  - The workflow imports the PFX certificate into the runner's `Cert:\CurrentUser\My` store.
+  - The sidecar executable `src-tauri/binaries/open-sime-server-x86_64-pc-windows-msvc.exe` is signed with `Set-AuthenticodeSignature` and timestamped via DigiCert (`http://timestamp.digicert.com`).
+  - Tauri packages the NSIS installer and signs both the inner binary and setup executable with the certificate thumbprint.
+  - The signature is verified with `Get-AuthenticodeSignature`. The certificate is removed from the store upon completion.
+
+### 8.2. macOS (Developer ID & Notarization)
+
+- **`APPLE_CERTIFICATE`**: Base64-encoded Developer ID Application `.p12` certificate.
+  To export and encode:
+  ```bash
+  # In Keychain Access, export "Developer ID Application: Your Name (TEAMID)" as certificate.p12
+  openssl base64 -A -in certificate.p12 -out certificate-base64.txt
+  ```
+- **`APPLE_CERTIFICATE_PASSWORD`**: Password defined during `.p12` export.
+- **`APPLE_SIGNING_IDENTITY`**: Full identity string, e.g.:
+  `Developer ID Application: Open SIME Contributors (ABC1234XYZ)`
+- **`APPLE_TEAM_ID`**: 10-character Apple Developer Team ID (e.g. `ABC1234XYZ`).
+- **Notarization Secrets (App Store Connect API Key - Recommended)**:
+  - **`APPLE_API_KEY`**: 10-character Key ID from App Store Connect (e.g. `9X8Y7Z6W5V`).
+  - **`APPLE_API_ISSUER`**: Issuer UUID from App Store Connect (e.g. `12345678-1234-1234-1234-1234567890ab`).
+  - **`APPLE_API_KEY_BASE64`**: Base64-encoded contents of the `.p8` API key file (`AuthKey_XXXXXXXXXX.p8`):
+    ```bash
+    openssl base64 -A -in AuthKey_9X8Y7Z6W5V.p8 -out p8-base64.txt
+    ```
+- **Notarization Secrets (Apple ID Fallback)**:
+  - **`APPLE_ID`**: Apple ID email.
+  - **`APPLE_PASSWORD`**: App-specific password generated on appleid.apple.com.
+- **Signing Process**:
+  - The workflow creates an ephemeral keychain, imports the `.p12` certificate, and registers the `.p8` key under `~/.appstoreconnect/private_keys/`.
+  - The sidecar binary is signed with hardened runtime (`--options runtime --timestamp`).
+  - Tauri builds and signs the `.app` bundle and DMG, submits for notarization via `notarytool`, and staples the ticket with `stapler`.
+  - Signatures are verified with `codesign --verify`, `spctl --assess`, and `xcrun stapler validate`. Keychains and keys are securely deleted in the cleanup phase.
+
+### 8.3. Linux (GPG AppImage Signing)
+
+- **`LINUX_GPG_PRIVATE_KEY`** (or `RELEASE_GPG_PRIVATE_KEY`): ASCII-armored GPG private key.
+  To export:
+  ```bash
+  gpg --armor --export-secret-keys <KEY-ID> > private-key.asc
+  ```
+- **`LINUX_GPG_PASSPHRASE`** (or `RELEASE_GPG_PASSPHRASE`): Passphrase for the GPG private key.
+- **Signing Process**:
+  - The workflow imports the GPG private key into the runner's keyring.
+  - Tauri's AppImage bundler runs with `SIGN=1`, `APPIMAGETOOL_FORCE_SIGN=1`, and `APPIMAGETOOL_SIGN_PASSPHRASE`. If signing encounters any issue, `APPIMAGETOOL_FORCE_SIGN=1` immediately fails the build.
+  - The signature is verified using `Open-SIME-linux-x64.AppImage --appimage-signature`.
+
+### 8.4. Release Checksum Manifest Signing
+
+- **`RELEASE_GPG_PRIVATE_KEY`** & **`RELEASE_GPG_PASSPHRASE`**: Used by the `publish-release` job to sign `checksums.txt` and generate `checksums.txt.sig`. Falls back to `LINUX_GPG_PRIVATE_KEY` if not configured separately.
+
+---
+
+## 9. How to Verify Signatures and Checksums
+
+Users and system administrators can verify the integrity and authenticity of downloaded release artifacts.
+
+### 9.1. Checksum Verification
+
+Download `checksums.txt` and the release artifact, then run:
 
 ```bash
-cd sime-desktop
-npm run sidecar:build   # Builds src-tauri/binaries/open-sime-server-<target-triple>[.exe]
-npm run tauri:build     # Runs sidecar:build via beforeBuildCommand, then compiles the Tauri app
+# Linux
+sha256sum --check --ignore-missing checksums.txt
+
+# macOS
+shasum -a 256 -c checksums.txt
+
+# Windows (PowerShell)
+Get-FileHash -Algorithm SHA256 Open-SIME-windows-x64-setup.exe
+# Compare with the hash in checksums.txt
 ```
 
-### Troubleshooting
+### 9.2. GPG Manifest Signature Verification
 
-- **`EADDRINUSE` on port `17321`**: Another instance of Open SIME (or another local process) is already bound to `127.0.0.1:17321`. Close the existing process and relaunch Open SIME.
-- **`cargo metadata` / `rustc` not found during `npm run tauri:build`**: Install Rust via [rustup.rs](https://rustup.rs/) and ensure `cargo` and `rustc` are in `PATH`. Note that `npm run sidecar:build` and `npm test` work with Node.js alone.
+Download `checksums.txt`, `checksums.txt.sig`, and import the release signing public key:
 
+```bash
+# Import the release signing public key
+gpg --import release-key.asc
+# Or fetch from a keyserver
+gpg --keyserver keyserver.ubuntu.com --recv-keys <RELEASE_KEY_FINGERPRINT>
+
+# Verify the manifest signature
+gpg --verify checksums.txt.sig checksums.txt
+```
+
+### 9.3. Windows Authenticode Verification
+
+```powershell
+Get-AuthenticodeSignature -FilePath .\Open-SIME-windows-x64-setup.exe | Format-List
+```
+Verify that `Status` is `Valid`, `StatusMessage` is `Signature verified.`, and `SignerCertificate` displays the expected subject.
+
+### 9.4. macOS Gatekeeper and Notarization Verification
+
+```bash
+# 1. Verify deep code signature
+codesign --verify --deep --strict --verbose=2 Open-SIME-macos-*.dmg
+
+# 2. Verify Gatekeeper assessment
+spctl --assess --type open --context context:primary-signature --verbose=2 Open-SIME-macos-*.dmg
+
+# 3. Verify notarization ticket is stapled
+xcrun stapler validate Open-SIME-macos-*.dmg
+```
+
+### 9.5. Linux AppImage Signature Verification
+
+```bash
+chmod +x Open-SIME-linux-x64.AppImage
+./Open-SIME-linux-x64.AppImage --appimage-signature
+```
+This extracts and validates the embedded GPG signature against your trusted GPG keyring.
+
+---
+
+## 10. Platform-Specific Notes and Troubleshooting
+
+### Windows SmartScreen
+
+A valid Authenticode signature with a standard Code Signing (OV) certificate does not immediately grant SmartScreen reputation. SmartScreen calculates reputation dynamically based on download volume and certificate history:
+- Users downloading early builds may see "Windows protected your PC". Clicking **More info > Run anyway** allows installation.
+- To prevent SmartScreen warnings on Day 1, an Extended Validation (EV) certificate or established developer identity with Microsoft Partner Center is required.
+
+### macOS Gatekeeper and First Launch
+
+- Release DMGs are signed with a Developer ID Application certificate and notarized by Apple. Gatekeeper verifies the stapled notarization ticket even when offline.
+- Unsigned preview builds (from CI pull requests) are **not** notarized: macOS Gatekeeper will block them by default with a "damaged app" or unidentified developer alert. To run unsigned CI preview builds on macOS:
+  ```bash
+  xattr -d com.apple.quarantine /Applications/"Open SIME.app"
+  ```
+
+### Linux FUSE Requirements for AppImage
+
+AppImages require `FUSE` (Filesystem in Userspace) to mount and execute:
+- **Ubuntu 22.04 and older**: `libfuse2` is installed or can be installed via `sudo apt install libfuse2`.
+- **Ubuntu 24.04 and newer**: Ubuntu 24.04 ships with `fuse3` by default. To run older AppImages on Ubuntu 24.04, install `libfuse2t64`:
+  ```bash
+  sudo apt install libfuse2t64
+  ```
+- Alternatively, run without FUSE:
+  ```bash
+  ./Open-SIME-linux-x64.AppImage --appimage-extract-and-run
+  ```
+- For Debian/Ubuntu distributions where FUSE cannot be enabled, use the native `.deb` package (`sudo dpkg -i Open-SIME-linux-x64.deb`).
