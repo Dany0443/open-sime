@@ -58,7 +58,7 @@ test("W12: diffNewMarks detects new marks only", async () => {
 test("W12: public/manifest.json exists and is linked in index.html", () => {
   const manifestRaw = fs.readFileSync(new URL("../public/manifest.json", import.meta.url), "utf-8");
   const manifest = JSON.parse(manifestRaw);
-  assert.equal(manifest.name, "open-sime");
+  assert.equal(manifest.name, "Open SIME");
   assert.ok(manifest.start_url);
   assert.ok(Array.isArray(manifest.icons) && manifest.icons.length > 0);
 

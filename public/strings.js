@@ -24,7 +24,7 @@ const STRINGS = {
     theme_auto: "automată",
 
     // Auth
-    app_title: "open-sime",
+    app_title: "Open SIME",
     app_subtitle: "agendă școlară",
     username: "Nume de utilizator",
     password: "Parolă",
@@ -136,7 +136,7 @@ const STRINGS = {
     theme_auto: "авто",
 
     // Auth
-    app_title: "open-sime",
+    app_title: "Open SIME",
     app_subtitle: "школьный дневник",
     username: "Имя пользователя",
     password: "Пароль",
@@ -248,7 +248,7 @@ const STRINGS = {
     theme_auto: "auto",
 
     // Auth
-    app_title: "open-sime",
+    app_title: "Open SIME",
     app_subtitle: "school agenda",
     username: "Username",
     password: "Password",

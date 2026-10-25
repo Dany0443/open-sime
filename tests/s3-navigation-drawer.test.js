@@ -18,7 +18,7 @@ test("S3: Brand mark uses real favicon.svg 40px img without data-cookie", () => 
   const brandMatch = html.match(/class="[^"]*(?:rail-brand|drawer-brand)[^"]*"[\s\S]*?<\/div>/);
   assert.ok(brandMatch, "brand container must exist");
   assert.ok(!brandMatch[0].includes("data-cookie"), "brand mark must NOT have data-cookie attribute");
-  assert.ok(brandMatch[0].includes("open-sime"), "text open-sime must be beside brand icon");
+  assert.ok(brandMatch[0].includes("Open SIME"), "text open-sime must be beside brand icon");
 });
 
 test("S3: Drawer has bottom-pinned Profil and Setări", () => {

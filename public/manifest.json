@@ -1,6 +1,6 @@
 {
-  "name": "open-sime",
-  "short_name": "open-sime",
+  "name": "Open SIME",
+  "short_name": "Open SIME",
   "description": "Student-friendly frontend for agenda.sime.md",
   "start_url": "/",
   "scope": "/",

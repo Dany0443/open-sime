@@ -19,9 +19,9 @@ const TICK_MS = 30000;
 const SYNC_COOLDOWN_MS = 30000;
 const STALE_AFTER_MS = 5 * 60000;
 const DAY_MS = 86400000;
-const THEMES = ["system", "light", "dark"];
-const THEME_LABELS = { system: "automată", light: "luminoasă", dark: "întunecată" };
-const THEME_ICONS = { system: "contrast", light: "light_mode", dark: "dark_mode" };
+const THEMES = ["light", "dark"];
+const THEME_LABELS = { light: "luminoasă", dark: "întunecată" };
+const THEME_ICONS = { light: "dark_mode", dark: "light_mode" };
 
 const TABS = [
   { id: "home", label: "Acasă", title: "Acasă", icon: "home" },
@@ -1673,8 +1673,9 @@ function scheduleCooldown() {
 function renderTheme() {
   const btn = $("theme-btn");
   if (!btn) return;
-  const label = "Temă " + (THEME_LABELS[state.theme] || "automată") + ". Schimbă tema.";
-  setIcon(btn, THEME_ICONS[state.theme] || "contrast");
+  const isDark = state.theme === "dark";
+  const label = isDark ? "Comută la tema luminoasă" : "Comută la tema întunecată";
+  setIcon(btn, isDark ? "light_mode" : "dark_mode");
   btn.setAttribute("aria-label", label);
   btn.title = label;
 }
@@ -1929,7 +1930,7 @@ function setTab(id) {
   $("profile-btn").classList.toggle("is-current", tab.id === "profile");
   const title = (state.simpleMode && SIMPLE_TAB_TITLES[tab.id]) ? SIMPLE_TAB_TITLES[tab.id] : tab.title;
   $("page-title").textContent = title;
-  document.title = title + " - open-sime";
+  document.title = title + " - Open SIME";
   if (tab.id === "timetable") renderLessons();
   window.scrollTo(0, 0);
   if (state.token) {
@@ -1940,9 +1941,6 @@ function setTab(id) {
 const colorQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 function getEffectiveTheme() {
-  if (state.theme === "system") {
-    return colorQuery.matches ? "dark" : "light";
-  }
   return state.theme === "dark" ? "dark" : "light";
 }
 
@@ -1956,10 +1954,11 @@ function applyTheme() {
 }
 
 function cycleTheme() {
-  const idx = THEMES.indexOf(state.theme);
-  state.theme = THEMES[(idx + 1) % THEMES.length];
+  state.theme = state.theme === "dark" ? "light" : "dark";
   store.set(KEYS.theme, state.theme);
   applyTheme();
+  const themeRadio = document.querySelector(`input[name="setting-theme"][value="${state.theme}"]`);
+  if (themeRadio) themeRadio.checked = true;
 }
 
 function applySettings() {
@@ -2147,7 +2146,7 @@ function showAuth(message) {
   $("auth-view").hidden = false;
   if (message) showAuthMessage(message, "info");
   else clearAuthMessage();
-  document.title = "Autentificare - open-sime";
+  document.title = "Autentificare - Open SIME";
   setAuthBusy(false);
 }
 
@@ -2414,7 +2413,12 @@ function bindEvents() {
 function boot() {
   store.del("open_sime_creds");
   const savedTheme = store.get(KEYS.theme);
-  state.theme = THEMES.includes(savedTheme) ? savedTheme : "system";
+  if (savedTheme === "light" || savedTheme === "dark") {
+    state.theme = savedTheme;
+  } else {
+    state.theme = colorQuery.matches ? "dark" : "light";
+    store.set(KEYS.theme, state.theme);
+  }
 
   for (const el of document.querySelectorAll("[data-icon]")) el.prepend(icon(el.dataset.icon));
   for (const el of document.querySelectorAll("[data-cookie]")) el.appendChild(cookieSvg("deco-shape"));

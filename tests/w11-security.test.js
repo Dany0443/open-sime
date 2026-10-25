@@ -102,5 +102,5 @@ test("W11: security headers include X-Frame-Options and HSTS on HTTPS", async ()
 test("W11: THEME_LABELS and THEME_ICONS have no duplicate keys and support system", () => {
   const appJs = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf-8");
   assert.ok(!appJs.includes('light: "automată", light: "luminoasă"'), "Must remove duplicate light key");
-  assert.ok(appJs.includes('system: "automată"'), "Must support system theme");
+  assert.ok(!appJs.includes('system: "automată"'), "Binary theme has no system option in settings");
 });
