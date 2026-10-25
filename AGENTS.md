@@ -78,7 +78,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## What this project is
 
-open-sime is a free, unofficial client for agenda.sime.md, the national electronic school agenda (an Oracle APEX application). Students and parents log in with their existing accounts. The app reads their data from the portal and shows it in a clearer, friendlier interface. The users include children as young as seven, so correctness, privacy and simplicity matter more than features.
+open-sime is a free, unofficial client for agenda.sime.md, the national electronic school agenda (an Oracle APEX application). Students and parents log in with their existing accounts. The app reads their data from the portal and shows it in a clearer, friendlier interface. The users are middle and high school students (grades 5 to 12, from about ten years old) and their parents, so correctness, privacy and simplicity matter more than features.
 
 Goals, in priority order:
 

@@ -8,7 +8,7 @@ Read `AGENTS.md` in the repository root before doing anything, including reading
 
 ## Project goals
 
-1. **Be useful for every age.** A seven-year-old and a parent should both be able to use it. Keep the language simple, the touch targets large and the screens uncluttered.
+1. **Be useful for every age.** Students from about ten years old (grades 5 to 12) and their parents should both be able to use it. Keep the language simple, the touch targets large and the screens uncluttered.
 2. **Show correct data.** Wrong data about a child is worse than no data. If something cannot be parsed reliably, show nothing or say so clearly. Never guess, and never show one student's data for another.
 3. **Protect privacy.** Credentials and student data stay on the user's own device or server. No analytics, no telemetry, no third-party services. The app only talks to agenda.sime.md.
 4. **Feel native on every platform.** Web, desktop and Android share the same behavior, but each follows its own platform's design conventions.
