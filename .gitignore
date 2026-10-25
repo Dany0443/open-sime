@@ -3,7 +3,9 @@
 .env.*
 *.env
 data/
+sime-desktop/data/
 *.key
+PROGRESS.md
 
 # Agent harness
 .agents/
@@ -11,8 +13,8 @@ data/
 tmp/
 skills-lock.json
 
-
 # OS / Editor files
 .idea/
 .vscode/
 node_modules/
+sime-desktop/node_modules/

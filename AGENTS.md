@@ -93,17 +93,25 @@ Goals, in priority order:
 Current:
 
 ```
+sime-desktop/        Existing web/desktop app (server.js, index.html, public/, tests/, scripts/)
+sime-app/            Reserved for future mobile development
+README.md            Repository overview
+```
+
+Inside `sime-desktop/`:
+
+```
 server.js            Express server and all portal logic (login, parsing, caching, routes)
-public/              Web UI: index.html, app.js, strings.js, style.css, sw.js, manifest.json, assets/
+public/              Web UI: app.js, strings.js, style.css, sw.js, manifest.json, assets/
 tests/               Automated tests (node:test) and the mock portal
 test/fixtures/       Sanitized portal captures
 scripts/             Tools, including sanitize-capture.mjs
 README.md            Running and deployment notes
 ```
 
-Planned (do not create these unless the task says so): a pure `core/` package with all portal logic and no I/O, a `spec/` folder with shared fixtures and expected JSON, a `server/` wrapper, a `desktop/` Electron wrapper and an `android/` Kotlin app. The web app with the server is the main product and the reference implementation. Android and Electron come later and must reproduce its behavior.
+Planned (do not create these unless the task says so): a pure `core/` package with all portal logic and no I/O, a `spec/` folder with shared fixtures and expected JSON, a `server/` wrapper, a `desktop/` wrapper and an `android/` Kotlin app in `sime-app/`. The web app with the server in `sime-desktop/` is the main product and the reference implementation.
 
-Useful commands:
+Useful commands (run inside `sime-desktop/`):
 
 ```
 npm test            run the whole test suite

@@ -2769,8 +2769,8 @@ function decryptRememberToken(token, secret) {
   }
 }
 
-const REMEMBER_STORE_PATH = process.env.SIME_REMEMBER_STORE || path.resolve("data/remember-tokens.json");
-const REMEMBER_KEY_PATH = process.env.SIME_REMEMBER_KEY_FILE || path.resolve("data/remember-secret.key");
+const REMEMBER_STORE_PATH = process.env.SIME_REMEMBER_STORE || path.join(ROOT, "data", "remember-tokens.json");
+const REMEMBER_KEY_PATH = process.env.SIME_REMEMBER_KEY_FILE || path.join(ROOT, "data", "remember-secret.key");
 let memRememberKey = null;
 
 function getRememberSecretKey() {
