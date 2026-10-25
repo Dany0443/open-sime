@@ -858,12 +858,20 @@ function parseAbsenceSummary($) {
   };
   const presenceRaw = getItemText($, "P1_PRESENCE_PERCENT", "") || getItemText($, "P1_PROC_PREZ", "");
   const presencePercent = /^[+-]?\d+$/.test(presenceRaw.trim()) ? parseInt(presenceRaw.trim(), 10) : 100;
+  const sem1Excused = asInt("P1_MOTIVATED", 0);
+  const sem1Unexcused = asInt("P1_UNMOTIVATED", 0);
+  const sem2Excused = asInt("P1_MOTIVATED2", 0);
+  const sem2Unexcused = asInt("P1_UNMOTIVATED2", 0);
+  const sem1Total = asInt("P1_TOTAL_ABSENCES1", sem1Excused + sem1Unexcused);
+  const sem2Total = asInt("P1_TOTAL_ABSENCES2", sem2Excused + sem2Unexcused);
   const summary = {
     presencePercent,
-    sem1Excused: asInt("P1_MOTIVATED", 0),
-    sem1Unexcused: asInt("P1_UNMOTIVATED", 0),
-    sem2Excused: asInt("P1_MOTIVATED2", 0),
-    sem2Unexcused: asInt("P1_UNMOTIVATED2", 0),
+    sem1Excused,
+    sem1Unexcused,
+    sem1Total,
+    sem2Excused,
+    sem2Unexcused,
+    sem2Total,
   };
   summary.totalExcused = summary.sem1Excused + summary.sem2Excused;
   summary.totalUnexcused = summary.sem1Unexcused + summary.sem2Unexcused;
@@ -1073,6 +1081,54 @@ function extractHtmlAbsenceRecords($, today = todayChisinau(), studentKey = null
   return records;
 }
 
+function extractEmbeddedAbsenceRecords($, today = todayChisinau(), studentKey = null) {
+  const raw = getInputValue($, "P1_JSON_ABSENCES");
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const date = parseDate(item.lessonDate, today);
+      const subject = String(item.discipliny || item.discipline || item.subject || "Disciplină").trim();
+      if (!date || !subject) continue;
+      const rawStatus = String(item.absenceName || "").toLowerCase();
+      const isUnexcused = UNEXCUSED_MARKERS.some((k) => rawStatus.includes(k));
+      const isExcused = !isUnexcused && EXCUSED_MARKERS.some((k) => rawStatus.includes(k));
+      const status = isExcused ? "excused" : isUnexcused ? "unexcused" : "unknown";
+      const rawStatusStr = isExcused ? "motivat" : isUnexcused ? "nemotivat" : "necunoscut";
+      const lessonNumber =
+        typeof item.lessonOrderId === "number"
+          ? item.lessonOrderId
+          : /^\d+$/.test(String(item.lessonOrderId || "").trim())
+          ? parseInt(String(item.lessonOrderId).trim(), 10)
+          : null;
+      out.push({
+        studentKey: studentKey ? String(studentKey) : null,
+        date,
+        lessonNumber,
+        startTime: "",
+        endTime: "",
+        subject,
+        room: null,
+        teacher: null,
+        status,
+        reason: null,
+        semester: inferAbsenceSemester(date),
+        startLocal: "",
+        endLocal: "",
+        discipline: subject,
+        note: null,
+        rawStatus: rawStatusStr,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 // Categorizes absences strictly into Semestrul 1 and Semestrul 2 with totals, motivate, nemotivate, and lesson records
 function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
   const effectiveRecords = Array.isArray(rawRecords) ? [...rawRecords] : [];
@@ -1080,7 +1136,7 @@ function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
   const deduped = [];
   for (const r of effectiveRecords) {
     if (!r) continue;
-    const key = `${r.date || ""}|${r.startTime || r.startLocal || ""}|${r.subject || r.discipline || ""}`;
+    const key = `${r.date || ""}|${r.lessonNumber || ""}|${r.startTime || r.startLocal || ""}|${r.subject || r.discipline || ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const sem = inferAbsenceSemester(r.date, r.semester);
@@ -1105,7 +1161,7 @@ function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
       rawStatus: r.rawStatus || (status === "excused" ? "motivat" : status === "unexcused" ? "nemotivat" : "necunoscut"),
     });
   }
-  deduped.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.startTime || b.startLocal || "").localeCompare(a.startTime || a.startLocal || ""));
+  deduped.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (a.lessonNumber || 0) - (b.lessonNumber || 0) || (b.startTime || b.startLocal || "").localeCompare(a.startTime || a.startLocal || ""));
 
   const sem1Records = deduped.filter((r) => r.semester === 1);
   const sem2Records = deduped.filter((r) => r.semester === 2);
@@ -1381,7 +1437,10 @@ function parseFullPortal(html, today = todayChisinau(), { extraReports = [], ext
   const days = groupByDay(calendarEntries);
   const timetable = days[today] || [];
   const schedule = { weekStart: weekStart(today), days };
-  const rawRecords = [...absenceRecords(calendarEntries), ...extractHtmlAbsenceRecords($, today)];
+  const embeddedAbsences = extractEmbeddedAbsenceRecords($, today, student ? student.id : null);
+  const rawRecords = embeddedAbsences.length
+    ? embeddedAbsences
+    : [...absenceRecords(calendarEntries), ...extractHtmlAbsenceRecords($, today)];
   const absences = buildSemesterAbsences(rawAbsenceSummary, rawRecords);
   const absenceSummary = absences.summary;
   const teachers = buildTeachers(calendarEntries, metadata, catalog.subjects);
@@ -1473,7 +1532,7 @@ function inspectParserHealth(html) {
   };
 
   // absences summary
-  const absSummarySelectors = ["#P1_MOTIVATED", "#P1_UNMOTIVATED", "#P1_MOTIVATED2", "#P1_UNMOTIVATED2", "#P1_PRESENCE_PERCENT", "#P1_PROC_PREZ"];
+  const absSummarySelectors = ["#P1_MOTIVATED", "#P1_UNMOTIVATED", "#P1_MOTIVATED2", "#P1_UNMOTIVATED2", "#P1_TOTAL_ABSENCES1", "#P1_TOTAL_ABSENCES2", "#P1_JSON_ABSENCES", "#P1_PRESENCE_PERCENT", "#P1_PROC_PREZ"];
   const matchedAbsSel = absSummarySelectors.filter((s) => $(s).length > 0);
   const absSummary = parseAbsenceSummary($);
   const absFields = [];
@@ -2406,10 +2465,14 @@ class SimeClient {
   getAbsenceRecords(studentId) {
     return this.withRetry(async () => {
       const today = todayChisinau();
+      const page = await this.loadStudent(studentId);
+      const embeddedRecords = extractEmbeddedAbsenceRecords(page.$, today, studentId);
+      if (embeddedRecords.length) {
+        return embeddedRecords;
+      }
       const year = Number(today.slice(0, 4));
       const startYear = Number(today.slice(5, 7)) >= 9 ? year : year - 1;
       const calEntries = await this.calendarRange(studentId, `${startYear}-09-01`, today);
-      const page = await this.loadStudent(studentId);
       const htmlRecords = extractHtmlAbsenceRecords(page.$, today, studentId);
       return [...absenceRecords(calEntries, studentId), ...htmlRecords];
     });
@@ -3331,6 +3394,7 @@ export {
   BROWSER_PROFILE,
   extractPageFlowInfo,
   extractHtmlAbsenceRecords,
+  extractEmbeddedAbsenceRecords,
   findCalendarAjaxId,
   findReportAjaxId,
   REGIONS,

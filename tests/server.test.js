@@ -25,6 +25,7 @@ import {
   buildTeachers,
   executeHandshake,
   extractHtmlAbsenceRecords,
+  extractEmbeddedAbsenceRecords,
   extractPageFlowInfo,
   findCalendarAjaxId,
   findReportAjaxId,
@@ -1550,4 +1551,71 @@ test("Marks: full-word qualifiers parse to single marks with correct label and r
   assert.equal(mOther[0].label, "foarte");
   assert.equal(mOther[1].kind, "other");
   assert.equal(mOther[1].label, "ceva");
+});
+
+test("Absences: parse P1_JSON_ABSENCES embedded records from real portal markup", () => {
+  const portalHtml =
+    '<input type="hidden" name="P1_PRESENCE_PERCENT" id="P1_PRESENCE_PERCENT" value="93">' +
+    '<input type="hidden" name="P1_MOTIVATED" id="P1_MOTIVATED" value="0">' +
+    '<input type="hidden" name="P1_MOTIVATED2" id="P1_MOTIVATED2" value="0">' +
+    '<input type="hidden" name="P1_UNMOTIVATED" id="P1_UNMOTIVATED" value="17">' +
+    '<input type="hidden" name="P1_UNMOTIVATED2" id="P1_UNMOTIVATED2" value="0">' +
+    '<input type="hidden" name="P1_TOTAL_ABSENCES1" id="P1_TOTAL_ABSENCES1" value="17">' +
+    '<input type="hidden" name="P1_TOTAL_ABSENCES2" id="P1_TOTAL_ABSENCES2" value="0">' +
+    '<input type="hidden" name="P1_JSON_ABSENCES" id="P1_JSON_ABSENCES" value="[{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;10.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:1},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;14.09.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:2},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;18.09.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:3},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;18.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Informatica&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:4},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;18.09.2026&quot;,&quot;lessonOrderId&quot;:5,&quot;discipliny&quot;:&quot;Matematică&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:5},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;25.09.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:6},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;25.09.2026&quot;,&quot;lessonOrderId&quot;:3,&quot;discipliny&quot;:&quot;Chimie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:7},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;25.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Informatica&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:8},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;30.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Educație pentru societate&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:9},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;30.09.2026&quot;,&quot;lessonOrderId&quot;:5,&quot;discipliny&quot;:&quot;Limba și literatura română&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:10},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;30.09.2026&quot;,&quot;lessonOrderId&quot;:6,&quot;discipliny&quot;:&quot;Limba și literatura română&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:11},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;01.10.2026&quot;,&quot;lessonOrderId&quot;:6,&quot;discipliny&quot;:&quot;Limba și literatura română&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:12},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;02.10.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:13},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:1,&quot;discipliny&quot;:&quot;Biologie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:14},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:15},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:3,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:16},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:7,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:17}]">';
+
+  const $ = cheerio.load(portalHtml);
+  const summary = parseAbsenceSummary($);
+  assert.equal(summary.presencePercent, 93);
+  assert.equal(summary.sem1Excused, 0);
+  assert.equal(summary.sem1Unexcused, 17);
+  assert.equal(summary.sem1Total, 17);
+  assert.equal(summary.total, 17);
+
+  const rawRecords = extractEmbeddedAbsenceRecords($, "2026-10-25", "101");
+  assert.equal(rawRecords.length, 17);
+
+  // First record
+  assert.deepEqual(rawRecords[0], {
+    studentKey: "101",
+    date: "2026-09-10",
+    lessonNumber: 4,
+    startTime: "",
+    endTime: "",
+    subject: "Fizica. Astronomia",
+    room: null,
+    teacher: null,
+    status: "unexcused",
+    reason: null,
+    semester: 1,
+    startLocal: "",
+    endLocal: "",
+    discipline: "Fizica. Astronomia",
+    note: null,
+    rawStatus: "nemotivat",
+  });
+
+  // Verify multiple lessons on the same day in the same subject are preserved and not deduped away
+  const romLessons = rawRecords.filter((r) => r.date === "2026-09-30" && r.subject.includes("română"));
+  assert.equal(romLessons.length, 2);
+  assert.equal(romLessons[0].lessonNumber, 5);
+  assert.equal(romLessons[1].lessonNumber, 6);
+
+  const fizLessons = rawRecords.filter((r) => r.date === "2026-10-13" && r.subject.includes("Fizica"));
+  assert.equal(fizLessons.length, 2);
+  assert.equal(fizLessons[0].lessonNumber, 3);
+  assert.equal(fizLessons[1].lessonNumber, 7);
+
+  // Full semester build passes integrity gate (17 === 17) and populates sem1.records
+  const detailed = buildSemesterAbsences(summary, rawRecords, "101");
+  assert.equal(detailed.sem1.total, 17);
+  assert.equal(detailed.sem1.motivate, 0);
+  assert.equal(detailed.sem1.nemotivate, 17);
+  assert.equal(detailed.sem1.records.length, 17, "All 17 lesson absence records must be present");
+  assert.equal(detailed.records.length, 17);
+
+  // Inspect parser health recognizes P1_JSON_ABSENCES
+  const health = inspectParserHealth(portalHtml);
+  assert.ok(health.absencesSummary.selectorsMatched.includes("#P1_JSON_ABSENCES"));
+  assert.equal(health.absencesSummary.count, 17);
 });
