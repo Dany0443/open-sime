@@ -1056,3 +1056,91 @@ test("Sun Rotation: CSS rotates only background suns and GPA sun with center ori
   const gpaDeco = gpaCard.querySelector(".metric-deco");
   assert.ok(gpaDeco, ".metric-gpa card must contain .metric-deco sun container");
 });
+
+test("M3 Expressive Motion & Switch Selection: unselected pill vs selected rounded-square, spring tokens, and reduced motion", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../public/style.css"), "utf8");
+
+  // 1. M3 Expressive Spatial & Effects spring tokens in :root
+  assert.ok(css.includes("--spring-spatial-fast"), "Must define --spring-spatial-fast token");
+  assert.ok(css.includes("--spring-spatial-default"), "Must define --spring-spatial-default token");
+  assert.ok(css.includes("--spring-spatial-slow"), "Must define --spring-spatial-slow token");
+  assert.ok(css.includes("--spring-effects-fast"), "Must define --spring-effects-fast token");
+  assert.ok(css.includes("--spring-effects-default"), "Must define --spring-effects-default token");
+  assert.ok(css.includes("--spring-effects-slow"), "Must define --spring-effects-slow token");
+  assert.ok(css.includes("@supports (transition-timing-function: linear(0, 1))"), "Must provide @supports linear() spring enhancement");
+
+  // 2. .seg track is neutral/transparent so unselected .seg-btn read as individual round pills
+  const segTrackMatch = css.match(/^\.seg\s*\{([^}]+)\}/m);
+  assert.ok(segTrackMatch, "Must declare .seg");
+  assert.ok(
+    segTrackMatch[1].includes("background: transparent") || segTrackMatch[1].includes("background: none"),
+    ".seg container must not have a solid grey pill track background"
+  );
+
+  // 3. Unselected .seg-btn, .day-tab, .student-chip use var(--shape-full) and var(--surface-container-high)
+  const segBtnMatch = css.match(/^\.seg-btn\s*\{([^}]+)\}/m);
+  assert.ok(segBtnMatch, "Must declare .seg-btn");
+  assert.ok(segBtnMatch[1].includes("border-radius: var(--shape-full)"), "Unselected .seg-btn must use var(--shape-full)");
+  assert.ok(segBtnMatch[1].includes("background: var(--surface-container-high)"), "Unselected .seg-btn must use var(--surface-container-high)");
+
+  const dayTabMatch = css.match(/^\.day-tab\s*\{([^}]+)\}/m);
+  assert.ok(dayTabMatch, "Must declare .day-tab");
+  assert.ok(dayTabMatch[1].includes("border-radius: var(--shape-full)"), "Unselected .day-tab must use var(--shape-full)");
+  assert.ok(dayTabMatch[1].includes("background: var(--surface-container-high)"), "Unselected .day-tab must use var(--surface-container-high)");
+
+  const studentChipMatch = css.match(/^\.student-chip\s*\{([^}]+)\}/m);
+  assert.ok(studentChipMatch, "Must declare .student-chip");
+  assert.ok(studentChipMatch[1].includes("border-radius: var(--shape-full)"), "Unselected .student-chip must use var(--shape-full)");
+  assert.ok(studentChipMatch[1].includes("background: var(--surface-container-high)"), "Unselected .student-chip must use var(--surface-container-high)");
+
+  // 4. Selected .seg-btn, .day-tab, and .student-chip morph to rounded square var(--shape-md) with var(--primary) / var(--on-primary)
+  const segSelectedMatch = css.match(/\.seg-btn\[aria-pressed="true"\][\s\S]*?\.seg\s+input:checked\s*\+\s*\.seg-btn\s*\{([^}]+)\}/);
+  assert.ok(segSelectedMatch, "Must have shared selected rule for .seg-btn[aria-pressed='true'] and .seg input:checked + .seg-btn");
+  assert.ok(segSelectedMatch[1].includes("border-radius: var(--shape-md)"), "Selected .seg-btn must use var(--shape-md)");
+  assert.ok(segSelectedMatch[1].includes("background: var(--primary)"), "Selected .seg-btn must use var(--primary)");
+  assert.ok(segSelectedMatch[1].includes("color: var(--on-primary)"), "Selected .seg-btn must use var(--on-primary)");
+
+  const daySelectedMatch = css.match(/\.day-tab\.is-selected[\s\S]*?\{([^}]+)\}/);
+  assert.ok(daySelectedMatch, "Must have selected rule for .day-tab.is-selected");
+  assert.ok(daySelectedMatch[1].includes("border-radius: var(--shape-md)"), "Selected .day-tab must use var(--shape-md)");
+  assert.ok(daySelectedMatch[1].includes("background: var(--primary)"), "Selected .day-tab must use var(--primary)");
+  assert.ok(daySelectedMatch[1].includes("color: var(--on-primary)"), "Selected .day-tab must use var(--on-primary)");
+
+  const chipSelectedMatch = css.match(/\.student-chip\.is-active[\s\S]*?\{([^}]+)\}/);
+  assert.ok(chipSelectedMatch, "Must have selected rule for .student-chip.is-active");
+  assert.ok(chipSelectedMatch[1].includes("border-radius: var(--shape-md)"), "Selected .student-chip must use var(--shape-md)");
+  assert.ok(chipSelectedMatch[1].includes("background: var(--primary)"), "Selected .student-chip must use var(--primary)");
+  assert.ok(chipSelectedMatch[1].includes("color: var(--on-primary)"), "Selected .student-chip must use var(--on-primary)");
+
+  // 5. Expressive selection transition without horizontal scale jitter between adjacent buttons
+  assert.ok(segBtnMatch[1].includes("border-radius var(--spring-spatial-default)"), ".seg-btn must transition border-radius with spatial spring");
+  assert.ok(dayTabMatch[1].includes("border-radius var(--spring-spatial-default)"), ".day-tab must transition border-radius with spatial spring");
+  assert.ok(studentChipMatch[1].includes("border-radius var(--spring-spatial-default)"), ".student-chip must transition border-radius with spatial spring");
+  assert.ok(!segSelectedMatch[1].includes("scale("), "Selected .seg-btn must not scale width and jitter adjacent buttons");
+
+  // 6. --shape-full uses an interpolatable pill radius (24px) so border-radius transitions smoothly across the full spring duration
+  assert.ok(css.includes("--shape-full: 24px"), "--shape-full must use 24px so border-radius interpolates smoothly without 999px clamping delay");
+
+  // 7. Checkboxes use the same unselected-round -> selected-rounded-square morph animation
+  const checkboxMatch = css.match(/input\[type="checkbox"\]\s*\{([^}]+)\}/);
+  assert.ok(checkboxMatch, "Must style input[type='checkbox'] with custom M3 Expressive morph");
+  assert.ok(checkboxMatch[1].includes("appearance: none"), "Checkbox must use appearance: none for custom shape morph");
+  assert.ok(checkboxMatch[1].includes("border-radius: 11px") || checkboxMatch[1].includes("border-radius: 50%"), "Unselected checkbox must be round");
+  const checkboxCheckedMatch = css.match(/input\[type="checkbox"\]:checked\s*\{([^}]+)\}/);
+  assert.ok(checkboxCheckedMatch, "Must style input[type='checkbox']:checked");
+  assert.ok(checkboxCheckedMatch[1].includes("border-radius: 6px"), "Checked checkbox must morph to rounded square (6px)");
+  assert.ok(checkboxCheckedMatch[1].includes("background: var(--primary)"), "Checked checkbox must use var(--primary)");
+  assert.ok(checkboxCheckedMatch[1].includes("animation: select-morph"), "Checked checkbox must use select-morph animation");
+
+  // 8. Reduced-motion disables spring transitions/overshoot while preserving selected shape
+  const reducedMotionBlock = css.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(reducedMotionBlock, "Must have @media (prefers-reduced-motion: reduce) block");
+  assert.ok(
+    reducedMotionBlock[1].includes("--ease-spatial-default: linear") || reducedMotionBlock[1].includes("transition-timing-function: linear"),
+    "Reduced motion block must neutralize spring overshoot to linear"
+  );
+  assert.ok(
+    reducedMotionBlock[1].includes("transition-duration: 0.01ms"),
+    "Reduced motion block must collapse transition durations"
+  );
+});

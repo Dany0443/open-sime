@@ -46,16 +46,55 @@
   --shape-lg: 24px;
   --shape-xl: 32px;
   --shape-xxl: 44px;
-  --shape-full: 999px;
+  --shape-full: 24px;
 
-  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+
+  /* M3 Expressive motion physics tokens (https://m3.material.io/styles/motion/overview/specs)
+   * Spatial springs (damping 0.9, stiffness fast 1400 / default 700 / slow 300): may overshoot slightly.
+   * Effects springs (damping 1.0, stiffness fast 3800 / default 1600 / slow 800): critical damping, no overshoot.
+   */
+  --dur-spatial-fast: 240ms;
+  --dur-spatial-default: 360ms;
+  --dur-spatial-slow: 480ms;
+  --ease-spatial-fast: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spatial-default: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spatial-slow: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-spatial-fast: var(--dur-spatial-fast) var(--ease-spatial-fast);
+  --spring-spatial-default: var(--dur-spatial-default) var(--ease-spatial-default);
+  --spring-spatial-slow: var(--dur-spatial-slow) var(--ease-spatial-slow);
+
+  --dur-effects-fast: 180ms;
+  --dur-effects-default: 280ms;
+  --dur-effects-slow: 360ms;
+  --ease-effects-fast: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-effects-default: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-effects-slow: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring-effects-fast: var(--dur-effects-fast) var(--ease-effects-fast);
+  --spring-effects-default: var(--dur-effects-default) var(--ease-effects-default);
+  --spring-effects-slow: var(--dur-effects-slow) var(--ease-effects-slow);
+
   --dur-fast: 160ms;
-  --dur-med: 220ms;
-  --dur-slow: 300ms;
+  --dur-med: 240ms;
+  --dur-slow: 320ms;
   --trans-fast: 160ms var(--ease);
-  --trans-med: 220ms var(--ease);
+  --trans-med: 240ms var(--ease);
   --nav-h: 80px;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    /* UNVERIFIED: 17-point linear() spring curves sampled from M3 harmonic oscillator
+     * Spatial (damping 0.9, stiffness 1400 / 700 / 300) and Effects (damping 1.0, stiffness 3800 / 1600 / 800)
+     */
+    --ease-spatial-fast: linear(0, 0.14 4%, 0.32 8%, 0.50 13%, 0.66 18%, 0.78 24%, 0.87 30%, 0.93 37%, 0.97 45%, 0.99 54%, 1.003 64%, 1.002 76%, 1);
+    --ease-spatial-default: linear(0, 0.12 4%, 0.28 8%, 0.45 13%, 0.60 18%, 0.73 24%, 0.83 31%, 0.90 38%, 0.95 46%, 0.98 55%, 0.995 66%, 1.002 78%, 1);
+    --ease-spatial-slow: linear(0, 0.10 4%, 0.25 8%, 0.41 13%, 0.56 18%, 0.69 24%, 0.80 31%, 0.88 39%, 0.94 48%, 0.975 58%, 0.992 70%, 1);
+    --ease-effects-fast: linear(0, 0.15 4%, 0.34 9%, 0.52 15%, 0.67 21%, 0.79 28%, 0.88 36%, 0.94 46%, 0.975 58%, 0.992 72%, 1);
+    --ease-effects-default: linear(0, 0.13 4%, 0.30 9%, 0.47 15%, 0.62 21%, 0.75 28%, 0.85 36%, 0.92 46%, 0.965 58%, 0.99 74%, 1);
+    --ease-effects-slow: linear(0, 0.11 4%, 0.27 9%, 0.43 15%, 0.58 21%, 0.71 28%, 0.82 36%, 0.90 46%, 0.955 58%, 0.985 74%, 1);
+  }
 }
 
 :root[data-theme="dark"] {
@@ -110,6 +149,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  scrollbar-gutter: stable;
   background: var(--surface);
 }
 
@@ -249,6 +289,15 @@ ul, ol {
   to { transform: rotate(-360deg); }
 }
 
+@keyframes select-morph {
+  from {
+    border-radius: var(--shape-full);
+  }
+  to {
+    border-radius: var(--shape-md);
+  }
+}
+
 .btn, .icon-btn, .text-btn, .seg-btn, .student-chip, .day-tab {
   position: relative;
   isolation: isolate;
@@ -262,7 +311,7 @@ ul, ol {
   z-index: -1;
   background: currentColor;
   opacity: 0;
-  transition: opacity 0.15s linear;
+  transition: opacity var(--spring-effects-fast);
 }
 
 .btn:hover::before, .icon-btn:hover::before, .text-btn:hover::before, .seg-btn:hover::before, .student-chip:hover::before, .day-tab:hover::before {
@@ -288,11 +337,17 @@ ul, ol {
   font-size: 0.875rem;
   font-weight: 600;
   line-height: 1.25;
-  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, box-shadow 0.2s, transform 0.15s var(--ease);
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default), border-color var(--spring-effects-default), box-shadow var(--spring-effects-default);
 }
 
-.btn:active {
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.015);
+}
+
+.btn:active:not(:disabled) {
   border-radius: var(--shape-md);
+  transform: scale(0.96);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast), border-color var(--spring-effects-fast), box-shadow var(--spring-effects-fast);
 }
 
 .btn-filled {
@@ -350,13 +405,19 @@ ul, ol {
   height: 48px;
   min-width: 48px;
   min-height: 48px;
-  border-radius: 50%;
+  border-radius: var(--shape-full);
   color: var(--on-surface-variant);
-  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, color 0.15s var(--ease);
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-fast);
 }
 
-.icon-btn:active {
+.icon-btn:hover:not(:disabled) {
+  transform: scale(1.06);
+}
+
+.icon-btn:active:not(:disabled) {
   border-radius: var(--shape-sm);
+  transform: scale(0.92);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
 .icon-btn:disabled {
@@ -378,11 +439,17 @@ ul, ol {
   color: var(--primary);
   font-size: 0.875rem;
   font-weight: 600;
-  transition: border-radius 0.25s var(--ease-spring), background-color 0.15s var(--ease), color 0.15s var(--ease);
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
-.text-btn:active {
+.text-btn:hover:not(:disabled) {
+  transform: scale(1.02);
+}
+
+.text-btn:active:not(:disabled) {
   border-radius: var(--shape-md);
+  transform: scale(0.95);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
 .chip {
@@ -827,10 +894,10 @@ ul, ol {
   position: relative;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px;
-  border-radius: var(--shape-full);
-  background: var(--surface-container-high);
+  gap: 6px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .seg > label {
@@ -855,21 +922,38 @@ ul, ol {
   min-height: 48px;
   padding: 4px 16px;
   border-radius: var(--shape-full);
+  background: var(--surface-container-high);
   color: var(--on-surface-variant);
   font-size: 0.875rem;
   font-weight: 600;
   line-height: 1.2;
   text-align: center;
-  transition: background-color 0.2s, color 0.2s, border-radius 0.3s var(--ease-spring);
+  cursor: pointer;
+  user-select: none;
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default);
 }
 
-.seg-btn:active {
-  border-radius: var(--shape-sm);
+.seg-btn:active,
+.seg > label:active .seg-btn {
+  border-radius: var(--shape-md);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
-.seg-btn[aria-pressed="true"], .seg input:checked + .seg-btn {
+.seg-btn[aria-pressed="true"],
+.seg-btn.is-selected,
+.seg-btn.is-active,
+.seg input:checked + .seg-btn {
+  border-radius: var(--shape-md);
   background: var(--primary);
   color: var(--on-primary);
+}
+
+.seg-btn[aria-pressed="true"]:active,
+.seg-btn.is-selected:active,
+.seg-btn.is-active:active,
+.seg input:checked + .seg-btn:active,
+.seg > label:active input:checked + .seg-btn {
+  border-radius: var(--shape-sm);
 }
 
 .seg input:focus-visible + .seg-btn {
@@ -1086,17 +1170,24 @@ ul, ol {
   height: 48px;
   min-width: 48px;
   min-height: 48px;
-  border-radius: 50%;
+  border-radius: var(--shape-full);
   background: var(--secondary-container);
   color: var(--on-secondary-container);
   border: none;
   cursor: pointer;
   padding: 0;
-  transition: background-color 0.15s ease, border-radius 0.3s var(--ease-spring);
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-fast);
 }
 
 .account-btn:hover {
   background: var(--surface-container-highest, #e6e0e9);
+  transform: scale(1.06);
+}
+
+.account-btn:active {
+  border-radius: var(--shape-sm);
+  transform: scale(0.92);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
 .account-avatar {
@@ -1193,18 +1284,40 @@ ul, ol {
   padding: 4px 16px 4px 6px;
   border-radius: var(--shape-full);
   background: var(--surface-container-high);
-  color: var(--on-surface);
+  color: var(--on-surface-variant);
   text-align: left;
-  transition: border-radius 0.3s var(--ease-spring), background-color 0.2s, color 0.2s;
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default);
 }
 
-.student-chip:active {
+.student-chip:active:not(:disabled):not(.is-static) {
   border-radius: var(--shape-md);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
-.student-chip.is-active {
-  background: var(--primary-container);
-  color: var(--on-primary-container);
+.student-chip.is-active,
+.student-chip.is-selected,
+.student-chip[aria-pressed="true"] {
+  border-radius: var(--shape-md);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.student-chip.is-active:active,
+.student-chip.is-selected:active,
+.student-chip[aria-pressed="true"]:active {
+  border-radius: var(--shape-sm);
+}
+
+.student-chip .avatar {
+  transition: transform var(--spring-spatial-default);
+}
+
+.student-chip.is-active .avatar,
+.student-chip.is-selected .avatar,
+.student-chip[aria-pressed="true"] .avatar {
+  --badge-bg: var(--primary-container);
+  --badge-fg: var(--on-primary-container);
+  transform: scale(1.06);
 }
 
 .student-chip.is-static {
@@ -1268,10 +1381,16 @@ ul, ol {
   align-items: center;
   gap: 4px;
   min-width: 0;
+  border-radius: var(--shape-md);
   color: var(--on-surface-variant);
   font-size: 0.75rem;
   font-weight: 650;
-  transition: color var(--trans-fast);
+  transition: border-radius var(--spring-spatial-default), color var(--spring-effects-fast), background-color var(--spring-effects-fast);
+}
+
+.nav-item:active {
+  border-radius: var(--shape-sm);
+  transition: border-radius var(--spring-spatial-fast), color var(--spring-effects-fast), background-color var(--spring-effects-fast);
 }
 
 .nav-item .nav-label {
@@ -1288,7 +1407,12 @@ ul, ol {
   width: 36px;
   height: 32px;
   border-radius: var(--shape-md);
-  transition: width 0.4s var(--ease-spring), background-color 0.2s, color 0.2s;
+  transition: width var(--spring-spatial-default), border-radius var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default);
+}
+
+.nav-item:active .nav-pill {
+  border-radius: var(--shape-xs);
+  transition: width var(--spring-spatial-fast), border-radius var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
 .nav-item:hover .nav-pill {
@@ -1854,7 +1978,7 @@ ul, ol {
   display: grid;
   flex: 1;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1862,16 +1986,19 @@ ul, ol {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
+  min-height: 48px;
   padding: 8px 0 10px;
-  border-radius: var(--shape-lg);
+  border-radius: var(--shape-full);
   background: var(--surface-container-high);
   color: var(--on-surface-variant);
-  transition: background-color 0.2s, color 0.2s, border-radius 0.35s var(--ease-spring);
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default);
 }
 
 .day-tab:active {
-  border-radius: var(--shape-sm);
+  border-radius: var(--shape-md);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
 }
 
 .day-name {
@@ -1900,10 +2027,16 @@ ul, ol {
   background: currentColor;
 }
 
-.day-tab.is-selected {
-  border-radius: var(--shape-full);
+.day-tab.is-selected,
+.day-tab[aria-pressed="true"] {
+  border-radius: var(--shape-md);
   background: var(--primary);
   color: var(--on-primary);
+}
+
+.day-tab.is-selected:active,
+.day-tab[aria-pressed="true"]:active {
+  border-radius: var(--shape-sm);
 }
 
 .day-heading {
@@ -2396,16 +2529,22 @@ ul, ol {
     min-height: 56px;
     padding: 4px 0;
     border: none;
-    border-radius: 12px;
+    border-radius: var(--shape-md);
     background: transparent;
     cursor: pointer;
     color: var(--on-surface-variant);
-    transition: background-color 0.15s ease;
+    transition: border-radius var(--spring-spatial-default), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
   }
 
   .drawer .nav-item:hover,
   .rail .nav-item:hover {
     background: var(--surface-container-highest, #e6e0e9);
+  }
+
+  .drawer .nav-item:active,
+  .rail .nav-item:active {
+    border-radius: var(--shape-xs);
+    transition: border-radius var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
   }
 
   .drawer .nav-pill,
@@ -2415,8 +2554,14 @@ ul, ol {
     justify-content: center;
     width: 56px;
     height: 32px;
-    border-radius: 16px;
-    transition: background-color 0.15s ease, color 0.15s ease;
+    border-radius: var(--shape-md);
+    transition: border-radius var(--spring-spatial-default), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
+  }
+
+  .drawer .nav-item:active .nav-pill,
+  .rail .nav-item:active .nav-pill {
+    border-radius: var(--shape-xs);
+    transition: border-radius var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
   }
 
   .drawer .nav-item[aria-current="page"] .nav-pill,
@@ -2532,7 +2677,7 @@ ul, ol {
     height: 56px;
     min-height: 56px;
     padding: 0 16px;
-    border-radius: 28px;
+    border-radius: var(--shape-full);
     border: none;
     background: transparent;
     color: var(--on-surface-variant);
@@ -2540,13 +2685,19 @@ ul, ol {
     font-weight: 500;
     cursor: pointer;
     text-align: left;
-    transition: background-color 0.15s ease, color 0.15s ease;
+    transition: border-radius var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default);
   }
 
   .drawer .nav-item:hover,
   .rail .nav-item:hover {
     background: var(--surface-container-highest, #e6e0e9);
     color: var(--on-surface);
+  }
+
+  .drawer .nav-item:active,
+  .rail .nav-item:active {
+    border-radius: var(--shape-md);
+    transition: border-radius var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
   }
 
   .drawer .nav-item:focus-visible,
@@ -2689,7 +2840,7 @@ ul, ol {
     padding: 0 20px;
     border-radius: var(--shape-full);
     font-size: 0.9375rem;
-    transition: background-color 0.2s, border-radius 0.3s var(--ease-spring);
+    transition: border-radius var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default);
   }
 
   .rail .nav-item:hover {
@@ -2698,6 +2849,7 @@ ul, ol {
 
   .rail .nav-item:active {
     border-radius: var(--shape-md);
+    transition: border-radius var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
   }
 
   .rail .nav-pill, .rail .nav-item[aria-current="page"] .nav-pill {
@@ -2713,6 +2865,22 @@ ul, ol {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-spatial-fast: 0.01ms;
+    --dur-spatial-default: 0.01ms;
+    --dur-spatial-slow: 0.01ms;
+    --dur-effects-fast: 0.01ms;
+    --dur-effects-default: 0.01ms;
+    --dur-effects-slow: 0.01ms;
+    --ease-spatial-fast: linear;
+    --ease-spatial-default: linear;
+    --ease-spatial-slow: linear;
+    --ease-effects-fast: linear;
+    --ease-effects-default: linear;
+    --ease-effects-slow: linear;
+    --ease-spring: linear;
+  }
+
   .view,
   .toast,
   .empty,
@@ -2735,15 +2903,45 @@ ul, ol {
     animation: none;
   }
 
-  .progress-fill, .nav-pill, .btn, .icon-btn, .seg-btn, .day-tab, .student-chip, .score {
+  .progress-fill, .nav-pill, .nav-item, .btn, .icon-btn, .text-btn, .account-btn, .seg-btn, .day-tab, .student-chip, .score, input[type="checkbox"], input[type="checkbox"]::after,
+  .btn::before, .icon-btn::before, .text-btn::before, .seg-btn::before, .student-chip::before, .day-tab::before {
     transition-duration: 0.01ms;
+    transition-timing-function: linear;
+    animation: none;
+  }
+
+  .btn:hover,
+  .icon-btn:hover,
+  .text-btn:hover,
+  .account-btn:hover,
+  .seg-btn:hover,
+  .day-tab:hover,
+  .student-chip:hover {
+    transform: none;
   }
 
   .btn:active,
   .icon-btn:active,
+  .text-btn:active,
+  .account-btn:active,
   .seg-btn:active,
+  .day-tab:active,
   .student-chip:active {
-    border-radius: inherit;
+    border-radius: var(--shape-full);
+    transform: none;
+  }
+
+  .seg-btn[aria-pressed="true"]:active,
+  .seg-btn.is-selected:active,
+  .seg-btn.is-active:active,
+  .seg input:checked + .seg-btn:active,
+  .day-tab.is-selected:active,
+  .day-tab[aria-pressed="true"]:active,
+  .student-chip.is-active:active,
+  .student-chip.is-selected:active,
+  .student-chip[aria-pressed="true"]:active {
+    border-radius: var(--shape-md);
+    transform: none;
   }
 }
 .marks-table-surface { overflow-x: auto; background: var(--surface-container-low); border-radius: var(--shape-lg); border: 1px solid var(--outline-variant); }
@@ -2870,6 +3068,66 @@ ul, ol {
   cursor: help;
 }
 
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  border-radius: 11px;
+  border: 2px solid var(--outline);
+  background: var(--surface-container-high);
+  cursor: pointer;
+  backface-visibility: hidden;
+  transition: border-radius var(--spring-spatial-default), transform var(--spring-spatial-default), background-color var(--spring-effects-default), border-color var(--spring-effects-default);
+}
+
+input[type="checkbox"]::after {
+  content: "";
+  width: 6px;
+  height: 11px;
+  margin-bottom: 2px;
+  border: solid var(--on-primary);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg) scale(0);
+  transition: transform var(--spring-spatial-default);
+}
+
+input[type="checkbox"]:active,
+.check-label:active input[type="checkbox"],
+.setting-toggle-row:active input[type="checkbox"] {
+  border-radius: 6px;
+  transform: scale(0.92);
+  transition: border-radius var(--spring-spatial-fast), transform var(--spring-spatial-fast), background-color var(--spring-effects-fast), border-color var(--spring-effects-fast);
+}
+
+input[type="checkbox"]:checked {
+  border-radius: 6px;
+  background: var(--primary);
+  border-color: var(--primary);
+  animation: select-morph var(--dur-spatial-default) var(--ease-spatial-default);
+}
+
+input[type="checkbox"]:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+
+input[type="checkbox"]:checked:active,
+.check-label:active input[type="checkbox"]:checked,
+.setting-toggle-row:active input[type="checkbox"]:checked {
+  border-radius: 4px;
+  transform: scale(0.92);
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .remember-row {
   display: flex;
   flex-direction: column;
@@ -2880,20 +3138,14 @@ ul, ol {
 .remember-row .check-label {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   font-size: 0.875rem;
   color: var(--on-surface);
 }
 
-.remember-row .check-label input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--primary);
-}
-
 .remember-row .field-hint {
-  margin: 0 0 0 26px;
+  margin: 0 0 0 32px;
   font-size: 0.75rem;
   line-height: 1.3;
   color: var(--on-surface-variant);
@@ -2946,6 +3198,7 @@ html[data-contrast="high"] .btn,
 html[data-contrast="high"] .btn-outlined,
 html[data-contrast="high"] .icon-btn,
 html[data-contrast="high"] .seg-btn,
+html[data-contrast="high"] .day-tab,
 html[data-contrast="high"] .student-chip,
 html[data-contrast="high"] .score,
 html[data-contrast="high"] .scale-chip,
@@ -2954,18 +3207,47 @@ html[data-contrast="high"] .subject {
   border: 2px solid currentColor !important;
 }
 
+html[data-contrast="high"] .seg-btn[aria-pressed="true"],
+html[data-contrast="high"] .seg-btn.is-selected,
+html[data-contrast="high"] .seg-btn.is-active,
+html[data-contrast="high"] .seg input:checked + .seg-btn,
+html[data-contrast="high"] .day-tab.is-selected,
+html[data-contrast="high"] .day-tab[aria-pressed="true"],
+html[data-contrast="high"] .student-chip.is-active,
+html[data-contrast="high"] .student-chip.is-selected,
+html[data-contrast="high"] .student-chip[aria-pressed="true"] {
+  border-color: var(--on-surface) !important;
+}
+
 html[data-contrast="high"] :focus-visible {
   outline: 4px solid var(--primary) !important;
   outline-offset: 3px !important;
 }
 
 /* W13: Reduce motion */
+html[data-reduce-motion="true"] {
+  --dur-spatial-fast: 0.001ms;
+  --dur-spatial-default: 0.001ms;
+  --dur-spatial-slow: 0.001ms;
+  --dur-effects-fast: 0.001ms;
+  --dur-effects-default: 0.001ms;
+  --dur-effects-slow: 0.001ms;
+  --ease-spatial-fast: linear;
+  --ease-spatial-default: linear;
+  --ease-spatial-slow: linear;
+  --ease-effects-fast: linear;
+  --ease-effects-default: linear;
+  --ease-effects-slow: linear;
+  --ease-spring: linear;
+}
+
 html[data-reduce-motion="true"] *,
 html[data-reduce-motion="true"] *::before,
 html[data-reduce-motion="true"] *::after {
   animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.001ms !important;
+  transition-timing-function: linear !important;
 }
 
 /* W13: Simple mode */
@@ -3081,10 +3363,7 @@ html[data-simple-mode="true"] .score-md {
 }
 
 .setting-toggle-row input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
   margin-top: 2px;
-  accent-color: var(--primary);
 }
 
 .setting-toggle-row strong {

@@ -1419,13 +1419,37 @@ function renderMarks() {
 
 // rendering: timetable
 
-const dayUi = { prev: null, next: null, tabs: new Map() };
+const dayUi = { prev: null, next: null, tabs: new Map(), daysKey: "" };
 
 function buildDaySwitch() {
   ensureDay();
   const days = weekDays();
   const today = todayIso();
   const shortDays = WEEKDAYS_SHORT_BY_LANG[currentLang()] || WEEKDAYS_SHORT;
+  const host = $("day-switch");
+  const key = days.join(",");
+  if (host && host.children.length > 0 && dayUi.daysKey === key && dayUi.tabs.size === days.length) {
+    if (dayUi.prev) {
+      dayUi.prev.setAttribute("aria-label", t("prev_day"));
+      dayUi.prev.title = t("prev_day");
+    }
+    if (dayUi.next) {
+      dayUi.next.setAttribute("aria-label", t("next_day"));
+      dayUi.next.title = t("next_day");
+    }
+    days.forEach((iso, i) => {
+      const btn = dayUi.tabs.get(iso);
+      if (btn) {
+        btn.classList.toggle("is-today", iso === today);
+        btn.setAttribute("aria-label", longDate(iso));
+        const nameEl = btn.querySelector(".day-name");
+        if (nameEl) nameEl.textContent = shortDays[i] || WEEKDAYS_SHORT[i];
+      }
+    });
+    updateDaySwitch();
+    return;
+  }
+  dayUi.daysKey = key;
   dayUi.tabs.clear();
   dayUi.prev = h("button", { type: "button", class: "icon-btn tonal day-nav", "aria-label": t("prev_day"), title: t("prev_day"), on: { click: () => stepDay(-1) } }, icon("chevron_left"));
   dayUi.next = h("button", { type: "button", class: "icon-btn tonal day-nav", "aria-label": t("next_day"), title: t("next_day"), on: { click: () => stepDay(1) } }, icon("chevron_right"));
@@ -1439,7 +1463,7 @@ function buildDaySwitch() {
     dayUi.tabs.set(iso, btn);
     return btn;
   });
-  $("day-switch").replaceChildren(dayUi.prev, h("div", { class: "day-tabs" }, tabs), dayUi.next);
+  host.replaceChildren(dayUi.prev, h("div", { class: "day-tabs" }, tabs), dayUi.next);
   updateDaySwitch();
 }
 
@@ -1539,6 +1563,15 @@ function renderLessons() {
 
 function buildAbsToggle() {
   const host = $("abs-toggle");
+  const existing = host ? host.querySelectorAll(".seg-btn") : [];
+  if (existing.length === 2) {
+    existing.forEach((btn, idx) => {
+      const n = idx + 1;
+      btn.textContent = t("semester_" + n);
+      btn.setAttribute("aria-pressed", String(state.semester === n));
+    });
+    return;
+  }
   const buttons = [1, 2].map((n) =>
     h(
       "button",
@@ -1819,6 +1852,8 @@ function renderProfile() {
 
 // rendering: shell
 
+const studentUi = { key: "", buttons: new Map() };
+
 function renderStudents() {
   const host = $("student-list");
   if (!host) return;
@@ -1828,16 +1863,41 @@ function renderStudents() {
 
   if (!multiple) {
     if (strip) strip.hidden = true;
+    studentUi.key = "";
+    studentUi.buttons.clear();
     host.replaceChildren();
     return;
   }
   if (strip) strip.hidden = false;
   if (!list.length) {
+    studentUi.key = "";
+    studentUi.buttons.clear();
     host.replaceChildren(h("div", { class: "skeleton student-skel", "aria-hidden": "true" }));
     return;
   }
   const hadFocus = host.contains(document.activeElement);
   const currentId = state.studentKey || state.switching || (state.data && state.data.student && state.data.student.id) || "";
+  const listKey = list.map((s) => `${s.id}:${s.className || ""}`).join(",");
+  if (studentUi.key === listKey && host.children.length === list.length && studentUi.buttons.size === list.length) {
+    list.forEach((s) => {
+      const id = String(s.id);
+      const btn = studentUi.buttons.get(id);
+      if (!btn) return;
+      const active = id === String(currentId);
+      btn.classList.toggle("is-active", active);
+      btn.classList.toggle("is-loading", String(state.switching) === id);
+      btn.setAttribute("aria-pressed", String(active));
+      const nameEl = btn.querySelector(".student-name");
+      if (nameEl) nameEl.textContent = toTitleCase(s.fullName || t("student_label"));
+    });
+    if (hadFocus) {
+      const el = host.querySelector("button.is-active");
+      if (el) el.focus({ preventScroll: true });
+    }
+    return;
+  }
+  studentUi.key = listKey;
+  studentUi.buttons.clear();
   const nodes = list.map((s, i) => {
     const active = String(s.id) === String(currentId);
     const known = state.students.find((x) => String(x.id) === String(s.id));
@@ -1846,7 +1906,7 @@ function renderStudents() {
       avatar(s, i, "sm"),
       h("span", { class: "student-text" }, h("span", { class: "student-name", text: toTitleCase(s.fullName || t("student_label")) }), cls ? h("span", { class: "student-class", text: cls }) : null),
     ];
-    return h(
+    const btn = h(
       "button",
       {
         type: "button",
@@ -1856,6 +1916,8 @@ function renderStudents() {
       },
       body
     );
+    studentUi.buttons.set(String(s.id), btn);
+    return btn;
   });
   host.replaceChildren(...nodes);
   if (hadFocus) {
