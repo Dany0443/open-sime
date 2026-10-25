@@ -502,6 +502,37 @@ const QUALIFIERS = {
   i: "I",
 };
 
+// UNVERIFIED: Subject scale lookup based on maintainer description.
+// Portal captures needed to confirm exact naming variations.
+const SUBJECT_SCALE_REGISTRY = [
+  { stem: "educatie fizica", scale: "qualifier" },
+  { stem: "educatie muzicala", scale: "qualifier" },
+  { stem: "educatie plastica", scale: "qualifier" },
+  { stem: "educatie tehnologica", scale: "qualifier" },
+  { stem: "educatie pentru societate", scale: "descriptor" },
+];
+
+function normalizeSubjectName(raw) {
+  if (!raw) return "";
+  let s = String(raw).toLowerCase().trim();
+  s = s.replace(/[\u015F\u0219]/g, "s").replace(/[\u0163\u021B]/g, "t");
+  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  s = s.replace(/\beducatia\b/g, "educatie");
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+function getSubjectScale(subjectName) {
+  const norm = normalizeSubjectName(subjectName);
+  if (!norm) return null;
+  for (const entry of SUBJECT_SCALE_REGISTRY) {
+    if (norm.includes(entry.stem)) {
+      return entry.scale;
+    }
+  }
+  return null;
+}
+
 function normalizeMark(rawText, rawAttr = null, isThesisExplicit = false, semester = null) {
   if (!rawText && rawText !== 0) return null;
   const raw = String(rawText).trim();
@@ -732,9 +763,11 @@ function buildCatalog(reports, annualMap = new Map()) {
     const annualAverage =
       explicitAnnual ?? (sem1Average !== null && sem2Average !== null ? mean([sem1Average, sem2Average]) : computedAverage);
     const average = computedAverage ?? annualAverage;
+    const scale = getSubjectScale(s.subject);
     return {
       ...s,
       discipline: s.subject,
+      scale,
       marks,
       markDetails,
       markCount: marks.length,
@@ -3301,6 +3334,9 @@ export {
   studentSwitchUrl,
   normalizeName,
   normalizeMark,
+  normalizeSubjectName,
+  getSubjectScale,
+  SUBJECT_SCALE_REGISTRY,
   parseMarkCell,
   unescapeJs,
   weekStart,

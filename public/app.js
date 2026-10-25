@@ -351,6 +351,52 @@ const QUALIFIER_NAMES = {
   I: "Insuficient",
 };
 
+// UNVERIFIED: Subject scale lookup based on maintainer description.
+const SUBJECT_SCALE_REGISTRY = [
+  { stem: "educatie fizica", scale: "qualifier" },
+  { stem: "educatie muzicala", scale: "qualifier" },
+  { stem: "educatie plastica", scale: "qualifier" },
+  { stem: "educatie tehnologica", scale: "qualifier" },
+  { stem: "educatie pentru societate", scale: "descriptor" },
+];
+
+function normalizeSubjectName(raw) {
+  if (!raw) return "";
+  let s = String(raw).toLowerCase().trim();
+  s = s.replace(/[\u015F\u0219]/g, "s").replace(/[\u0163\u021B]/g, "t");
+  s = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  s = s.replace(/\beducatia\b/g, "educatie");
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
+function getSubjectScale(subjectName) {
+  const norm = normalizeSubjectName(subjectName);
+  if (!norm) return null;
+  for (const entry of SUBJECT_SCALE_REGISTRY) {
+    if (norm.includes(entry.stem)) {
+      return entry.scale;
+    }
+  }
+  return null;
+}
+
+function scaleChip(scale) {
+  if (scale === "qualifier") {
+    return h("span", { class: "scale-chip scale-chip-qualifier", role: "note", "aria-label": "Sistem de evaluare: Calificative" }, t("scale_qualifiers") || "Calificative");
+  }
+  if (scale === "descriptor") {
+    return h("span", { class: "scale-chip scale-chip-descriptor", role: "note", "aria-label": "Sistem de evaluare: Descriptori" }, t("scale_descriptors") || "Descriptori");
+  }
+  return null;
+}
+
+function emptyMarkText(scale) {
+  if (scale === "qualifier") return t("no_qualifiers_yet") || "Încă nu sunt calificative";
+  if (scale === "descriptor") return t("no_descriptors_yet") || "Încă nu sunt descriptori";
+  return t("no_marks_yet") || "Încă nu sunt note";
+}
+
 function score(valueOrMark, size, date, isThesis = false) {
   let val = valueOrMark;
   let labelText = "";
@@ -1144,16 +1190,22 @@ function subjectCard(s) {
   if (!s) return null;
   const groups = markGroups(s);
   const teacher = s.teacher && s.teacher !== "null" && s.teacher !== "undefined" ? s.teacher : null;
+  const scale = s.scale || getSubjectScale(s.subject || s.discipline);
   return h(
     "article",
     { class: "subject" },
     h(
       "header",
       null,
-      h("h3", { class: "subject-name", text: toTitleCase(s.subject || s.discipline || "Disciplină") }),
+      h(
+        "div",
+        { class: "subject-title-row" },
+        h("h3", { class: "subject-name", text: toTitleCase(s.subject || s.discipline || "Disciplină") }),
+        scaleChip(scale)
+      ),
       teacher ? h("p", { class: "subject-teacher", text: teacher }) : null
     ),
-    groups.length ? h("div", { class: "mark-groups" }, groups.map(markGroupBlock)) : h("p", { class: "muted", text: "Nu există note încă." })
+    groups.length ? h("div", { class: "mark-groups" }, groups.map(markGroupBlock)) : h("p", { class: "muted", text: emptyMarkText(scale) })
   );
 }
 
@@ -1190,14 +1242,18 @@ function renderMarks() {
   const rows = m.subjects.map((subject) => {
     const groups = markGroups(subject);
     const sem = (n) => groups.find((g) => g.semester === n);
-    const pills = (g) =>
-      g && g.marks.length
-        ? h(
-            "div",
-            { class: "grade-pills" },
-            g.marks.map((mk) => score(mk, "md", mk.date, mk.isThesis))
-          )
-        : h("span", { class: "muted", text: "-" });
+    const scale = subject.scale || getSubjectScale(subject.subject || subject.discipline);
+    const pills = (g) => {
+      if (g && g.marks.length) {
+        return h(
+          "div",
+          { class: "grade-pills" },
+          g.marks.map((mk) => score(mk, "md", mk.date, mk.isThesis))
+        );
+      }
+      const emptyText = emptyMarkText(scale);
+      return h("span", { class: "muted empty-mark-dash", title: emptyText, "aria-label": emptyText, text: "—" });
+    };
 
     return h(
       "tr",
@@ -1206,7 +1262,12 @@ function renderMarks() {
         h(
           "div",
           null,
-          h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || "Disciplină") }),
+          h(
+            "div",
+            { class: "subject-title-row" },
+            h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || "Disciplină") }),
+            scaleChip(scale)
+          ),
           subject.teacher && subject.teacher !== "null" && subject.teacher !== "undefined" ? h("div", { class: "subject-teacher muted", text: subject.teacher }) : null
         )
       ),
@@ -1227,17 +1288,7 @@ function renderMarks() {
     m.subjects.map(subjectCard)
   );
 
-  const legend = h(
-    "div",
-    { class: "qualifier-legend", role: "region", "aria-label": "Legendă calificative" },
-    h("span", { class: "legend-title", text: "Calificative:" }),
-    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-top is-qualifier", text: "FB" }), "Foarte Bine"),
-    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-good is-qualifier", text: "B" }), "Bine"),
-    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-ok is-qualifier", text: "S" }), "Suficient"),
-    h("span", { class: "legend-item" }, h("span", { class: "score score-sm band-low is-qualifier", text: "I" }), "Insuficient")
-  );
-
-  setChildren(list, tableSurface, cardsSurface, legend);
+  setChildren(list, tableSurface, cardsSurface);
 }
 
 // rendering: timetable
