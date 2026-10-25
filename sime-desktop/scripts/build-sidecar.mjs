@@ -159,6 +159,11 @@ async function stampWindowsPeMetadata(exePath, desktopRoot) {
 
     res.outputResource(exe);
     const newBuf = Buffer.from(exe.generate());
+    const peOffset = newBuf.readInt32LE(0x3c);
+    const subsystemOffset = peOffset + 24 + 68;
+    if (newBuf.readUInt16LE(subsystemOffset) === 3) {
+      newBuf.writeUInt16LE(2, subsystemOffset);
+    }
     fs.writeFileSync(exePath, newBuf);
   } catch (err) {
     console.warn(`Warning: failed to stamp Windows PE metadata on ${exePath}: ${err.message}`);

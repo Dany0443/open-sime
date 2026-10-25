@@ -276,8 +276,85 @@ fn spawn_production_sidecar(app: &AppHandle) {
   });
 }
 
+#[cfg(windows)]
+fn assign_to_app_job_object() {
+  use std::ffi::c_void;
+
+  #[repr(C)]
+  #[derive(Default)]
+  struct JobObjectBasicLimitInformation {
+    per_process_user_time_limit: i64,
+    per_job_user_time_limit: i64,
+    limit_flags: u32,
+    minimum_working_set_size: usize,
+    maximum_working_set_size: usize,
+    active_process_limit: u32,
+    affinity: usize,
+    priority_class: u32,
+    scheduling_class: u32,
+  }
+
+  #[repr(C)]
+  #[derive(Default)]
+  struct IoCounters {
+    read_operation_count: u64,
+    write_operation_count: u64,
+    other_operation_count: u64,
+    read_transfer_count: u64,
+    write_transfer_count: u64,
+    other_transfer_count: u64,
+  }
+
+  #[repr(C)]
+  #[derive(Default)]
+  struct JobObjectExtendedLimitInformation {
+    basic_limit_information: JobObjectBasicLimitInformation,
+    io_info: IoCounters,
+    process_memory_limit: usize,
+    job_memory_limit: usize,
+    peak_process_memory_used: usize,
+    peak_job_memory_used: usize,
+  }
+
+  #[link(name = "kernel32")]
+  extern "system" {
+    fn CreateJobObjectW(lp_job_attributes: *const c_void, lp_name: *const u16) -> *mut c_void;
+    fn SetInformationJobObject(
+      h_job: *mut c_void,
+      job_object_information_class: i32,
+      lp_job_object_information: *const c_void,
+      cb_job_object_information_length: u32,
+    ) -> i32;
+    fn AssignProcessToJobObject(h_job: *mut c_void, h_process: *mut c_void) -> i32;
+    fn GetCurrentProcess() -> *mut c_void;
+  }
+
+  const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+  const JOB_OBJECT_LIMIT_BREAKAWAY_OK: u32 = 0x0000_0800;
+  const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+
+  unsafe {
+    let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+    if !job.is_null() {
+      let mut info = JobObjectExtendedLimitInformation::default();
+      info.basic_limit_information.limit_flags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+      let _ = SetInformationJobObject(
+        job,
+        JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+        &info as *const _ as *const c_void,
+        std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
+      );
+      let _ = AssignProcessToJobObject(job, GetCurrentProcess());
+    }
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  #[cfg(windows)]
+  assign_to_app_job_object();
+
   let app = tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .manage(Mutex::new(SidecarState::default()))
