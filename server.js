@@ -921,7 +921,7 @@ function inferAbsenceSemester(isoDay, explicitSemester = null) {
   return 1;
 }
 
-function absenceRecords(entries) {
+function absenceRecords(entries, studentKey = null) {
   const seen = new Set();
   const records = [];
   for (const e of entries.filter((x) => x.isAbsence)) {
@@ -929,94 +929,172 @@ function absenceRecords(entries) {
     if (seen.has(key)) continue;
     seen.add(key);
     const date = chisinauDate(e.start);
+    const startHm = chisinauHm(e.start);
+    const endHm = chisinauHm(e.end);
+    const status = e.isExcused ? "excused" : e.isUnexcused ? "unexcused" : "unknown";
     records.push({
+      studentKey: studentKey ? String(studentKey) : null,
       date,
-      startLocal: chisinauHm(e.start),
-      endLocal: chisinauHm(e.end),
-      subject: e.subject,
-      discipline: e.subject,
-      teacher: e.teacher,
-      status: e.isExcused ? "motivat" : e.isUnexcused ? "nemotivat" : "necunoscut",
-      note: e.note,
+      lessonNumber: e.periodIndex || e.lessonNumber || null,
+      startTime: startHm,
+      endTime: endHm,
+      subject: e.subject || "Disciplină",
+      room: e.classroom || e.room || null,
+      teacher: e.teacher || null,
+      status,
+      reason: e.note || e.reason || null,
       semester: inferAbsenceSemester(date, e.semester),
+      // Backward compatibility aliases
+      startLocal: startHm,
+      endLocal: endHm,
+      discipline: e.subject || "Disciplină",
+      note: e.note || e.reason || null,
+      rawStatus: e.isExcused ? "motivat" : e.isUnexcused ? "nemotivat" : "necunoscut",
     });
   }
-  return records.sort((a, b) => b.date.localeCompare(a.date) || b.startLocal.localeCompare(a.startLocal));
+  return records.sort((a, b) => b.date.localeCompare(a.date) || (b.startTime || b.startLocal || "").localeCompare(a.startTime || a.startLocal || ""));
 }
 
-function extractHtmlAbsenceRecords($, today = todayChisinau()) {
+function extractHtmlAbsenceRecords($, today = todayChisinau(), studentKey = null) {
   const records = [];
   $("tr").each((_i, tr) => {
     const tds = $(tr).find("td").toArray();
     if (!tds.length) return;
-    const statusTd = tds.find((td) => headerHas($, td, ["STATUT" /* UNVERIFIED */, "MOTIVAT" /* UNVERIFIED */, "TIP_ABS" /* UNVERIFIED */, "ABSENT" /* UNVERIFIED */]));
-    const dateTd = tds.find((td) => headerHas($, td, ["DATA" /* UNVERIFIED */, "DATE" /* UNVERIFIED */, "DATA_ABS" /* UNVERIFIED */]));
-    const discTd = tds.find((td) => headerHas($, td, ["DISCIPLINA" /* UNVERIFIED */, "DISCIPLINE" /* UNVERIFIED */, "MATERIA" /* UNVERIFIED */]));
+    const statusTd = tds.find((td) => headerHas($, td, ["STATUT" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "MOTIVAT" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "TIP_ABS" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "ABSENT" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
+    const dateTd = tds.find((td) => headerHas($, td, ["DATA" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "DATE" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "DATA_ABS" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
+    const discTd = tds.find((td) => headerHas($, td, ["DISCIPLINA" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "DISCIPLINE" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "MATERIA" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
     if (!statusTd || !dateTd || !discTd) return;
     const date = parseDate(textOf(dateTd), today);
     const subject = textOf(discTd);
     if (!date || !subject) return;
     const rawStatus = textOf(statusTd).toLowerCase();
-    const status = UNEXCUSED_MARKERS.some((k) => rawStatus.includes(k))
-      ? "nemotivat"
-      : EXCUSED_MARKERS.some((k) => rawStatus.includes(k))
-        ? "motivat"
-        : "necunoscut";
-    const timeTd = tds.find((td) => headerHas($, td, ["ORA" /* UNVERIFIED */, "TIME" /* UNVERIFIED */, "LECTIA" /* UNVERIFIED */]));
-    const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR" /* UNVERIFIED */, "CADRU" /* UNVERIFIED */, "TEACHER" /* UNVERIFIED */]));
-    const noteTd = tds.find((td) => headerHas($, td, ["MOTIV" /* UNVERIFIED */, "NOTE" /* UNVERIFIED */, "OBSERVATII" /* UNVERIFIED */]));
-    const semTd = tds.find((td) => headerHas($, td, ["SEMESTRU" /* UNVERIFIED */, "SEM" /* UNVERIFIED */]));
+    const isUnexcused = UNEXCUSED_MARKERS.some((k) => rawStatus.includes(k));
+    const isExcused = !isUnexcused && EXCUSED_MARKERS.some((k) => rawStatus.includes(k));
+    const status = isExcused ? "excused" : isUnexcused ? "unexcused" : "unknown";
+    const timeTd = tds.find((td) => headerHas($, td, ["ORA" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "TIME" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "LECTIA" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
+    const roomTd = tds.find((td) => headerHas($, td, ["SALA" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "CABINET" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "ROOM" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
+    const teacherTd = tds.find((td) => headerHas($, td, ["PROFESOR" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "CADRU" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "TEACHER" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
+    const noteTd = tds.find((td) => headerHas($, td, ["MOTIV" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "NOTE" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "OBSERVATII" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
+    const semTd = tds.find((td) => headerHas($, td, ["SEMESTRU" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */, "SEM" /* UNVERIFIED: needs real capture from capture-absence-sources.mjs */]));
     const explicitSem = semTd ? parseInt(textOf(semTd), 10) : null;
+    const rawTime = timeTd ? textOf(timeTd) : "";
+    const lessonNum = rawTime && /^\d+$/.test(rawTime) ? parseInt(rawTime, 10) : null;
     records.push({
+      studentKey: studentKey ? String(studentKey) : null,
       date,
-      startLocal: timeTd ? textOf(timeTd) : "",
-      endLocal: "",
+      lessonNumber: lessonNum,
+      startTime: lessonNum ? "" : rawTime,
+      endTime: "",
       subject,
-      discipline: subject,
+      room: roomTd ? textOf(roomTd) || null : null,
       teacher: teacherTd ? textOf(teacherTd) || null : null,
       status,
-      note: noteTd ? textOf(noteTd) || null : null,
+      reason: noteTd ? textOf(noteTd) || null : null,
       semester: inferAbsenceSemester(date, explicitSem === 1 || explicitSem === 2 ? explicitSem : null),
+      startLocal: rawTime,
+      endLocal: "",
+      discipline: subject,
+      note: noteTd ? textOf(noteTd) || null : null,
+      rawStatus: isExcused ? "motivat" : isUnexcused ? "nemotivat" : "necunoscut",
     });
   });
   return records;
 }
 
+function generateSyntheticAbsences(summary, studentKey = null) {
+  const records = [];
+  const sem1Exc = summary?.sem1Excused ?? 0;
+  const sem1Unexc = summary?.sem1Unexcused ?? 0;
+  const sem2Exc = summary?.sem2Excused ?? 0;
+  const sem2Unexc = summary?.sem2Unexcused ?? 0;
+
+  const pushBatch = (count, status, sem, defaultMonth) => {
+    for (let i = 0; i < count; i += 1) {
+      const day = String(Math.min(28, 10 + i)).padStart(2, "0");
+      const date = `2026-${defaultMonth}-${day}`;
+      const isExc = status === "excused";
+      records.push({
+        studentKey: studentKey ? String(studentKey) : null,
+        date,
+        lessonNumber: (i % 6) + 1,
+        startTime: "08:30",
+        endTime: "09:15",
+        subject: i % 2 === 0 ? "Matematică" : "Fizică",
+        room: "101",
+        teacher: i % 2 === 0 ? "Profesor Mate" : "Profesor Fizică",
+        status,
+        reason: isExc ? "Motivat medical" : null,
+        semester: sem,
+        startLocal: "08:30",
+        endLocal: "09:15",
+        discipline: i % 2 === 0 ? "Matematică" : "Fizică",
+        note: isExc ? "Motivat medical" : null,
+        rawStatus: isExc ? "motivat" : "nemotivat",
+        synthetic: true,
+      });
+    }
+  };
+
+  pushBatch(sem1Exc, "excused", 1, "10");
+  pushBatch(sem1Unexc, "unexcused", 1, "11");
+  pushBatch(sem2Exc, "excused", 2, "02");
+  pushBatch(sem2Unexc, "unexcused", 2, "03");
+
+  return records;
+}
+
 // Categorizes absences strictly into Semestrul 1 and Semestrul 2 with totals, motivate, nemotivate, and lesson records
-function buildSemesterAbsences(summary, rawRecords = []) {
+function buildSemesterAbsences(summary, rawRecords = [], studentKey = null) {
+  let effectiveRecords = Array.isArray(rawRecords) ? [...rawRecords] : [];
+  if (!effectiveRecords.length && process.env.SIME_SYNTHETIC_ABSENCES === "1") {
+    effectiveRecords = generateSyntheticAbsences(summary, studentKey);
+  }
+
   const seen = new Set();
   const deduped = [];
-  for (const r of rawRecords) {
+  for (const r of effectiveRecords) {
     if (!r) continue;
-    const key = `${r.date || ""}|${r.startLocal || ""}|${r.subject || r.discipline || ""}`;
+    const key = `${r.date || ""}|${r.startTime || r.startLocal || ""}|${r.subject || r.discipline || ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const sem = inferAbsenceSemester(r.date, r.semester);
     const subj = r.subject || r.discipline || "Disciplina";
+    const status = r.status || (r.rawStatus ? (r.rawStatus === "motivat" ? "excused" : "unexcused") : "unknown");
     deduped.push({
+      studentKey: r.studentKey || (studentKey ? String(studentKey) : null),
       date: r.date || null,
-      startLocal: r.startLocal || "",
-      endLocal: r.endLocal || "",
+      lessonNumber: r.lessonNumber || null,
+      startTime: r.startTime || r.startLocal || "",
+      endTime: r.endTime || r.endLocal || "",
       subject: subj,
-      discipline: r.discipline || subj,
+      room: r.room || null,
       teacher: r.teacher || null,
-      status: r.status || "necunoscut",
-      note: r.note || null,
+      status,
+      reason: r.reason || r.note || null,
       semester: sem,
+      startLocal: r.startTime || r.startLocal || "",
+      endLocal: r.endTime || r.endLocal || "",
+      discipline: r.discipline || subj,
+      note: r.reason || r.note || null,
+      rawStatus: r.rawStatus || (status === "excused" ? "motivat" : status === "unexcused" ? "nemotivat" : "necunoscut"),
+      ...(r.synthetic ? { synthetic: true } : {}),
     });
   }
-  deduped.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.startLocal || "").localeCompare(a.startLocal || ""));
+  deduped.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.startTime || b.startLocal || "").localeCompare(a.startTime || a.startLocal || ""));
 
   const sem1Records = deduped.filter((r) => r.semester === 1);
   const sem2Records = deduped.filter((r) => r.semester === 2);
 
-  const countBy = (list, status) => list.filter((r) => r.status === status).length;
-  const sem1Motivate = Math.max(summary?.sem1Excused ?? 0, countBy(sem1Records, "motivat"));
-  const sem1Nemotivate = Math.max(summary?.sem1Unexcused ?? 0, countBy(sem1Records, "nemotivat"));
+  const isExcused = (r) => r.status === "excused" || r.status === "motivat";
+  const isUnexcused = (r) => r.status === "unexcused" || r.status === "nemotivat";
+  const countBy = (list, fn) => list.filter(fn).length;
+
+  const sem1Motivate = Math.max(summary?.sem1Excused ?? 0, countBy(sem1Records, isExcused));
+  const sem1Nemotivate = Math.max(summary?.sem1Unexcused ?? 0, countBy(sem1Records, isUnexcused));
   const sem1Total = Math.max(sem1Motivate + sem1Nemotivate, sem1Records.length);
 
-  const sem2Motivate = Math.max(summary?.sem2Excused ?? 0, countBy(sem2Records, "motivat"));
-  const sem2Nemotivate = Math.max(summary?.sem2Unexcused ?? 0, countBy(sem2Records, "nemotivat"));
+  const sem2Motivate = Math.max(summary?.sem2Excused ?? 0, countBy(sem2Records, isExcused));
+  const sem2Nemotivate = Math.max(summary?.sem2Unexcused ?? 0, countBy(sem2Records, isUnexcused));
   const sem2Total = Math.max(sem2Motivate + sem2Nemotivate, sem2Records.length);
 
   const normalizedSummary = {
@@ -2300,8 +2378,8 @@ class SimeClient {
       const startYear = Number(today.slice(5, 7)) >= 9 ? year : year - 1;
       const calEntries = await this.calendarRange(studentId, `${startYear}-09-01`, today);
       const page = await this.loadStudent(studentId);
-      const htmlRecords = extractHtmlAbsenceRecords(page.$, today);
-      return [...absenceRecords(calEntries), ...htmlRecords];
+      const htmlRecords = extractHtmlAbsenceRecords(page.$, today, studentId);
+      return [...absenceRecords(calEntries, studentId), ...htmlRecords];
     });
   }
 
@@ -2921,7 +2999,7 @@ function createApp() {
     }
     const summary = await client.getAbsenceSummary(student.id);
     const records = await client.getAbsenceRecords(student.id);
-    const detailed = buildSemesterAbsences(summary, records);
+    const detailed = buildSemesterAbsences(summary, records, student.id);
     detailed.detail = true;
     if (hit) {
       hit.absenteDetailed = detailed;
@@ -3026,6 +3104,11 @@ export {
   parseStudentMetadata,
   BROWSER_PROFILE,
   extractPageFlowInfo,
+  extractHtmlAbsenceRecords,
+  findCalendarAjaxId,
+  findReportAjaxId,
+  REGIONS,
+  todayChisinau,
   scrubLog,
   encryptRememberToken,
   decryptRememberToken,

@@ -783,8 +783,10 @@ function absenceSemester(m, n) {
   const block = (n === 2 ? a.sem2 : a.sem1) || {};
   const all = Array.isArray(a.records) ? a.records : [];
   const records = Array.isArray(block.records) ? block.records : all.filter((r) => r.semester === n);
-  const motivate = num(block.motivate) ?? records.filter((r) => r.status === "motivat").length;
-  const nemotivate = num(block.nemotivate) ?? records.filter((r) => r.status === "nemotivat").length;
+  const isExc = (r) => r.status === "excused" || r.status === "motivat";
+  const isUnexc = (r) => r.status === "unexcused" || r.status === "nemotivat";
+  const motivate = num(block.motivate) ?? records.filter(isExc).length;
+  const nemotivate = num(block.nemotivate) ?? records.filter(isUnexc).length;
   const total = num(block.total) ?? Math.max(records.length, motivate + nemotivate);
   return { records, motivate, nemotivate, total };
 }
@@ -1337,17 +1339,22 @@ function buildAbsToggle() {
 }
 
 function statusChip(status) {
-  if (status === "motivat") return chip("Motivată", "success");
-  if (status === "nemotivat") return chip("Nemotivată", "error");
+  if (status === "excused" || status === "motivat") return chip("Motivată", "success");
+  if (status === "unexcused" || status === "nemotivat") return chip("Nemotivată", "error");
   return chip("Neclasificată", "neutral");
 }
 
 function absenceRow(r) {
   if (!r) return null;
   const valid = validIso(r.date);
-  const time = [r.startLocal, r.endLocal].filter((x) => Boolean(x) && x !== "null" && x !== "undefined").join(" - ");
+  const time = [r.startTime || r.startLocal, r.endTime || r.endLocal].filter((x) => Boolean(x) && x !== "null" && x !== "undefined").join(" - ");
+  const lessonOra = r.lessonNumber ? ((typeof getString !== "undefined" ? getString("lesson_period", { period: r.lessonNumber }) : null) || "Ora " + r.lessonNumber) : "";
+  const roomText = r.room ? `Sala ${r.room}` : null;
   const teacher = r.teacher && r.teacher !== "null" && r.teacher !== "undefined" ? r.teacher : null;
-  const note = r.note && r.note !== "null" && r.note !== "undefined" ? r.note : null;
+  const metaParts = [lessonOra, time, roomText, teacher].filter(Boolean);
+  const note = r.reason || r.note;
+  const safeNote = note && note !== "null" && note !== "undefined" ? note : null;
+
   return h(
     "li",
     { class: "absence" },
@@ -1356,8 +1363,8 @@ function absenceRow(r) {
       "div",
       { class: "abs-body" },
       h("p", { class: "abs-subject", text: r.subject || r.discipline || "Disciplină" }),
-      time || teacher ? h("p", { class: "abs-meta", text: [time, teacher].filter(Boolean).join(", ") }) : null,
-      note ? h("p", { class: "abs-note", text: note }) : null
+      metaParts.length ? h("p", { class: "abs-meta", text: metaParts.join(", ") }) : null,
+      safeNote ? h("p", { class: "abs-note", text: safeNote }) : null
     ),
     statusChip(r.status)
   );
@@ -1384,7 +1391,7 @@ function renderAbsences() {
     setChildren(
       list,
       sem.total > 0
-        ? emptyState("Detaliile nu sunt disponibile", "Portalul raportează " + sem.total + " absențe în acest semestru, dar fără detalii pe ore.")
+        ? emptyState("Detaliile nu sunt disponibile pe portal", "Portalul raportează " + sem.total + " absențe în acest semestru, dar fără detalii pe ore.")
         : emptyState("Nicio absență", "Nu sunt absențe înregistrate în Semestrul " + state.semester + ".")
     );
     return;
@@ -1407,7 +1414,7 @@ function renderAbsences() {
     );
   }
 
-  // Per-subject summary (collapsible dates)
+  // Per-subject summary (collapsible dates), sorted with most absences first
   const bySubject = new Map();
   for (const r of sem.records) {
     const subj = r.subject || r.discipline || "Disciplină";
@@ -1416,9 +1423,13 @@ function renderAbsences() {
   }
 
   if (bySubject.size > 0) {
-    const subjectCards = Array.from(bySubject.entries()).map(([subj, records]) => {
-      const motCount = records.filter((r) => r.status === "motivat").length;
-      const nemotCount = records.filter((r) => r.status === "nemotivat").length;
+    const sortedSubjects = Array.from(bySubject.entries()).sort((a, b) => b[1].length - a[1].length);
+    const isUnexc = (r) => r.status === "unexcused" || r.status === "nemotivat";
+    const isExc = (r) => r.status === "excused" || r.status === "motivat";
+
+    const subjectCards = sortedSubjects.map(([subj, records]) => {
+      const motCount = records.filter(isExc).length;
+      const nemotCount = records.filter(isUnexc).length;
       return h(
         "details",
         { class: "abs-subject-card" },

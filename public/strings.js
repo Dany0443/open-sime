@@ -87,6 +87,10 @@ const STRINGS = {
     abs_unexcused: "Nemotivate",
     abs_by_subject: "Pe discipline",
     abs_chronological: "Cronologic",
+    abs_status_excused: "Motivată",
+    abs_status_unexcused: "Nemotivată",
+    abs_status_unknown: "Neclasificată",
+    abs_details_unavailable: "Detaliile nu sunt disponibile pe portal",
 
     // Timetable
     today: "Astăzi",
@@ -191,6 +195,10 @@ const STRINGS = {
     abs_unexcused: "Неуважительные",
     abs_by_subject: "По предметам",
     abs_chronological: "Хронология",
+    abs_status_excused: "Уважительная",
+    abs_status_unexcused: "Неуважительная",
+    abs_status_unknown: "Не классифицировано",
+    abs_details_unavailable: "Подробности недоступны на портале",
 
     // Timetable
     today: "Сегодня",
@@ -295,6 +303,10 @@ const STRINGS = {
     abs_unexcused: "Unexcused",
     abs_by_subject: "By subject",
     abs_chronological: "Chronological",
+    abs_status_excused: "Excused",
+    abs_status_unexcused: "Unexcused",
+    abs_status_unknown: "Unclassified",
+    abs_details_unavailable: "Details not available on portal",
 
     // Timetable
     today: "Today",

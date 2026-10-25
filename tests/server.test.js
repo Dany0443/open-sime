@@ -137,7 +137,8 @@ test("calendar events, teachers directory, and absence records", () => {
   const abs = absenceRecords(entries);
   assert.equal(abs.length, 1);
   assert.equal(abs[0].subject, "Fizica");
-  assert.equal(abs[0].status, "nemotivat");
+  assert.equal(abs[0].status, "unexcused");
+  assert.equal(abs[0].rawStatus, "nemotivat");
 });
 
 test("date parsing infers year and rejects invalid dates", () => {
