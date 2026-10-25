@@ -141,6 +141,7 @@ class ApiError extends Error {
 
 const num = (value) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const pad2 = (n) => String(n).padStart(2, "0");
+const canonKey = (id) => (typeof id === "string" || typeof id === "number" ? String(id).trim().toLowerCase() : "");
 const markFmt = new Intl.NumberFormat("ro-RO", { maximumFractionDigits: 2 });
 const avgFmt = new Intl.NumberFormat("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtMark = (value) => markFmt.format(value);
@@ -552,8 +553,37 @@ function diffNewMarks(currentCatalog, prevCatalog) {
 }
 
 function setData(data, syncedAt) {
+  const prevData = state.data;
+  const newStudentKey = data.studentKey || (data.student && data.student.id) || state.studentKey || "";
+  const sameStudent = Boolean(
+    state.studentKey &&
+    newStudentKey &&
+    canonKey(state.studentKey) === canonKey(newStudentKey)
+  );
+
+  if (sameStudent && prevData) {
+    if ((!data.teachers || data.teachers.length <= 1) && Array.isArray(prevData.teachers) && prevData.teachers.length > 1) {
+      data.teachers = prevData.teachers;
+    }
+    if ((!data.absences || !data.absences.detail) && prevData.absences?.detail) {
+      data.absences = prevData.absences;
+      data.absente = prevData.absente;
+    }
+    if ((!data.catalog || !data.catalog.length) && Array.isArray(prevData.catalog) && prevData.catalog.length) {
+      data.catalog = prevData.catalog;
+      data.reusita = prevData.reusita;
+    }
+    if ((!data.schedule || !data.schedule.days || !Object.keys(data.schedule.days).length) && prevData.schedule?.days) {
+      data.schedule = prevData.schedule;
+      data.orar = prevData.orar;
+    }
+    if ((!data.homework || !data.homework.length) && Array.isArray(prevData.homework) && prevData.homework.length) {
+      data.homework = prevData.homework;
+    }
+  }
+
   state.data = data;
-  state.studentKey = data.studentKey || (data.student && data.student.id) || state.studentKey || "";
+  state.studentKey = newStudentKey;
   const list = Array.isArray(data.students) ? data.students.filter((s) => s && s.id) : [];
   if (data.student && data.student.id && !list.some((s) => s.id === data.student.id)) list.unshift(data.student);
   if (list.length) {
@@ -1740,8 +1770,8 @@ async function loadTabData(tabId, { force = false } = {}) {
       const q = `?student=${encodeURIComponent(student)}`;
       if (tabId === "marks") {
         const res = await api(`/api/catalog${q}`);
-        if (currentSeq !== state.seq || student !== state.studentKey) return;
-        if (res && res.studentKey && res.studentKey !== student) return;
+        if (currentSeq !== state.seq || canonKey(student) !== canonKey(state.studentKey)) return;
+        if (res && res.studentKey && canonKey(res.studentKey) !== canonKey(student)) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
           if (Array.isArray(res.data) && res.data.length) {
@@ -1767,8 +1797,8 @@ async function loadTabData(tabId, { force = false } = {}) {
         const d = state.day || todayIso();
         const schedQ = `?date=${encodeURIComponent(d)}&student=${encodeURIComponent(student)}`;
         const res = await api(`/api/schedule${schedQ}`);
-        if (currentSeq !== state.seq || student !== state.studentKey) return;
-        if (res && res.studentKey && res.studentKey !== student) return;
+        if (currentSeq !== state.seq || canonKey(student) !== canonKey(state.studentKey)) return;
+        if (res && res.studentKey && canonKey(res.studentKey) !== canonKey(student)) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
           state.data.schedule = res.data;
@@ -1781,8 +1811,8 @@ async function loadTabData(tabId, { force = false } = {}) {
         }
       } else if (tabId === "absences") {
         const res = await api(`/api/absences${q}`);
-        if (currentSeq !== state.seq || student !== state.studentKey) return;
-        if (res && res.studentKey && res.studentKey !== student) return;
+        if (currentSeq !== state.seq || canonKey(student) !== canonKey(state.studentKey)) return;
+        if (res && res.studentKey && canonKey(res.studentKey) !== canonKey(student)) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
           state.data.absente = res.data;
@@ -1795,20 +1825,27 @@ async function loadTabData(tabId, { force = false } = {}) {
           api(`/api/teachers${q}`),
           api(`/api/profile${q}`),
         ]);
-        if (currentSeq !== state.seq || student !== state.studentKey) return;
+        if (currentSeq !== state.seq || canonKey(student) !== canonKey(state.studentKey)) return;
         if (!state.data) state.data = {};
         if (teachersRes.status === "fulfilled" && teachersRes.value && teachersRes.value.data) {
-          if (!teachersRes.value.studentKey || teachersRes.value.studentKey === student) {
-            state.data.teachers = teachersRes.value.data.teachers || teachersRes.value.data;
+          const resKey = teachersRes.value.studentKey;
+          const matchStudent = !resKey || canonKey(resKey) === canonKey(student) || state.role === "student" || (state.students && state.students.length <= 1);
+          if (matchStudent) {
+            const list = teachersRes.value.data.teachers || teachersRes.value.data;
+            if (Array.isArray(list) && list.length) {
+              state.data.teachers = list;
+            }
           }
         }
         if (profileRes.status === "fulfilled" && profileRes.value && profileRes.value.data) {
-          if (!profileRes.value.studentKey || profileRes.value.studentKey === student) {
+          const resKey = profileRes.value.studentKey;
+          const matchStudent = !resKey || canonKey(resKey) === canonKey(student) || state.role === "student" || (state.students && state.students.length <= 1);
+          if (matchStudent) {
             state.data.metadata = profileRes.value.data.metadata || profileRes.value.data;
           }
           if (Array.isArray(profileRes.value.students)) {
             for (const updated of profileRes.value.students) {
-              const found = state.students.find((s) => s.id === updated.id);
+              const found = state.students.find((s) => canonKey(s.id) === canonKey(updated.id));
               if (found) {
                 if (updated.className) found.className = updated.className;
                 if (updated.schoolName) found.schoolName = updated.schoolName;
@@ -1823,8 +1860,8 @@ async function loadTabData(tabId, { force = false } = {}) {
         if (state.tab === "profile") renderProfile();
       } else if (tabId === "homework") {
         const res = await api(`/api/homework${q}`);
-        if (currentSeq !== state.seq || student !== state.studentKey) return;
-        if (res && res.studentKey && res.studentKey !== student) return;
+        if (currentSeq !== state.seq || canonKey(student) !== canonKey(state.studentKey)) return;
+        if (res && res.studentKey && canonKey(res.studentKey) !== canonKey(student)) return;
         if (res && res.data) {
           if (!state.data) state.data = {};
           state.data.homework = res.data.homework || res.data;

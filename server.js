@@ -2361,12 +2361,17 @@ function storeStudentSessionState(session, studentId, data) {
   const id = String(studentId || data.studentKey || data.student?.id || data.metadata?.id || "");
   const now = Date.now();
   const payload = { ...data, cachedAt: now };
+  const prevRecord = session.students[id];
   const record = {
     metadata: payload.metadata,
     reusita: payload.reusita,
     absente: payload.absente,
     orar: payload.orar,
     homework: payload.homework,
+    teachersDetailed: prevRecord?.teachersDetailed,
+    teachersDetailedAt: prevRecord?.teachersDetailedAt,
+    absenteDetailed: prevRecord?.absenteDetailed,
+    absenteDetailedAt: prevRecord?.absenteDetailedAt,
     cachedAt: now,
     data: payload,
   };
@@ -2849,12 +2854,17 @@ function createApp() {
           req.session.defaultStudentId = canonicalKey;
           const entry = { at, data };
           req.session.cache.set(key, entry);
+          const prevStudentSession = req.session.students[canonicalKey];
           req.session.students[canonicalKey] = {
             metadata: data.metadata,
             reusita: data.reusita,
             absente: data.absente,
             orar: data.orar,
             homework: data.homework,
+            teachersDetailed: prevStudentSession?.teachersDetailed,
+            teachersDetailedAt: prevStudentSession?.teachersDetailedAt,
+            absenteDetailed: prevStudentSession?.absenteDetailed,
+            absenteDetailedAt: prevStudentSession?.absenteDetailedAt,
             cachedAt: at,
             data,
           };
