@@ -213,7 +213,7 @@ function loadClientContext() {
   vm.runInContext(cleanStrings, sandbox);
   vm.runInContext(cleanApp, sandbox);
   vm.runInContext(
-    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score, scaleChip, getSubjectScale, normalizeSubjectName, emptyMarkText, subjectCard });",
+    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score, scaleChip, getSubjectScale, normalizeSubjectName, emptyMarkText, subjectCard, recentMarks, bandOf, renderMetrics, renderRecent });",
     sandbox
   );
   return sandbox;
@@ -722,17 +722,110 @@ test("Service Worker: public/sw.js never caches /api/auth and caches shell", () 
 
 test("Marks UI: Qualifier pills and neutral raw pills rendering in score", () => {
   const ctx = loadClientContext();
-  const fb = ctx.score({ kind: "qualifier", label: "FB", value: null });
+  const fb = ctx.score({ kind: "qualifier", label: "FB", raw: "Foarte bine", value: null });
   assert.ok(fb.classList.contains("is-qualifier"));
   assert.ok(fb.classList.contains("band-top"));
-  assert.equal(fb.textContent, "FB");
-  assert.ok(fb.attributes.get("title").includes("Foarte Bine"));
+  assert.equal(fb.textContent, "Foarte bine");
+  assert.equal(fb.attributes.get("title"), "Foarte bine");
+  assert.equal(fb.attributes.get("aria-label"), "Foarte bine");
 
-  const b = ctx.score({ kind: "qualifier", label: "B", value: null });
+  const fbWithDate = ctx.score({ kind: "qualifier", label: "FB", raw: "Foarte bine", value: null, date: "2024-10-12" });
+  assert.ok(fbWithDate.attributes.get("title").includes("Foarte bine"));
+  assert.ok(fbWithDate.attributes.get("title").includes("12 oct"));
+
+  const b = ctx.score({ kind: "qualifier", label: "B", raw: "Bine", value: null });
+  assert.ok(b.classList.contains("is-qualifier"));
   assert.ok(b.classList.contains("band-good"));
+  assert.equal(b.textContent, "Bine");
+  assert.equal(b.attributes.get("title"), "Bine");
 
-  const s = ctx.score({ kind: "qualifier", label: "S", value: null });
+  const s = ctx.score({ kind: "qualifier", label: "S", raw: "Suficient", value: null });
+  assert.ok(s.classList.contains("is-qualifier"));
   assert.ok(s.classList.contains("band-ok"));
+  assert.equal(s.textContent, "Suficient");
+  assert.equal(s.attributes.get("title"), "Suficient");
+
+  const i = ctx.score({ kind: "qualifier", label: "I", raw: "Insuficient", value: null });
+  assert.ok(i.classList.contains("is-qualifier"));
+  assert.ok(i.classList.contains("band-low"));
+  assert.equal(i.textContent, "Insuficient");
+  assert.equal(i.attributes.get("title"), "Insuficient");
+
+  // Full words passed directly as string or label
+  const fbStr = ctx.score("Foarte bine");
+  assert.ok(fbStr.classList.contains("is-qualifier"));
+  assert.ok(fbStr.classList.contains("band-top"));
+  assert.equal(fbStr.textContent, "Foarte bine");
+
+  const bStr = ctx.score("Bine");
+  assert.ok(bStr.classList.contains("is-qualifier"));
+  assert.ok(bStr.classList.contains("band-good"));
+  assert.equal(bStr.textContent, "Bine");
+
+  // CSS white-space nowrap verification
+  const styleCss = fs.readFileSync(path.join(__dirname, "../public/style.css"), "utf8");
+  assert.ok(styleCss.includes(".score.is-qualifier"), "style.css must have .score.is-qualifier");
+  const qualRule = styleCss.match(/\.score\.is-qualifier\s*\{([^}]+)\}/);
+  assert.ok(qualRule, "must find .score.is-qualifier block");
+  assert.ok(qualRule[1].includes("white-space: nowrap"), ".score.is-qualifier must enforce white-space: nowrap");
+
+  // Multi-language localization support
+  ctx.state.lang = "ru";
+  const fbRu = ctx.score({ kind: "qualifier", label: "FB", raw: "Foarte bine", value: null });
+  assert.equal(fbRu.textContent, "Отлично");
+  assert.ok(fbRu.classList.contains("band-top"));
+
+  ctx.state.lang = "en";
+  const fbEn = ctx.score({ kind: "qualifier", label: "FB", raw: "Foarte bine", value: null });
+  assert.equal(fbEn.textContent, "Very Good");
+  assert.ok(fbEn.classList.contains("band-top"));
+  ctx.state.lang = "ro";
+
+  // Consistency across Reușita, recent marks on Home, and "Ultima notă"
+  const markObj = { kind: "qualifier", label: "FB", raw: "Foarte bine", date: "2024-10-12", value: null };
+  const card = ctx.subjectCard({
+    subject: "Educație fizică",
+    discipline: "Educație fizică",
+    scale: "qualifier",
+    markDetails: [markObj],
+    semesters: [{ semester: 1, marks: [markObj] }],
+  });
+  const pills = card.querySelectorAll(".score");
+  assert.ok(pills.length >= 1, "Subject card must render qualifier mark pill");
+  for (const pill of pills) {
+    assert.equal(pill.textContent, "Foarte bine");
+    assert.ok(pill.classList.contains("band-top"));
+    assert.ok(pill.classList.contains("is-qualifier"));
+    // Ensure no fragmenting into separate "Foarte" and "bine" pills
+    assert.notEqual(pill.textContent, "Foarte");
+    assert.notEqual(pill.textContent, "bine");
+  }
+
+  // Home metrics & recent marks consistency
+  ctx.state.data = {
+    grades: [{ subject: "Educație fizică", kind: "qualifier", label: "FB", raw: "Foarte bine", date: "2024-10-12", value: null }],
+    reusita: { subjects: [] },
+    absences: { summary: {} },
+    schedule: { days: {} },
+    homework: [],
+  };
+  ctx.renderHome();
+
+  const metricsHost = ctx.elements.get("home-metrics");
+  const metricLast = metricsHost ? metricsHost.querySelector(".metric-last") : null;
+  const lastScore = metricLast ? metricLast.querySelector(".score") : null;
+  assert.ok(lastScore, "Ultima notă in Home metrics must render a .score pill");
+  assert.equal(lastScore.textContent, "Foarte bine");
+  assert.ok(lastScore.classList.contains("band-top"));
+  assert.ok(lastScore.classList.contains("is-qualifier"));
+
+  const recentHost = ctx.elements.get("home-marks");
+  const recentItem = recentHost ? recentHost.querySelector(".recent-item") : null;
+  const recentScore = recentItem ? recentItem.querySelector(".score") : null;
+  assert.ok(recentScore, "Recent marks in Home must render a .score pill");
+  assert.equal(recentScore.textContent, "Foarte bine");
+  assert.ok(recentScore.classList.contains("band-top"));
+  assert.ok(recentScore.classList.contains("is-qualifier"));
 
   // Unrecognized non-empty cell text renders as neutral raw pill (band-none, is-other)
   const other = ctx.score({ kind: "other", label: "25", raw: "25", value: null });

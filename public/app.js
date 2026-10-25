@@ -209,11 +209,12 @@ function toTitleCase(str) {
 }
 
 function bandOf(value, label = "") {
-  const l = String(label || "").toUpperCase();
-  if (l === "FB") return "band-top";
-  if (l === "B") return "band-good";
-  if (l === "S") return "band-ok";
-  if (l === "I") return "band-low";
+  const l = String(label || "").trim().toUpperCase();
+  const canon = typeof QUALIFIER_CANONICAL !== "undefined" ? QUALIFIER_CANONICAL[l] : null;
+  if (canon === "FB" || l === "FB" || l === "FOARTE BINE") return "band-top";
+  if (canon === "B" || l === "B" || l === "BINE") return "band-good";
+  if (canon === "S" || l === "S" || l === "SUFICIENT") return "band-ok";
+  if (canon === "I" || l === "I" || l === "INSUFICIENT") return "band-low";
 
   if (value == null) return "band-none";
   if (value >= 9) return "band-top";
@@ -344,12 +345,52 @@ function textButton(label, onClick) {
   return h("button", { type: "button", class: "text-btn", on: { click: onClick } }, label);
 }
 
-const QUALIFIER_NAMES = {
-  FB: "Foarte Bine",
-  B: "Bine",
-  S: "Suficient",
-  I: "Insuficient",
+const QUALIFIER_CANONICAL = {
+  FB: "FB",
+  "FOARTE BINE": "FB",
+  "VERY GOOD": "FB",
+  "ОТЛИЧНО": "FB",
+  B: "B",
+  "BINE": "B",
+  "GOOD": "B",
+  "ХОРОШО": "B",
+  S: "S",
+  "SUFICIENT": "S",
+  "SUFFICIENT": "S",
+  "УДОВЛЕТВОРИТЕЛЬНО": "S",
+  I: "I",
+  "INSUFICIENT": "I",
+  "INSUFFICIENT": "I",
+  "НЕУДОВЛЕТВОРИТЕЛЬНО": "I",
 };
+
+const QUALIFIER_NAMES = {
+  FB: "Foarte bine",
+  "FOARTE BINE": "Foarte bine",
+  B: "Bine",
+  BINE: "Bine",
+  S: "Suficient",
+  SUFICIENT: "Suficient",
+  I: "Insuficient",
+  INSUFICIENT: "Insuficient",
+};
+
+function isQualifierToken(str) {
+  if (!str) return false;
+  const k = String(str).trim().toUpperCase();
+  return Boolean(QUALIFIER_CANONICAL[k] || QUALIFIER_NAMES[k]);
+}
+
+function qualifierFullText(labelOrKey) {
+  const k = String(labelOrKey || "").trim().toUpperCase();
+  const canon = QUALIFIER_CANONICAL[k];
+  const lang = (typeof state !== "undefined" && state.lang) || "ro";
+  if (canon === "FB" || k === "FOARTE BINE") return (typeof getString !== "undefined" ? getString("qual_fb", {}, lang) : null) || "Foarte bine";
+  if (canon === "B" || k === "BINE") return (typeof getString !== "undefined" ? getString("qual_b", {}, lang) : null) || "Bine";
+  if (canon === "S" || k === "SUFICIENT") return (typeof getString !== "undefined" ? getString("qual_s", {}, lang) : null) || "Suficient";
+  if (canon === "I" || k === "INSUFICIENT") return (typeof getString !== "undefined" ? getString("qual_i", {}, lang) : null) || "Insuficient";
+  return null;
+}
 
 // UNVERIFIED: Subject scale lookup based on maintainer description.
 const SUBJECT_SCALE_REGISTRY = [
@@ -413,13 +454,13 @@ function score(valueOrMark, size, date, isThesis = false) {
     markDate = valueOrMark.date || date;
     markThesis = Boolean(valueOrMark.isThesis || isThesis);
     markIsNew = Boolean(valueOrMark.isNew);
-    markKind = valueOrMark.kind || (val != null ? "numeric" : (QUALIFIER_NAMES[String(labelText).toUpperCase()] ? "qualifier" : "other"));
-    isQual = markKind === "qualifier" || Boolean(QUALIFIER_NAMES[String(labelText).toUpperCase()]);
+    markKind = valueOrMark.kind || (val != null ? "numeric" : (isQualifierToken(labelText) ? "qualifier" : "other"));
+    isQual = markKind === "qualifier" || isQualifierToken(labelText);
     isOther = markKind === "other" || markKind === "descriptor";
-  } else if (typeof valueOrMark === "string" && QUALIFIER_NAMES[valueOrMark.toUpperCase()]) {
+  } else if (typeof valueOrMark === "string" && isQualifierToken(valueOrMark)) {
     isQual = true;
     markKind = "qualifier";
-    labelText = valueOrMark.toUpperCase();
+    labelText = valueOrMark;
     val = null;
   } else {
     labelText = val != null ? fmtMark(val) : "";
@@ -431,12 +472,12 @@ function score(valueOrMark, size, date, isThesis = false) {
   }
 
   const band = bandOf(val, labelText);
-  const qualFull = isQual ? (QUALIFIER_NAMES[String(labelText).toUpperCase()] || labelText) : "";
+  const qualWord = isQual ? (qualifierFullText(labelText) || labelText) : "";
   const dateStr = markDate ? (longDate(markDate) || shortDate(markDate)) : "";
 
   let accessibleLabel;
   if (isQual) {
-    accessibleLabel = qualFull + " (" + labelText + ")" + (dateStr ? " din " + dateStr : "");
+    accessibleLabel = qualWord + (dateStr ? ", " + dateStr : "");
   } else if (isOther) {
     accessibleLabel = labelText + (dateStr ? " (" + dateStr + ")" : "");
   } else {
@@ -445,6 +486,8 @@ function score(valueOrMark, size, date, isThesis = false) {
   if (markIsNew) {
     accessibleLabel += " (Nou)";
   }
+
+  const pillText = isQual ? qualWord : labelText;
 
   return h(
     "span",
@@ -456,7 +499,7 @@ function score(valueOrMark, size, date, isThesis = false) {
     },
     markThesis ? h("span", { class: "thesis-tag", text: "Teză" }) : null,
     markIsNew ? h("span", { class: "badge-new", text: "Nou" }) : null,
-    labelText
+    pillText
   );
 }
 
@@ -752,7 +795,7 @@ function recentMarks(m) {
     if (!g) continue;
     const value = num(g.value);
     const label = g.label || (value != null ? String(value) : (g.raw != null ? String(g.raw) : ""));
-    const isQual = g.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(label).toUpperCase()]);
+    const isQual = g.kind === "qualifier" || isQualifierToken(label);
     const isOther = g.kind === "other" || g.kind === "descriptor" || (value == null && !isQual && Boolean(label));
     if (value == null && !isQual && !isOther) continue;
     list.push({
@@ -772,7 +815,7 @@ function recentMarks(m) {
         if (!d) continue;
         const value = num(d.value);
         const label = d.label || (value != null ? String(value) : (d.raw != null ? String(d.raw) : ""));
-        const isQual = d.kind === "qualifier" || Boolean(QUALIFIER_NAMES[String(label).toUpperCase()]);
+        const isQual = d.kind === "qualifier" || isQualifierToken(label);
         const isOther = d.kind === "other" || d.kind === "descriptor" || (value == null && !isQual && Boolean(label));
         if (value == null && !isQual && !isOther) continue;
         if (validIso(d.date)) {
@@ -836,7 +879,7 @@ function markGroups(subject) {
       value: typeof value === "number" ? value : null,
       label: String(value ?? ""),
       raw: String(value ?? ""),
-      kind: typeof value === "number" ? "numeric" : (QUALIFIER_NAMES[String(value).toUpperCase()] ? "qualifier" : "other"),
+      kind: typeof value === "number" ? "numeric" : (isQualifierToken(value) ? "qualifier" : "other"),
       date: null,
       isThesis: false,
       semester: 0,
@@ -847,7 +890,7 @@ function markGroups(subject) {
     if (!d) continue;
     const value = num(d.value);
     const label = d.label || (value != null ? String(value) : (d.raw != null ? String(d.raw) : ""));
-    const kind = d.kind || (value != null ? "numeric" : (QUALIFIER_NAMES[String(label).toUpperCase()] ? "qualifier" : "other"));
+    const kind = d.kind || (value != null ? "numeric" : (isQualifierToken(label) ? "qualifier" : "other"));
     if (value == null && !label) continue;
     const key = d.semester === 1 || d.semester === 2 ? d.semester : 0;
     if (!groups.has(key)) groups.set(key, []);
@@ -971,10 +1014,7 @@ function renderMetrics(m) {
       ? h(
           "div",
           { class: "last-row" },
-          cookie(
-            "cookie cookie-lg " + bandOf(last.value, last.label),
-            last.kind === "qualifier" || last.value == null ? (last.label || "") : fmtMark(last.value)
-          ),
+          score(last, "lg", last.date, last.isThesis),
           h("div", { class: "last-text" }, h("p", { class: "last-subject", text: last.subject }), last.date ? h("p", { class: "last-date", text: shortDate(last.date) }) : null)
         )
       : h("p", { class: "metric-note", text: "Încă nu există note." })

@@ -2653,8 +2653,23 @@ ul, ol {
 }
 
 .score.is-qualifier {
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  white-space: nowrap;
+  width: auto;
+  min-width: fit-content;
+  padding: 0 12px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.score-sm.is-qualifier {
+  font-size: 0.75rem;
+  padding: 0 8px;
+}
+
+.score-lg.is-qualifier {
+  font-size: 1.125rem;
+  padding: 0 16px;
 }
 
 .scale-chip {
