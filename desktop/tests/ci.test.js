@@ -42,6 +42,7 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   // Working directory
   assert.ok(content.includes("working-directory: desktop"), "CI must use desktop working directory");
   assert.ok(content.includes("working-directory: web"), "CI must use web working directory");
+  assert.ok(content.includes("Install web dependencies"), "Desktop CI must install web dependencies before running tests");
 
   // Required checks reporting completed status
   assert.ok(content.includes("ci-status:"), "CI must have a completion status gate job");
