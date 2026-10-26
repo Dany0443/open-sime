@@ -23,6 +23,11 @@ import {
   resolveTargetTriple,
 } from "../scripts/build-sidecar.mjs";
 import { computeSha256 } from "../scripts/verify-appimage.mjs";
+import {
+  cleanStaleArtifacts,
+  getStandardArtifactName,
+  resolvePlatform,
+} from "../scripts/stage-release-artifact.mjs";
 import { readProjectVersions, validateVersions, parseCliArgs } from "../scripts/check-versions.mjs";
 import { validateReleaseSecrets } from "../scripts/check-release-secrets.mjs";
 
@@ -426,5 +431,51 @@ test("Release Secrets: validateReleaseSecrets validates required signing secrets
   assert.equal(appleIdRes.valid, true);
   assert.equal(appleIdRes.errors.length, 0);
   assert.equal(appleIdRes.sign_macos, true);
+});
+
+test("Artifact Naming and Staging: exact output filenames, version interpolation, and stale artifact cleanup", () => {
+  // 1. Exact naming convention per user requirements
+  assert.equal(getStandardArtifactName("windows", "1.2.3"), "Open-SIME-installer-v1.2.3.exe");
+  assert.equal(getStandardArtifactName("win32", "1.2.3"), "Open-SIME-installer-v1.2.3.exe");
+  assert.equal(getStandardArtifactName("x86_64-pc-windows-msvc", "1.2.3"), "Open-SIME-installer-v1.2.3.exe");
+
+  assert.equal(getStandardArtifactName("macos", "1.2.3"), "Open-SIME-v1.2.3.dmg");
+  assert.equal(getStandardArtifactName("darwin", "1.2.3"), "Open-SIME-v1.2.3.dmg");
+  assert.equal(getStandardArtifactName("aarch64-apple-darwin", "1.2.3"), "Open-SIME-v1.2.3.dmg");
+  assert.equal(getStandardArtifactName("x86_64-apple-darwin", "1.2.3"), "Open-SIME-v1.2.3.dmg");
+
+  assert.equal(getStandardArtifactName("linux", "1.2.3"), "Open-SIME-v1.2.3.AppImage");
+  assert.equal(getStandardArtifactName("x86_64-unknown-linux-gnu", "1.2.3"), "Open-SIME-v1.2.3.AppImage");
+
+  // Handles 'v'-prefixed versions identically
+  assert.equal(getStandardArtifactName("windows", "v2.0.0"), "Open-SIME-installer-v2.0.0.exe");
+  assert.equal(getStandardArtifactName("macos", "v2.0.0"), "Open-SIME-v2.0.0.dmg");
+  assert.equal(getStandardArtifactName("linux", "v2.0.0"), "Open-SIME-v2.0.0.AppImage");
+
+  // Canonical current project version
+  const { version } = validateVersions({ desktopRoot: DESKTOP_ROOT });
+  assert.equal(getStandardArtifactName("windows", version), `Open-SIME-installer-v${version}.exe`);
+  assert.equal(getStandardArtifactName("macos", version), `Open-SIME-v${version}.dmg`);
+  assert.equal(getStandardArtifactName("linux", version), `Open-SIME-v${version}.AppImage`);
+
+  // Stale artifact cleanup
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sime-stage-test-"));
+  try {
+    fs.writeFileSync(path.join(tmpDir, "Open-SIME-linux-x64.AppImage"), "old");
+    fs.writeFileSync(path.join(tmpDir, "Open-SIME-windows-x64-setup.exe"), "old");
+    fs.writeFileSync(path.join(tmpDir, "Open-SIME-linux-x64.deb"), "old-deb");
+    fs.writeFileSync(path.join(tmpDir, "Open-SIME-v0.9.0.AppImage"), "old");
+    fs.writeFileSync(path.join(tmpDir, `Open-SIME-v${version}.AppImage`), "keep");
+    fs.writeFileSync(path.join(tmpDir, "unrelated-file.txt"), "keep-unrelated");
+
+    const removed = cleanStaleArtifacts(tmpDir, `Open-SIME-v${version}.AppImage`);
+    assert.equal(removed.length, 4);
+    assert.ok(fs.existsSync(path.join(tmpDir, `Open-SIME-v${version}.AppImage`)));
+    assert.ok(fs.existsSync(path.join(tmpDir, "unrelated-file.txt")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, "Open-SIME-linux-x64.AppImage")));
+    assert.ok(!fs.existsSync(path.join(tmpDir, "Open-SIME-linux-x64.deb")));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 

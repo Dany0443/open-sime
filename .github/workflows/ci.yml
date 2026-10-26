@@ -127,6 +127,10 @@ jobs:
         env:
           CI: "true"
 
+      - name: Stage preview artifact
+        working-directory: desktop
+        run: node scripts/stage-release-artifact.mjs --target ${{ matrix.target }}
+
       - name: Verify Linux sidecar binary in AppImage
         if: runner.os == 'Linux'
         working-directory: desktop
@@ -137,8 +141,8 @@ jobs:
         with:
           name: preview-${{ matrix.name }}
           path: |
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            desktop/Open-SIME-installer-*.exe
+            desktop/Open-SIME-v*.dmg
+            desktop/Open-SIME-v*.AppImage
           if-no-files-found: error
           retention-days: 7

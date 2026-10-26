@@ -173,17 +173,11 @@ jobs:
         shell: pwsh
         working-directory: desktop
         run: |
-          $nsisExe = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
-          if (-not $nsisExe) {
-              Write-Error "NSIS installer not found in bundle output."
-              exit 1
-          }
-
-          Move-Item -Path $nsisExe.FullName -Destination "./Open-SIME-windows-x64-setup.exe" -Force
-          Write-Host "Staged installer as ./Open-SIME-windows-x64-setup.exe"
+          node scripts/stage-release-artifact.mjs --target x86_64-pc-windows-msvc
+          $artifact = node scripts/stage-release-artifact.mjs --name-only --platform windows
 
           if ($env:SIGN_WINDOWS -eq "true") {
-              $sig = Get-AuthenticodeSignature -FilePath "./Open-SIME-windows-x64-setup.exe"
+              $sig = Get-AuthenticodeSignature -FilePath "./$artifact"
               Write-Host "Installer signature status: $($sig.Status), Signer: $($sig.SignerCertificate.Subject)"
               if ($sig.Status -ne "Valid") {
                   Write-Error "Installer signature verification failed: $($sig.StatusMessage)"
@@ -191,7 +185,7 @@ jobs:
               }
               Write-Host "Verified Windows installer Authenticode signature."
           } else {
-              Write-Host "Built unsigned Windows installer Open-SIME-windows-x64-setup.exe"
+              Write-Host "Built unsigned Windows installer $artifact"
           }
 
       - name: Cleanup certificate from store
@@ -216,24 +210,13 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1
         with:
           name: release-windows
-          path: desktop/Open-SIME-windows-x64-setup.exe
+          path: desktop/Open-SIME-installer-*.exe
           if-no-files-found: error
           retention-days: 1
 
   build-macos:
-    name: Build & Package macOS (${{ matrix.name }})
+    name: Build & Package macOS (DMG)
     needs: validate-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: intel
-            target: x86_64-apple-darwin
-            artifact_name: Open-SIME-macos-intel.dmg
-          - name: apple-silicon
-            target: aarch64-apple-darwin
-            artifact_name: Open-SIME-macos-apple-silicon.dmg
-
     runs-on: macos-latest
     env:
       SIGN_MACOS: ${{ needs.validate-release.outputs.sign_macos }}
@@ -253,7 +236,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin
 
       - name: Rust build cache
         uses: swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2.7.5
@@ -302,7 +285,7 @@ jobs:
 
       - name: Build Node.js sidecar executable
         working-directory: desktop
-        run: node scripts/build-sidecar.mjs --target ${{ matrix.target }}
+        run: node scripts/build-sidecar.mjs --target aarch64-apple-darwin
 
       - name: Sign sidecar executable
         if: env.SIGN_MACOS == 'true'
@@ -312,7 +295,7 @@ jobs:
         run: |
           codesign --force --options runtime --timestamp \
             --sign "$APPLE_SIGNING_IDENTITY" \
-            "src-tauri/binaries/open-sime-server-${{ matrix.target }}"
+            "src-tauri/binaries/open-sime-server-aarch64-apple-darwin"
 
       - name: Build signed and notarized DMG
         if: env.SIGN_MACOS == 'true'
@@ -326,33 +309,27 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        run: npx tauri build --target ${{ matrix.target }} --bundles dmg
+        run: npx tauri build --target aarch64-apple-darwin --bundles dmg
 
       - name: Build unsigned DMG
         if: env.SIGN_MACOS != 'true'
         working-directory: desktop
-        run: npx tauri build --target ${{ matrix.target }} --bundles dmg
+        run: npx tauri build --target aarch64-apple-darwin --bundles dmg
 
       - name: Rename and verify DMG
         working-directory: desktop
         run: |
-          DMG_FILE=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" | head -n 1)
-          if [ -z "$DMG_FILE" ]; then
-            echo "Error: DMG file not found in bundle output."
-            exit 1
-          fi
-
-          mv "$DMG_FILE" "./${{ matrix.artifact_name }}"
-          echo "Staged DMG as ./${{ matrix.artifact_name }}"
+          node scripts/stage-release-artifact.mjs --target aarch64-apple-darwin
+          MAC_ARTIFACT=$(node scripts/stage-release-artifact.mjs --name-only --platform macos)
 
           if [ "$SIGN_MACOS" = "true" ]; then
-            xcrun stapler staple "./${{ matrix.artifact_name }}" || true
-            codesign --verify --deep --strict --verbose=2 "./${{ matrix.artifact_name }}"
-            spctl --assess --type open --context context:primary-signature --verbose=2 "./${{ matrix.artifact_name }}"
-            xcrun stapler validate "./${{ matrix.artifact_name }}"
-            echo "Verified macOS code signature and notarization for ${{ matrix.artifact_name }}"
+            xcrun stapler staple "./$MAC_ARTIFACT" || true
+            codesign --verify --deep --strict --verbose=2 "./$MAC_ARTIFACT"
+            spctl --assess --type open --context context:primary-signature --verbose=2 "./$MAC_ARTIFACT"
+            xcrun stapler validate "./$MAC_ARTIFACT"
+            echo "Verified macOS code signature and notarization for $MAC_ARTIFACT"
           else
-            echo "Staged unsigned macOS DMG: ${{ matrix.artifact_name }}"
+            echo "Staged unsigned macOS DMG: $MAC_ARTIFACT"
           fi
 
       - name: Cleanup temporary credentials
@@ -367,8 +344,8 @@ jobs:
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1
         with:
-          name: release-${{ matrix.name }}
-          path: desktop/${{ matrix.artifact_name }}
+          name: release-macos
+          path: desktop/Open-SIME-v*.dmg
           if-no-files-found: error
           retention-days: 1
 
@@ -441,29 +418,22 @@ jobs:
       - name: Rename and verify Linux artifacts
         working-directory: desktop
         run: |
-          APPIMAGE_FILE=$(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage -name "*.AppImage" | head -n 1)
-
-          if [ -z "$APPIMAGE_FILE" ]; then
-            echo "Error: Linux AppImage not found in bundle output."
-            exit 1
-          fi
-
-          mv "$APPIMAGE_FILE" ./Open-SIME-linux-x64.AppImage
-          node scripts/verify-appimage.mjs ./Open-SIME-linux-x64.AppImage
+          node scripts/stage-release-artifact.mjs --target x86_64-unknown-linux-gnu
+          node scripts/verify-appimage.mjs
+          LNX_ARTIFACT=$(node scripts/stage-release-artifact.mjs --name-only --platform linux)
 
           if [ "$SIGN_LINUX" = "true" ]; then
-            ./Open-SIME-linux-x64.AppImage --appimage-signature
+            "./$LNX_ARTIFACT" --appimage-signature
             echo "Verified embedded AppImage signature."
           else
-            echo "Staged unsigned Linux AppImage."
+            echo "Staged unsigned Linux AppImage: $LNX_ARTIFACT."
           fi
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1
         with:
           name: release-linux
-          path: |
-            desktop/Open-SIME-linux-x64.AppImage
+          path: desktop/Open-SIME-v*.AppImage
           if-no-files-found: error
           retention-days: 1
 
@@ -489,11 +459,14 @@ jobs:
 
       - name: Verify all required release files are present
         run: |
+          WIN_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform windows)
+          MAC_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform macos)
+          LNX_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform linux)
+
           REQUIRED_FILES=(
-            "Open-SIME-windows-x64-setup.exe"
-            "Open-SIME-macos-intel.dmg"
-            "Open-SIME-macos-apple-silicon.dmg"
-            "Open-SIME-linux-x64.AppImage"
+            "$WIN_FILE"
+            "$MAC_FILE"
+            "$LNX_FILE"
           )
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "release-assets/$file" ]; then
@@ -546,9 +519,9 @@ jobs:
           fi
 
           if [ "$SIGN_MAC" = "true" ]; then
-            echo "- **macOS (Intel & Apple Silicon DMG)**: Signed with Developer ID and notarized by Apple" >> release-notes.md
+            echo "- **macOS (DMG)**: Signed with Developer ID and notarized by Apple" >> release-notes.md
           else
-            echo "- **macOS (Intel & Apple Silicon DMG)**: Unsigned build" >> release-notes.md
+            echo "- **macOS (DMG)**: Unsigned build" >> release-notes.md
           fi
 
           if [ "$SIGN_LNX" = "true" ]; then
@@ -568,7 +541,7 @@ jobs:
           ### Platform Notes for Unsigned Builds
           - **Windows**: Microsoft Defender SmartScreen may display *"Windows protected your PC"*. Click **More info**, then click **Run anyway** to launch.
           - **macOS**: Gatekeeper may state the app cannot be opened because Apple cannot check it for malicious software. In Finder, open the **Applications** folder, right-click (or Control-click) **Open SIME**, select **Open**, and click **Open** in the confirmation dialog.
-          - **Linux**: Make the AppImage executable (`chmod +x Open-SIME-linux-x64.AppImage`) before launching.
+          - **Linux**: Make the AppImage executable (`chmod +x Open-SIME-v*.AppImage`) before launching.
 
           ### Checksum Verification
           To verify download integrity against `checksums.txt`:
@@ -587,11 +560,14 @@ jobs:
           EOF
           fi
 
+          WIN_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform windows)
+          MAC_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform macos)
+          LNX_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform linux)
+
           RELEASE_ASSETS=(
-            "release-assets/Open-SIME-windows-x64-setup.exe"
-            "release-assets/Open-SIME-macos-intel.dmg"
-            "release-assets/Open-SIME-macos-apple-silicon.dmg"
-            "release-assets/Open-SIME-linux-x64.AppImage"
+            "release-assets/$WIN_FILE"
+            "release-assets/$MAC_FILE"
+            "release-assets/$LNX_FILE"
             "release-assets/checksums.txt"
           )
           if [ -f "release-assets/checksums.txt.sig" ]; then

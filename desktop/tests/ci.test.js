@@ -39,12 +39,15 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   assert.ok(content.includes("working-directory: desktop"), "CI must use desktop working directory");
   assert.ok(content.includes("working-directory: web"), "CI must use web working directory");
 
-  // Linux sidecar integrity verification (no patchelf or strip shims)
+  // Artifact staging and sidecar integrity verification (no patchelf or strip shims)
   assert.ok(!content.includes("patchelf-shim.sh"), "CI must not use patchelf-shim.sh");
   assert.ok(!content.includes("strip-shim.sh"), "CI must not use strip-shim.sh");
+  assert.ok(content.includes("node scripts/stage-release-artifact.mjs"), "CI must stage preview artifacts");
   assert.ok(content.includes("node scripts/verify-appimage.mjs"), "CI must verify AppImage sidecar integrity using verify-appimage.mjs");
   const verifyScriptPath = path.join(DESKTOP_ROOT, "scripts", "verify-appimage.mjs");
   assert.ok(fs.existsSync(verifyScriptPath), "verify-appimage.mjs must exist");
+  const stageScriptPath = path.join(DESKTOP_ROOT, "scripts", "stage-release-artifact.mjs");
+  assert.ok(fs.existsSync(stageScriptPath), "stage-release-artifact.mjs must exist");
   assert.ok(!fs.existsSync(path.join(DESKTOP_ROOT, "scripts", "patchelf-shim.sh")), "patchelf-shim.sh must be removed");
   assert.ok(!fs.existsSync(path.join(DESKTOP_ROOT, "scripts", "strip-shim.sh")), "strip-shim.sh must be removed");
 
@@ -87,17 +90,13 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
     "Publish release job must require all matrix builds"
   );
 
-  // Exact installer filenames
-  const expectedArtifacts = [
-    "Open-SIME-windows-x64-setup.exe",
-    "Open-SIME-macos-intel.dmg",
-    "Open-SIME-macos-apple-silicon.dmg",
-    "Open-SIME-linux-x64.AppImage",
-  ];
-  for (const artifact of expectedArtifacts) {
-    assert.ok(content.includes(artifact), `release.yml must produce and stage ${artifact}`);
-  }
-  assert.ok(!content.includes("Open-SIME-linux-x64.deb"), "Release workflow must not stage deb package");
+  // Standardized dynamic artifact staging
+  assert.ok(content.includes("scripts/stage-release-artifact.mjs"), "Release must stage artifacts via stage-release-artifact.mjs");
+  assert.ok(!content.includes("Open-SIME-windows-x64-setup.exe"), "Release must not hardcode legacy Windows setup name");
+  assert.ok(!content.includes("Open-SIME-macos-intel.dmg"), "Release must not hardcode legacy macOS intel DMG name");
+  assert.ok(!content.includes("Open-SIME-macos-apple-silicon.dmg"), "Release must not hardcode legacy macOS arm64 DMG name");
+  assert.ok(!content.includes("Open-SIME-linux-x64.AppImage"), "Release must not hardcode legacy Linux AppImage name");
+  assert.ok(!content.includes(".deb"), "Release workflow must not reference or stage deb package");
 
   // Checksum manifest and detached signature
   assert.ok(content.includes("sha256sum Open-SIME-* > checksums.txt"), "Release must generate checksums.txt");

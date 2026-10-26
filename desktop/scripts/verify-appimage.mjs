@@ -11,6 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readProjectVersions } from "./check-versions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_ROOT = path.resolve(__dirname, "..");
@@ -24,6 +25,14 @@ function findInBundle(bundleDir) {
     .map((f) => path.join(bundleDir, f));
 }
 
+function findMatchingInDir(dir, predicate) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter(predicate)
+    .map((f) => path.join(dir, f));
+}
+
 export function findAppImage(customPath) {
   if (customPath) {
     const resolved = path.resolve(customPath);
@@ -33,7 +42,18 @@ export function findAppImage(customPath) {
     return resolved;
   }
 
+  let version = "";
+  try {
+    version = readProjectVersions(DESKTOP_ROOT).packageJson || "";
+  } catch {
+    // ignore version resolution fallback
+  }
+
+  const standardName = version ? `Open-SIME-v${version}.AppImage` : "";
+
   const searchLocations = [
+    ...(standardName ? [path.join(DESKTOP_ROOT, standardName), path.join(REPO_ROOT, standardName)] : []),
+    ...findMatchingInDir(DESKTOP_ROOT, (f) => f.startsWith("Open-SIME-") && f.endsWith(".AppImage")),
     path.join(DESKTOP_ROOT, "Open-SIME-linux-x64.AppImage"),
     path.join(REPO_ROOT, "Open-SIME-linux-x64.AppImage"),
     ...findInBundle(
@@ -189,3 +209,4 @@ if (path.resolve(process.argv[1] || "") === path.resolve(fileURLToPath(import.me
     process.exit(1);
   }
 }
+

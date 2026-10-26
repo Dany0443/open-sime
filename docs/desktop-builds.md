@@ -165,14 +165,13 @@ Two independent, purpose-built workflows live under `.github/workflows/`:
 
 ## 7. Supported Platforms and Release Artifacts
 
-Every official release produces exactly 4 platform installers plus the checksum manifest and its detached signature:
+Every official release produces exactly 3 platform installers plus the checksum manifest and its detached signature:
 
 | Platform / Target | Rust Triple | Distribution Format | Final Release Filename |
 | --- | --- | --- | --- |
-| **Windows x64** | `x86_64-pc-windows-msvc` | NSIS Installer (`.exe`) | `Open-SIME-windows-x64-setup.exe` |
-| **macOS Intel** | `x86_64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-macos-intel.dmg` |
-| **macOS Apple Silicon** | `aarch64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-macos-apple-silicon.dmg` |
-| **Linux x64** | `x86_64-unknown-linux-gnu` | Portable AppImage (`.AppImage`) | `Open-SIME-linux-x64.AppImage` |
+| **Windows x64** | `x86_64-pc-windows-msvc` | NSIS Installer (`.exe`) | `Open-SIME-installer-v<version>.exe` |
+| **macOS (Apple Silicon)** | `aarch64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-v<version>.dmg` |
+| **Linux x64** | `x86_64-unknown-linux-gnu` | Portable AppImage (`.AppImage`) | `Open-SIME-v<version>.AppImage` |
 | **Checksum Manifest** | N/A | SHA-256 Text File | `checksums.txt` |
 | **Manifest Signature** | N/A | Detached ASCII-Armored GPG Signature | `checksums.txt.sig` |
 
@@ -237,7 +236,7 @@ Official production releases require real signing credentials configured in **Se
   - The Node.js sidecar binary is bundled under `/usr/share/open-sime/open-sime-server` via Tauri's AppImage file mappings, which guarantees `linuxdeploy` will not run `patchelf` or `strip` on it, and is launched directly or via the `/usr/bin/open-sime-server` launcher script.
   - Tauri's AppImage bundler runs with `SIGN=1`, `APPIMAGETOOL_FORCE_SIGN=1`, and `APPIMAGETOOL_SIGN_PASSPHRASE`. If signing encounters any issue, `APPIMAGETOOL_FORCE_SIGN=1` immediately fails the build.
   - The sidecar binary integrity and functionality inside the resulting AppImage is verified via `desktop/scripts/verify-appimage.mjs` (checking SHA-256 hash match against the reference binary and validating CLI argument handling).
-  - The signature is verified using `Open-SIME-linux-x64.AppImage --appimage-signature`.
+  - The signature is verified using `Open-SIME-v<version>.AppImage --appimage-signature`.
 
 ### 8.4. Release Checksum Manifest Signing
 
@@ -261,7 +260,7 @@ sha256sum --check --ignore-missing checksums.txt
 shasum -a 256 -c checksums.txt
 
 # Windows (PowerShell)
-Get-FileHash -Algorithm SHA256 Open-SIME-windows-x64-setup.exe
+Get-FileHash -Algorithm SHA256 .\Open-SIME-installer-v*.exe
 # Compare with the hash in checksums.txt
 ```
 
@@ -282,7 +281,7 @@ gpg --verify checksums.txt.sig checksums.txt
 ### 9.3. Windows Authenticode Verification
 
 ```powershell
-Get-AuthenticodeSignature -FilePath .\Open-SIME-windows-x64-setup.exe | Format-List
+Get-AuthenticodeSignature -FilePath .\Open-SIME-installer-v*.exe | Format-List
 ```
 Verify that `Status` is `Valid`, `StatusMessage` is `Signature verified.`, and `SignerCertificate` displays the expected subject.
 
@@ -290,20 +289,20 @@ Verify that `Status` is `Valid`, `StatusMessage` is `Signature verified.`, and `
 
 ```bash
 # 1. Verify deep code signature
-codesign --verify --deep --strict --verbose=2 Open-SIME-macos-*.dmg
+codesign --verify --deep --strict --verbose=2 Open-SIME-v*.dmg
 
 # 2. Verify Gatekeeper assessment
-spctl --assess --type open --context context:primary-signature --verbose=2 Open-SIME-macos-*.dmg
+spctl --assess --type open --context context:primary-signature --verbose=2 Open-SIME-v*.dmg
 
 # 3. Verify notarization ticket is stapled
-xcrun stapler validate Open-SIME-macos-*.dmg
+xcrun stapler validate Open-SIME-v*.dmg
 ```
 
 ### 9.5. Linux AppImage Signature Verification
 
 ```bash
-chmod +x Open-SIME-linux-x64.AppImage
-./Open-SIME-linux-x64.AppImage --appimage-signature
+chmod +x Open-SIME-v*.AppImage
+./Open-SIME-v*.AppImage --appimage-signature
 ```
 This extracts and validates the embedded GPG signature against your trusted GPG keyring.
 
@@ -335,5 +334,5 @@ AppImages require `FUSE` (Filesystem in Userspace) to mount and execute:
   ```
 - Alternatively, run without FUSE:
   ```bash
-  ./Open-SIME-linux-x64.AppImage --appimage-extract-and-run
+  ./Open-SIME-v*.AppImage --appimage-extract-and-run
   ```
