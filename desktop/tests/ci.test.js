@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DESKTOP_ROOT = path.resolve(__dirname, "..");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CI_WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "ci.yml");
 const RELEASE_WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "release.yml");
@@ -39,8 +41,11 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
 
   // Sidecar protection in Linux packaging
   assert.ok(content.includes('NO_STRIP: "true"'), "CI must set NO_STRIP: true for Linux bundling");
-  assert.ok(content.includes("Skipping patchelf for sidecar"), "CI must protect sidecar from patchelf");
+  assert.ok(content.includes("scripts/patchelf-shim.sh"), "CI must install patchelf-shim.sh for Linux packaging");
   assert.ok(content.includes("Verify Linux sidecar binary in AppImage"), "CI must verify AppImage sidecar integrity");
+  const shimPath = path.join(DESKTOP_ROOT, "scripts", "patchelf-shim.sh");
+  assert.ok(fs.existsSync(shimPath), "patchelf-shim.sh must exist");
+  assert.ok(fs.readFileSync(shimPath, "utf8").includes("Skipping patchelf for sidecar"), "patchelf-shim must skip sidecar");
 
   // Must NOT expose or reference signing secrets in CI
   assert.ok(!content.includes("secrets.WINDOWS_CERTIFICATE"), "CI must not access WINDOWS_CERTIFICATE");
@@ -106,10 +111,25 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
 
   // Linux sidecar protection and verification
   assert.ok(content.includes('NO_STRIP: "true"'), "Release must set NO_STRIP: true for Linux AppImage packaging");
-  assert.ok(content.includes("Skipping patchelf for sidecar"), "Release must protect sidecar from patchelf");
+  assert.ok(content.includes("scripts/patchelf-shim.sh"), "Release must install patchelf-shim.sh for Linux packaging");
   assert.ok(content.includes("Successfully verified Linux sidecar binary integrity inside AppImage"), "Release must verify sidecar integrity");
 
   // Draft release creation
   assert.ok(content.includes("--draft=true"), "Release must create a draft release");
+});
+
+test("Workflow YAML Validation: .github/workflows/*.yml must be valid YAML syntax", () => {
+  try {
+    execFileSync(
+      "python3",
+      [
+        "-c",
+        "import yaml; yaml.safe_load(open('.github/workflows/release.yml')); yaml.safe_load(open('.github/workflows/ci.yml'))",
+      ],
+      { cwd: REPO_ROOT, encoding: "utf8" }
+    );
+  } catch (err) {
+    assert.fail(`GitHub Actions YAML syntax error: ${err.message}`);
+  }
 });
 

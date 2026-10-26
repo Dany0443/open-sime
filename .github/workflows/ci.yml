@@ -129,18 +129,10 @@ jobs:
 
       - name: Setup Linux bundling environment
         if: runner.os == 'Linux'
+        working-directory: desktop
         run: |
           mkdir -p "$RUNNER_TEMP/bin"
-          cat << 'EOF' > "$RUNNER_TEMP/bin/patchelf"
-#!/bin/bash
-TARGET="${@: -1}"
-if [[ "$TARGET" == *"open-sime-server"* ]]; then
-  echo "[patchelf shim] Skipping patchelf for sidecar: $TARGET"
-  exit 0
-fi
-REAL_PATCHELF=$(which -a patchelf | grep -v "$RUNNER_TEMP/bin/patchelf" | head -n 1)
-exec "$REAL_PATCHELF" "$@"
-EOF
+          cp scripts/patchelf-shim.sh "$RUNNER_TEMP/bin/patchelf"
           chmod +x "$RUNNER_TEMP/bin/patchelf"
           echo "$RUNNER_TEMP/bin" >> $GITHUB_PATH
 
