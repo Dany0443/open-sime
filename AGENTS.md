@@ -90,34 +90,49 @@ Goals, in priority order:
 
 ## Layout
 
-Current:
+For an overview, see the root `README.md`.
 
 ```
-sime-desktop/        Existing web/desktop app (server.js, index.html, public/, tests/, scripts/)
-sime-app/            Reserved for future mobile development
-README.md            Repository overview
+web/                 Web client and server (server.js, index.html, public/, tests/, scripts/)
+desktop/             Tauri 2 desktop client (src-tauri/, dist-tauri/, tests/, scripts/)
+android/             Reserved for future Android development
+docs/                Architecture and build documentation
 ```
 
-Inside `sime-desktop/`:
+Inside `web/`:
 
 ```
-server.js            Express server and all portal logic (login, parsing, caching, routes)
+server.js            Express server and portal logic (login, parsing, caching, routes)
 public/              Web UI: app.js, strings.js, style.css, sw.js, manifest.json, assets/
-tests/               Automated tests (node:test) and the mock portal
-test/fixtures/       Sanitized portal captures
-scripts/             Tools, including sanitize-capture.mjs
-README.md            Running and deployment notes
+tests/               Automated unit and integration tests (node:test)
+scripts/             Tools: sanitize-capture.mjs, capture-absence-sources.mjs
+package.json         Web dependencies (express, cheerio) and scripts
 ```
 
-Planned (do not create these unless the task says so): a pure `core/` package with all portal logic and no I/O, a `spec/` folder with shared fixtures and expected JSON, a `server/` wrapper, a `desktop/` wrapper and an `android/` Kotlin app in `sime-app/`. The web app with the server in `sime-desktop/` is the main product and the reference implementation.
-
-Useful commands (run inside `sime-desktop/`):
+Inside `desktop/`:
 
 ```
-npm test            run the whole test suite
-npm run check       syntax check of server and client files
-SIME_DEBUG=1        enables /api/debug/parser-health (never returns personal values)
+src-tauri/           Tauri Rust source (lib.rs, main.rs, capabilities, config)
+dist-tauri/          Embedded startup loader page
+scripts/             build-sidecar.mjs, check-versions.mjs, check-release-secrets.mjs
+tests/               Desktop sidecar and CI workflow automated tests
+package.json         Desktop build tooling dependencies
 ```
+
+Useful commands:
+
+```bash
+cd web
+npm test             # run web test suite
+npm run check        # syntax check of web server and client files
+
+cd ../desktop
+npm test             # run desktop test suite
+npm run check        # syntax and version checks of desktop files
+```
+
+Enable parser health diagnostics (never returns personal data):
+`SIME_DEBUG=1 node server.js`
 
 ## Rules that must never be broken
 
@@ -153,6 +168,14 @@ Any change touching switching, caching or student-scoped routes needs a test wit
 ### Dependencies
 
 No new dependency without a one-sentence justification and the maintainers' agreement. Prefer the standard library. The test runner is the built-in `node:test`.
+
+### Repository structure and desktop separation
+
+- The web app has no desktop dependencies: `web/` must run and test completely standalone without `desktop/`.
+- The desktop app builds on the web app without duplication: `desktop/` has no second copy of the server or UI. `desktop/scripts/build-sidecar.mjs` bundles `../web/server.js` and embeds `../web/index.html` and `../web/public/`.
+- In desktop mode, `web/server.js` rejects unexpected `Host` headers (allowing only `127.0.0.1:<port>` and `localhost:<port>`) with HTTP 403. Dev and standalone modes remain open.
+- Release signing is optional per platform in `.github/workflows/release.yml`. `desktop/scripts/check-release-secrets.mjs` outputs platform booleans, does not fail when secrets are missing (allowing unsigned builds), and fails only on partial configuration. NEVER print, echo or log secret values.
+- Version consistency: versions across all four project files (`web/package.json`, `desktop/package.json`, `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml`) must stay strictly synchronized. `desktop/scripts/check-versions.mjs` validates this.
 
 ## UI conventions
 

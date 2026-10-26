@@ -21,13 +21,24 @@ Read `AGENTS.md` in the repository root before doing anything, including reading
 - Never post real names, grades, passwords, tokens or other personal data from a real account in issues, pull requests, logs or screenshots. Blur or sanitize first.
 - Do not add features meant to bypass limits, scrape other people's accounts or hide the app's behavior from the portal.
 
+## Repository layout
+
+- `web/`: web client and server (`server.js`, `index.html`, `public/`, unit tests). Runs standalone.
+- `desktop/`: Tauri 2 desktop wrapper (`src-tauri/`, `dist-tauri/`, build scripts, tests).
+- `android/`: reserved for future mobile development.
+- `docs/`: architecture and desktop distribution documentation.
+
 ## Making a change
 
 1. Open an issue first for anything bigger than a small fix, so we can agree on the approach.
 2. Create a branch from `main`.
 3. Keep each pull request focused on one thing.
-4. Run the tests and the syntax check (`npm test` and `npm run check`) before opening the pull request.
-5. If you change how the portal is parsed, add a sanitized fixture and its expected output in `spec/` in the same pull request. Portal fixes start from a real fixture, not a guess.
+4. Run the tests and the syntax checks before opening the pull request:
+   ```bash
+   cd web && npm run check && npm test
+   cd ../desktop && npm run check && npm test
+   ```
+5. If you change how the portal is parsed, add a sanitized fixture and its expected output in the same pull request. Portal fixes start from a real fixture, not a guess.
 6. Describe what changed, why, and how you tested it.
 
 ## Commit messages
@@ -76,4 +87,4 @@ Code written with the help of an AI agent is welcome under these conditions:
 
 ## Reporting security problems
 
-Do not open a public issue for a vulnerability or for leaked credentials. Contact the maintainers privately and give us time to fix it.
+Do not open a public issue for a security vulnerability or leaked credentials. Please report security issues privately via GitHub Private Vulnerability Reporting (under the repository's Security tab > Report a vulnerability) or contact the maintainers privately and give us time to resolve it.
