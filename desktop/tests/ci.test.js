@@ -82,11 +82,11 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
     "Open-SIME-macos-intel.dmg",
     "Open-SIME-macos-apple-silicon.dmg",
     "Open-SIME-linux-x64.AppImage",
-    "Open-SIME-linux-x64.deb",
   ];
   for (const artifact of expectedArtifacts) {
     assert.ok(content.includes(artifact), `release.yml must produce and stage ${artifact}`);
   }
+  assert.ok(!content.includes("Open-SIME-linux-x64.deb"), "Release workflow must not stage deb package");
 
   // Checksum manifest and detached signature
   assert.ok(content.includes("sha256sum Open-SIME-* > checksums.txt"), "Release must generate checksums.txt");
