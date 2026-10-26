@@ -50,15 +50,23 @@ fn shutdown_sidecar(app: &AppHandle) {
   }
 }
 
+pub fn build_show_startup_error_script(code: &str, detail: &str) -> String {
+  let json_code = serde_json::to_string(code).unwrap_or_else(|_| "\"ERROR\"".to_string());
+  let json_detail = serde_json::to_string(detail).unwrap_or_else(|_| "\"An unexpected error occurred\"".to_string());
+  // Prevent closing </script> tags if executed in webview / HTML context
+  let safe_code = json_code.replace("</", "<\\/");
+  let safe_detail = json_detail.replace("</", "<\\/");
+  format!(
+    "if (window.__showSimeError) {{ window.__showSimeError({}, {}); }}",
+    safe_code, safe_detail
+  )
+}
+
 fn show_startup_error(app: &AppHandle, code: &str, detail: &str) {
   shutdown_sidecar(app);
   if let Some(window) = app.get_webview_window("main") {
-    let escaped_code = code.replace('\\', "\\\\").replace('\'', "\\'");
-    let escaped_detail = detail.replace('\\', "\\\\").replace('\'', "\\'");
-    let _ = window.eval(&format!(
-      "if (window.__showSimeError) {{ window.__showSimeError('{}', '{}'); }}",
-      escaped_code, escaped_detail
-    ));
+    let script = build_show_startup_error_script(code, detail);
+    let _ = window.eval(&script);
     let _ = window.show();
     let _ = window.set_focus();
   }
@@ -367,6 +375,7 @@ pub fn run() {
           PRODUCTION_PORT,
           STARTUP_TIMEOUT_SECS,
           show_startup_error as fn(&AppHandle, &str, &str),
+          build_show_startup_error_script as fn(&str, &str) -> String,
           make_instance_nonce as fn() -> String,
         );
         if let Some(window) = app.get_webview_window("main") {
@@ -397,4 +406,42 @@ pub fn run() {
       shutdown_sidecar(app_handle);
     }
   });
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_build_show_startup_error_script_escapes() {
+    // 1. newline
+    let script = build_show_startup_error_script("CODE\nLINE", "Detail\nline 2\r\nline 3");
+    assert!(script.contains(r#""CODE\nLINE""#));
+    assert!(script.contains(r#""Detail\nline 2\r\nline 3""#));
+
+    // 2. single quote
+    let script = build_show_startup_error_script("CODE'1", "It's a test 'detail'");
+    assert!(script.contains(r#""CODE'1""#));
+    assert!(script.contains(r#""It's a test 'detail'""#));
+
+    // 3. double quote
+    let script = build_show_startup_error_script(r#"CODE"QUOTED""#, r#"Detail with "quotes""#);
+    assert!(script.contains(r#""CODE\"QUOTED\"""#));
+    assert!(script.contains(r#""Detail with \"quotes\"""#));
+
+    // 4. backslash
+    let script = build_show_startup_error_script(r#"CODE\PATH"#, r#"C:\Windows\System32"#);
+    assert!(script.contains(r#""CODE\\PATH""#));
+    assert!(script.contains(r#""C:\\Windows\\System32""#));
+
+    // 5. unicode (ă, î, ș, ț, â)
+    let script = build_show_startup_error_script("EROARE_ȘCOALĂ", "Aplicația școlară: învățător, știință, țară, pâine.");
+    assert!(script.contains(r#""EROARE_ȘCOALĂ""#));
+    assert!(script.contains(r#""Aplicația școlară: învățător, știință, țară, pâine.""#));
+
+    // 6. </script> injection prevention
+    let script = build_show_startup_error_script("INJECT", "</script><script>alert('xss')</script>");
+    assert!(!script.contains("</script>"));
+    assert!(!script.to_lowercase().contains("</script>"));
+  }
 }
