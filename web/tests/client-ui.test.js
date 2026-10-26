@@ -1172,6 +1172,10 @@ test("Tauri 2 Desktop: configuration, sidecar externalBin, scripts, capabilities
   assert.ok(tauriConf.app.windows[0].height >= 600);
   assert.equal(tauriConf.bundle.active, true);
   assert.deepEqual(tauriConf.bundle.externalBin, ["binaries/open-sime-server"]);
+  assert.equal(
+    tauriConf.app?.security?.csp,
+    "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; script-src 'self'"
+  );
 
   const cap = JSON.parse(fs.readFileSync(path.join(desktopRoot, "src-tauri/capabilities/default.json"), "utf8"));
   assert.ok(cap.windows.includes("main"));
