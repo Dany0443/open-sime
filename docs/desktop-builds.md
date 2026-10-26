@@ -165,15 +165,14 @@ Two independent, purpose-built workflows live under `.github/workflows/`:
 
 ## 7. Supported Platforms and Release Artifacts
 
-Every official release produces exactly 5 platform installers plus the checksum manifest and its detached signature:
+Every official release produces exactly 4 platform installers plus the checksum manifest and its detached signature:
 
 | Platform / Target | Rust Triple | Distribution Format | Final Release Filename |
 | --- | --- | --- | --- |
 | **Windows x64** | `x86_64-pc-windows-msvc` | NSIS Installer (`.exe`) | `Open-SIME-windows-x64-setup.exe` |
 | **macOS Intel** | `x86_64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-macos-intel.dmg` |
 | **macOS Apple Silicon** | `aarch64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-macos-apple-silicon.dmg` |
-| **Linux x64 (Primary)** | `x86_64-unknown-linux-gnu` | Portable AppImage (`.AppImage`) | `Open-SIME-linux-x64.AppImage` |
-| **Linux x64 (Secondary)**| `x86_64-unknown-linux-gnu` | Debian Package (`.deb`) | `Open-SIME-linux-x64.deb` |
+| **Linux x64** | `x86_64-unknown-linux-gnu` | Portable AppImage (`.AppImage`) | `Open-SIME-linux-x64.AppImage` |
 | **Checksum Manifest** | N/A | SHA-256 Text File | `checksums.txt` |
 | **Manifest Signature** | N/A | Detached ASCII-Armored GPG Signature | `checksums.txt.sig` |
 
@@ -338,4 +337,3 @@ AppImages require `FUSE` (Filesystem in Userspace) to mount and execute:
   ```bash
   ./Open-SIME-linux-x64.AppImage --appimage-extract-and-run
   ```
-- For Debian/Ubuntu distributions where FUSE cannot be enabled, use the native `.deb` package (`sudo dpkg -i Open-SIME-linux-x64.deb`).

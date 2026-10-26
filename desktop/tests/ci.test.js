@@ -13,7 +13,7 @@ const RELEASE_WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "release.y
 
 test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   assert.ok(fs.existsSync(CI_WORKFLOW), "ci.yml must exist under .github/workflows/");
-  const content = fs.readFileSync(CI_WORKFLOW, "utf8");
+  const content = fs.readFileSync(CI_WORKFLOW, "utf8").replace(/\r\n/g, "\n");
 
   // Must not contain tabs (invalid YAML)
   assert.ok(!content.includes("\t"), "ci.yml must use spaces, not tabs");
@@ -55,7 +55,7 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
 
 test("Release Workflow: .github/workflows/release.yml validation and publishing", () => {
   assert.ok(fs.existsSync(RELEASE_WORKFLOW), "release.yml must exist under .github/workflows/");
-  const content = fs.readFileSync(RELEASE_WORKFLOW, "utf8");
+  const content = fs.readFileSync(RELEASE_WORKFLOW, "utf8").replace(/\r\n/g, "\n");
 
   // Must not contain tabs (invalid YAML)
   assert.ok(!content.includes("\t"), "release.yml must use spaces, not tabs");
@@ -92,11 +92,11 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
     "Open-SIME-macos-intel.dmg",
     "Open-SIME-macos-apple-silicon.dmg",
     "Open-SIME-linux-x64.AppImage",
-    "Open-SIME-linux-x64.deb",
   ];
   for (const artifact of expectedArtifacts) {
     assert.ok(content.includes(artifact), `release.yml must produce and stage ${artifact}`);
   }
+  assert.ok(!content.includes("Open-SIME-linux-x64.deb"), "Release workflow must not stage deb package");
 
   // Checksum manifest and detached signature
   assert.ok(content.includes("sha256sum Open-SIME-* > checksums.txt"), "Release must generate checksums.txt");

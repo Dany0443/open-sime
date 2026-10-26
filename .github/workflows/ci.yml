@@ -79,7 +79,7 @@ jobs:
           - name: linux-x64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bundles: appimage,deb
+            bundles: appimage
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -109,10 +109,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
             patchelf
 
       - name: Install web dependencies
@@ -122,10 +120,6 @@ jobs:
       - name: Install desktop dependencies
         working-directory: desktop
         run: npm ci
-
-      - name: Build Node.js sidecar executable
-        working-directory: desktop
-        run: node scripts/build-sidecar.mjs --target ${{ matrix.target }}
 
       - name: Setup Linux bundling environment
         if: runner.os == 'Linux'
@@ -168,6 +162,5 @@ jobs:
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             desktop/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
           if-no-files-found: error
           retention-days: 7

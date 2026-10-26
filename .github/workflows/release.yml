@@ -373,7 +373,7 @@ jobs:
           retention-days: 1
 
   build-linux:
-    name: Build & Package Linux x64 (AppImage & deb)
+    name: Build & Package Linux x64 (AppImage)
     needs: validate-release
     runs-on: ubuntu-22.04
     env:
@@ -404,10 +404,8 @@ jobs:
       - name: Install Linux build dependencies & FUSE
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
             patchelf \
             libfuse2
 
@@ -426,10 +424,6 @@ jobs:
         run: |
           echo "$GPG_KEY" | gpg --batch --import
 
-      - name: Build Node.js sidecar executable
-        working-directory: desktop
-        run: node scripts/build-sidecar.mjs --target x86_64-unknown-linux-gnu
-
       - name: Setup Linux bundling environment
         working-directory: desktop
         run: |
@@ -438,7 +432,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/bin/patchelf"
           echo "$RUNNER_TEMP/bin" >> $GITHUB_PATH
 
-      - name: Build signed Linux AppImage and deb
+      - name: Build signed Linux AppImage
         if: env.SIGN_LINUX == 'true'
         working-directory: desktop
         env:
@@ -446,28 +440,27 @@ jobs:
           APPIMAGETOOL_FORCE_SIGN: "1"
           APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE || secrets.RELEASE_GPG_PASSPHRASE }}
           NO_STRIP: "true"
-        run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb
+        run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage
 
-      - name: Build unsigned Linux AppImage and deb
+      - name: Build unsigned Linux AppImage
         if: env.SIGN_LINUX != 'true'
         working-directory: desktop
         env:
           NO_STRIP: "true"
-        run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb
+        run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage
+
 
       - name: Rename and verify Linux artifacts
         working-directory: desktop
         run: |
           APPIMAGE_FILE=$(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage -name "*.AppImage" | head -n 1)
-          DEB_FILE=$(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -name "*.deb" | head -n 1)
 
-          if [ -z "$APPIMAGE_FILE" ] || [ -z "$DEB_FILE" ]; then
-            echo "Error: Linux bundles not found in bundle output."
+          if [ -z "$APPIMAGE_FILE" ]; then
+            echo "Error: Linux AppImage not found in bundle output."
             exit 1
           fi
 
           mv "$APPIMAGE_FILE" ./Open-SIME-linux-x64.AppImage
-          mv "$DEB_FILE" ./Open-SIME-linux-x64.deb
           chmod +x ./Open-SIME-linux-x64.AppImage
 
           rm -rf /tmp/release-appimage-verify
@@ -483,7 +476,7 @@ jobs:
             ./Open-SIME-linux-x64.AppImage --appimage-signature
             echo "Verified embedded AppImage signature."
           else
-            echo "Staged unsigned Linux AppImage and deb."
+            echo "Staged unsigned Linux AppImage."
           fi
 
       - name: Upload Linux artifacts
@@ -492,7 +485,6 @@ jobs:
           name: release-linux
           path: |
             desktop/Open-SIME-linux-x64.AppImage
-            desktop/Open-SIME-linux-x64.deb
           if-no-files-found: error
           retention-days: 1
 
@@ -523,7 +515,6 @@ jobs:
             "Open-SIME-macos-intel.dmg"
             "Open-SIME-macos-apple-silicon.dmg"
             "Open-SIME-linux-x64.AppImage"
-            "Open-SIME-linux-x64.deb"
           )
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "release-assets/$file" ]; then
@@ -582,9 +573,9 @@ jobs:
           fi
 
           if [ "$SIGN_LNX" = "true" ]; then
-            echo "- **Linux (x64 AppImage & deb)**: AppImage signed with GPG key" >> release-notes.md
+            echo "- **Linux (x64 AppImage)**: AppImage signed with GPG key" >> release-notes.md
           else
-            echo "- **Linux (x64 AppImage & deb)**: Unsigned build" >> release-notes.md
+            echo "- **Linux (x64 AppImage)**: Unsigned build" >> release-notes.md
           fi
 
           if [ "$SIGN_SIG" = "true" ]; then
@@ -622,7 +613,6 @@ jobs:
             "release-assets/Open-SIME-macos-intel.dmg"
             "release-assets/Open-SIME-macos-apple-silicon.dmg"
             "release-assets/Open-SIME-linux-x64.AppImage"
-            "release-assets/Open-SIME-linux-x64.deb"
             "release-assets/checksums.txt"
           )
           if [ -f "release-assets/checksums.txt.sig" ]; then

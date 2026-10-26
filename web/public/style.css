@@ -1041,8 +1041,6 @@ ul, ol {
 .main-col {
   width: 100%;
   min-width: 0;
-  max-width: 1240px;
-  margin-inline: auto;
 }
 
 .rail,
@@ -2773,10 +2771,6 @@ ul, ol {
     bottom: 24px;
   }
 
-  .main-col {
-    margin-inline: 0 auto;
-  }
-
   .absence {
     padding-right: 20px;
   }
@@ -2806,61 +2800,6 @@ ul, ol {
 
   .homework-card {
     grid-area: homework;
-  }
-}
-
-@media (min-width: 1240px) {
-  .shell {
-    grid-template-columns: 288px minmax(0, 1fr);
-  }
-
-  .rail {
-    align-items: stretch;
-    padding: 28px 16px;
-  }
-
-  .rail-brand {
-    flex-direction: row;
-    gap: 12px;
-    padding-left: 12px;
-  }
-
-  .brand-name {
-    display: block;
-  }
-
-  .rail-nav {
-    gap: 4px;
-  }
-
-  .rail .nav-item {
-    flex-direction: row;
-    gap: 14px;
-    height: 56px;
-    padding: 0 20px;
-    border-radius: var(--shape-full);
-    font-size: 0.9375rem;
-    transition: border-radius var(--spring-spatial-default), background-color var(--spring-effects-default), color var(--spring-effects-default);
-  }
-
-  .rail .nav-item:hover {
-    background: color-mix(in srgb, var(--on-surface) 8%, transparent);
-  }
-
-  .rail .nav-item:active {
-    border-radius: var(--shape-md);
-    transition: border-radius var(--spring-spatial-fast), background-color var(--spring-effects-fast), color var(--spring-effects-fast);
-  }
-
-  .rail .nav-pill, .rail .nav-item[aria-current="page"] .nav-pill {
-    width: auto;
-    height: auto;
-    background: none;
-  }
-
-  .rail .nav-item[aria-current="page"] {
-    background: var(--secondary-container);
-    color: var(--on-secondary-container);
   }
 }
 

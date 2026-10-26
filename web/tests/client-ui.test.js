@@ -571,6 +571,8 @@ test("Navigation UI: Navigation follows M3 window size classes (<600, 600-839, >
     css.includes("drawer-pinned-bottom") || css.includes("rail-bottom"),
     "CSS must style drawer bottom pinned section"
   );
+  assert.ok(!css.includes("max-width: 1240px"), "main-col must not cap desktop width to 1240px");
+  assert.ok(!css.includes("@media (min-width: 1240px)"), "Must not have legacy 1240px query overriding drawer navigation animations");
 });
 
 test("Buttons UI: Unified button tokens and variants in style.css", () => {

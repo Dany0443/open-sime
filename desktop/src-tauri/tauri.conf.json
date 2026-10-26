@@ -29,7 +29,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "dmg",
+      "appimage"
+    ],
     "category": "Education",
     "shortDescription": "Client neoficial pentru agenda.sime.md / Unofficial client for agenda.sime.md",
     "longDescription": "Open SIME este un client prietenos, rapid și privat pentru agenda electronică școlară agenda.sime.md, destinat elevilor și părinților.",
@@ -74,13 +78,6 @@
         }
       }
     },
-    "linux": {
-      "deb": {
-        "depends": [
-          "libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37",
-          "libayatana-appindicator3-1 | libappindicator3-1"
-        ]
-      }
-    }
+    "linux": {}
   }
 }
