@@ -89,6 +89,27 @@ fn make_instance_nonce() -> String {
   format!("sime-{}-{}", std::process::id(), nanos)
 }
 
+#[cfg(all(target_os = "linux", not(debug_assertions)))]
+fn resolve_linux_sidecar(app: &AppHandle) -> Option<tauri_plugin_shell::process::Command> {
+  // 1. If running inside an AppImage, locate the untampered binary in usr/share
+  if let Ok(appdir) = std::env::var("APPDIR") {
+    let p = std::path::Path::new(&appdir).join("usr/share/open-sime/open-sime-server");
+    if p.is_file() {
+      return Some(app.shell().command(p));
+    }
+  }
+  // 2. Relative to current executable: <exe_dir>/../share/open-sime/open-sime-server
+  if let Ok(exe_path) = std::env::current_exe() {
+    if let Some(parent) = exe_path.parent() {
+      let p = parent.join("../share/open-sime/open-sime-server");
+      if p.is_file() {
+        return Some(app.shell().command(p));
+      }
+    }
+  }
+  None
+}
+
 #[cfg(not(debug_assertions))]
 fn spawn_production_sidecar(app: &AppHandle) {
   {
@@ -127,11 +148,22 @@ fn spawn_production_sidecar(app: &AppHandle) {
   let instance_id = make_instance_nonce();
   let port_str = PRODUCTION_PORT.to_string();
 
-  let sidecar_cmd = match app
+  #[cfg(target_os = "linux")]
+  let sidecar_cmd_result = resolve_linux_sidecar(app)
+    .map(Ok)
+    .unwrap_or_else(|| {
+      app.shell()
+        .sidecar("open-sime-server")
+        .or_else(|_| app.shell().sidecar(SIDECAR_NAME))
+    });
+
+  #[cfg(not(target_os = "linux"))]
+  let sidecar_cmd_result = app
     .shell()
     .sidecar("open-sime-server")
-    .or_else(|_| app.shell().sidecar(SIDECAR_NAME))
-  {
+    .or_else(|_| app.shell().sidecar(SIDECAR_NAME));
+
+  let sidecar_cmd = match sidecar_cmd_result {
     Ok(cmd) => cmd
       .args([
           "--production",

@@ -78,6 +78,17 @@
         }
       }
     },
-    "linux": {}
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/open-sime/open-sime-server": "binaries/open-sime-server-real-x86_64-unknown-linux-gnu"
+        }
+      },
+      "deb": {
+        "files": {
+          "/usr/share/open-sime/open-sime-server": "binaries/open-sime-server-real-x86_64-unknown-linux-gnu"
+        }
+      }
+    }
   }
 }

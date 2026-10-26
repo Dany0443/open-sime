@@ -424,32 +424,6 @@ jobs:
         run: |
           echo "$GPG_KEY" | gpg --batch --import
 
-      - name: Setup Linux bundling environment
-        working-directory: desktop
-        run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-
-          if [ -f /usr/bin/patchelf ] && [ ! -f /usr/bin/patchelf.real ]; then
-            sudo cp /usr/bin/patchelf /usr/bin/patchelf.real
-          fi
-          cp scripts/patchelf-shim.sh "$RUNNER_TEMP/bin/patchelf"
-          chmod +x "$RUNNER_TEMP/bin/patchelf"
-          sudo cp scripts/patchelf-shim.sh /usr/bin/patchelf
-          sudo chmod +x /usr/bin/patchelf
-
-          if [ -f /usr/bin/strip ] && [ ! -f /usr/bin/strip.real ]; then
-            sudo cp /usr/bin/strip /usr/bin/strip.real
-          fi
-          cp scripts/strip-shim.sh "$RUNNER_TEMP/bin/strip"
-          chmod +x "$RUNNER_TEMP/bin/strip"
-          sudo cp scripts/strip-shim.sh /usr/bin/strip
-          sudo chmod +x /usr/bin/strip
-
-          echo "$RUNNER_TEMP/bin" >> $GITHUB_PATH
-          echo "PATCHELF=$RUNNER_TEMP/bin/patchelf" >> $GITHUB_ENV
-          echo "STRIP=$RUNNER_TEMP/bin/strip" >> $GITHUB_ENV
-          echo "NO_STRIP=1" >> $GITHUB_ENV
-
       - name: Build signed Linux AppImage
         if: env.SIGN_LINUX == 'true'
         working-directory: desktop
@@ -457,20 +431,12 @@ jobs:
           SIGN: "1"
           APPIMAGETOOL_FORCE_SIGN: "1"
           APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE || secrets.RELEASE_GPG_PASSPHRASE }}
-          NO_STRIP: "true"
-          PATCHELF: "${{ runner.temp }}/bin/patchelf"
-          STRIP: "${{ runner.temp }}/bin/strip"
         run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage
 
       - name: Build unsigned Linux AppImage
         if: env.SIGN_LINUX != 'true'
         working-directory: desktop
-        env:
-          NO_STRIP: "true"
-          PATCHELF: "${{ runner.temp }}/bin/patchelf"
-          STRIP: "${{ runner.temp }}/bin/strip"
         run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage
-
 
       - name: Rename and verify Linux artifacts
         working-directory: desktop
@@ -483,16 +449,7 @@ jobs:
           fi
 
           mv "$APPIMAGE_FILE" ./Open-SIME-linux-x64.AppImage
-          chmod +x ./Open-SIME-linux-x64.AppImage
-
-          rm -rf /tmp/release-appimage-verify
-          ./Open-SIME-linux-x64.AppImage --appimage-extract
-          mv squashfs-root /tmp/release-appimage-verify
-          OUTPUT=$(/tmp/release-appimage-verify/usr/bin/open-sime-server --port invalid 2>&1 || true)
-          echo "$OUTPUT"
-          echo "$OUTPUT" | grep -q "INVALID_PORT" || { echo "Sidecar in AppImage failed validation: $OUTPUT"; exit 1; }
-          rm -rf /tmp/release-appimage-verify
-          echo "Successfully verified Linux sidecar binary integrity inside AppImage"
+          node scripts/verify-appimage.mjs ./Open-SIME-linux-x64.AppImage
 
           if [ "$SIGN_LINUX" = "true" ]; then
             ./Open-SIME-linux-x64.AppImage --appimage-signature

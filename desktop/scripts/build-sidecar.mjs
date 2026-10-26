@@ -95,6 +95,36 @@ export function getSidecarOutputPath(targetTriple) {
   return path.join(BINARIES_DIR, `${SIDECAR_BASE_NAME}-${targetTriple}${targetInfo.ext}`);
 }
 
+export function getLinuxRealBinaryPath(targetTriple = "x86_64-unknown-linux-gnu") {
+  return path.join(BINARIES_DIR, `${SIDECAR_BASE_NAME}-real-${targetTriple}`);
+}
+
+export const LINUX_LAUNCHER_SCRIPT = `#!/bin/sh
+set -e
+# Open SIME Sidecar Launcher for Linux
+# Resolves and executes the untampered Node.js sidecar binary bundled in usr/share or beside this wrapper.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -n "$APPDIR" ] && [ -f "$APPDIR/usr/share/open-sime/open-sime-server" ]; then
+  exec "$APPDIR/usr/share/open-sime/open-sime-server" "$@"
+fi
+
+if [ -f "$SCRIPT_DIR/../share/open-sime/open-sime-server" ]; then
+  exec "$SCRIPT_DIR/../share/open-sime/open-sime-server" "$@"
+fi
+
+if [ -f "$SCRIPT_DIR/open-sime-server-real-x86_64-unknown-linux-gnu" ]; then
+  exec "$SCRIPT_DIR/open-sime-server-real-x86_64-unknown-linux-gnu" "$@"
+fi
+
+if [ -f "$SCRIPT_DIR/open-sime-server-real" ]; then
+  exec "$SCRIPT_DIR/open-sime-server-real" "$@"
+fi
+
+echo "Error: Open SIME sidecar executable not found in share/ or beside launcher" >&2
+exit 1
+`;
+
 function collectEmbeddedAssets(webRoot) {
   const assets = {};
   const indexHtmlPath = path.join(webRoot, "index.html");
@@ -211,25 +241,37 @@ export async function buildSidecar(options = {}) {
       logLevel: "warning",
     });
 
+    const isLinuxTarget = targetTriple === "x86_64-unknown-linux-gnu";
+    const actualBinaryPath = isLinuxTarget ? getLinuxRealBinaryPath(targetTriple) : outputPath;
+
     await pkgExec([
       bundledCjsPath,
       "--target",
       targetInfo.pkgTarget,
       "--output",
-      outputPath,
+      actualBinaryPath,
       "--public",
       "--no-bytecode",
       "--public-packages",
       "*",
     ]);
 
-    if (!fs.existsSync(outputPath)) {
-      throw new Error(`Expected sidecar binary was not created at ${outputPath}`);
+    if (!fs.existsSync(actualBinaryPath)) {
+      throw new Error(`Expected sidecar binary was not created at ${actualBinaryPath}`);
     }
 
     if (targetInfo.ext === ".exe") {
-      await stampWindowsPeMetadata(outputPath, DESKTOP_ROOT);
+      await stampWindowsPeMetadata(actualBinaryPath, DESKTOP_ROOT);
     } else {
+      try {
+        fs.chmodSync(actualBinaryPath, 0o755);
+      } catch {
+        // Ignore chmod errors on environments without POSIX permissions
+      }
+    }
+
+    if (isLinuxTarget) {
+      fs.writeFileSync(outputPath, LINUX_LAUNCHER_SCRIPT, { mode: 0o755 });
       try {
         fs.chmodSync(outputPath, 0o755);
       } catch {
@@ -237,11 +279,11 @@ export async function buildSidecar(options = {}) {
       }
     }
 
-    const stat = fs.statSync(outputPath);
+    const stat = fs.statSync(actualBinaryPath);
     console.log(
-      `Built Open SIME sidecar for ${targetTriple}: ${path.relative(DESKTOP_ROOT, outputPath)} (${(stat.size / (1024 * 1024)).toFixed(1)} MB)`
+      `Built Open SIME sidecar for ${targetTriple}: ${path.relative(DESKTOP_ROOT, actualBinaryPath)} (${(stat.size / (1024 * 1024)).toFixed(1)} MB)`
     );
-    return { targetTriple, outputPath, sizeBytes: stat.size };
+    return { targetTriple, outputPath, realBinaryPath: actualBinaryPath, sizeBytes: stat.size };
   } finally {
     fs.rmSync(STAGING_DIR, { recursive: true, force: true });
   }

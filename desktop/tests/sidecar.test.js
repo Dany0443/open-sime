@@ -15,7 +15,14 @@ import {
   isProductionSidecar,
   resolveDataDir,
 } from "../../web/server.js";
-import { buildSidecar, getSidecarOutputPath, resolveTargetTriple } from "../scripts/build-sidecar.mjs";
+import {
+  buildSidecar,
+  getLinuxRealBinaryPath,
+  getSidecarOutputPath,
+  LINUX_LAUNCHER_SCRIPT,
+  resolveTargetTriple,
+} from "../scripts/build-sidecar.mjs";
+import { computeSha256 } from "../scripts/verify-appimage.mjs";
 import { readProjectVersions, validateVersions, parseCliArgs } from "../scripts/check-versions.mjs";
 import { validateReleaseSecrets } from "../scripts/check-release-secrets.mjs";
 
@@ -62,7 +69,28 @@ test("Sidecar Build Script: target triple resolution and binary naming across al
       path.join("src-tauri", "binaries", "open-sime-server-x86_64-unknown-linux-gnu")
     )
   );
+  assert.ok(
+    getLinuxRealBinaryPath("x86_64-unknown-linux-gnu").endsWith(
+      path.join("src-tauri", "binaries", "open-sime-server-real-x86_64-unknown-linux-gnu")
+    )
+  );
+  assert.ok(LINUX_LAUNCHER_SCRIPT.includes("/usr/share/open-sime/open-sime-server"));
+  assert.ok(LINUX_LAUNCHER_SCRIPT.includes("open-sime-server-real"));
   assert.throws(() => getSidecarOutputPath("invalid-target-triple"), /Unsupported Rust target triple/);
+});
+
+test("AppImage Verification Helper: computeSha256 and checksum calculation", () => {
+  const tmpFile = path.join(os.tmpdir(), `test-sha-${Date.now()}.txt`);
+  fs.writeFileSync(tmpFile, "open-sime-sha-test-content", "utf8");
+  try {
+    const hash = computeSha256(tmpFile);
+    assert.equal(typeof hash, "string");
+    assert.equal(hash.length, 64);
+    // SHA256 of "open-sime-sha-test-content"
+    assert.equal(hash, "1a34f6d7db2b20b82dc5aceecdfe58353d37316203b42a063750cbcd3024e3d1");
+  } finally {
+    fs.rmSync(tmpFile, { force: true });
+  }
 });
 
 test("Version Consistency: package.json, tauri.conf.json, and Cargo.toml versions match and CLI validation works", () => {

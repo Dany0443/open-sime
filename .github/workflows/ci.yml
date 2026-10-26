@@ -121,58 +121,16 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Setup Linux bundling environment
-        if: runner.os == 'Linux'
-        working-directory: desktop
-        run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-
-          if [ -f /usr/bin/patchelf ] && [ ! -f /usr/bin/patchelf.real ]; then
-            sudo cp /usr/bin/patchelf /usr/bin/patchelf.real
-          fi
-          cp scripts/patchelf-shim.sh "$RUNNER_TEMP/bin/patchelf"
-          chmod +x "$RUNNER_TEMP/bin/patchelf"
-          sudo cp scripts/patchelf-shim.sh /usr/bin/patchelf
-          sudo chmod +x /usr/bin/patchelf
-
-          if [ -f /usr/bin/strip ] && [ ! -f /usr/bin/strip.real ]; then
-            sudo cp /usr/bin/strip /usr/bin/strip.real
-          fi
-          cp scripts/strip-shim.sh "$RUNNER_TEMP/bin/strip"
-          chmod +x "$RUNNER_TEMP/bin/strip"
-          sudo cp scripts/strip-shim.sh /usr/bin/strip
-          sudo chmod +x /usr/bin/strip
-
-          echo "$RUNNER_TEMP/bin" >> $GITHUB_PATH
-          echo "PATCHELF=$RUNNER_TEMP/bin/patchelf" >> $GITHUB_ENV
-          echo "STRIP=$RUNNER_TEMP/bin/strip" >> $GITHUB_ENV
-          echo "NO_STRIP=1" >> $GITHUB_ENV
-
       - name: Build Tauri application (unsigned preview)
         working-directory: desktop
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
         env:
           CI: "true"
-          NO_STRIP: "true"
-          PATCHELF: "${{ runner.temp }}/bin/patchelf"
-          STRIP: "${{ runner.temp }}/bin/strip"
 
       - name: Verify Linux sidecar binary in AppImage
         if: runner.os == 'Linux'
         working-directory: desktop
-        run: |
-          APPIMAGE_FILE=$(find src-tauri/target/${{ matrix.target }}/release/bundle/appimage -name "*.AppImage" | head -n 1)
-          if [ -n "$APPIMAGE_FILE" ]; then
-            chmod +x "$APPIMAGE_FILE"
-            rm -rf /tmp/ci-appimage-verify
-            "$APPIMAGE_FILE" --appimage-extract
-            mv squashfs-root /tmp/ci-appimage-verify
-            OUTPUT=$(/tmp/ci-appimage-verify/usr/bin/open-sime-server --port invalid 2>&1 || true)
-            echo "$OUTPUT"
-            echo "$OUTPUT" | grep -q "INVALID_PORT" || { echo "Sidecar in AppImage failed validation: $OUTPUT"; exit 1; }
-            rm -rf /tmp/ci-appimage-verify
-            echo "Successfully verified Linux sidecar binary integrity inside AppImage"
-          fi
+        run: node scripts/verify-appimage.mjs
 
       - name: Upload preview installer artifact
         uses: actions/upload-artifact@v4
