@@ -46,6 +46,10 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   const shimPath = path.join(DESKTOP_ROOT, "scripts", "patchelf-shim.sh");
   assert.ok(fs.existsSync(shimPath), "patchelf-shim.sh must exist");
   assert.ok(fs.readFileSync(shimPath, "utf8").includes("Skipping patchelf for sidecar"), "patchelf-shim must skip sidecar");
+  assert.ok(content.includes("scripts/strip-shim.sh"), "CI must install strip-shim.sh for Linux packaging");
+  const stripShimPath = path.join(DESKTOP_ROOT, "scripts", "strip-shim.sh");
+  assert.ok(fs.existsSync(stripShimPath), "strip-shim.sh must exist");
+  assert.ok(fs.readFileSync(stripShimPath, "utf8").includes("Skipping strip for sidecar"), "strip-shim must skip sidecar");
 
   // Must NOT expose or reference signing secrets in CI
   assert.ok(!content.includes("secrets.WINDOWS_CERTIFICATE"), "CI must not access WINDOWS_CERTIFICATE");
@@ -112,6 +116,7 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   // Linux sidecar protection and verification
   assert.ok(content.includes('NO_STRIP: "true"'), "Release must set NO_STRIP: true for Linux AppImage packaging");
   assert.ok(content.includes("scripts/patchelf-shim.sh"), "Release must install patchelf-shim.sh for Linux packaging");
+  assert.ok(content.includes("scripts/strip-shim.sh"), "Release must install strip-shim.sh for Linux packaging");
   assert.ok(content.includes("Successfully verified Linux sidecar binary integrity inside AppImage"), "Release must verify sidecar integrity");
 
   // Draft release creation

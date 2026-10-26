@@ -234,7 +234,7 @@ Official production releases require real signing credentials configured in **Se
 - **`LINUX_GPG_PASSPHRASE`** (or `RELEASE_GPG_PASSPHRASE`): Passphrase for the GPG private key.
 - **Signing Process**:
   - The workflow imports the GPG private key into the runner's keyring.
-  - Tauri's AppImage bundler runs with `NO_STRIP=true` and an intercepted `patchelf` shim for `open-sime-server`. This ensures `linuxdeploy` does not strip or alter the ELF section offsets of the embedded Node.js sidecar binary.
+  - Tauri's AppImage bundler runs with `NO_STRIP=true` and intercepted `patchelf` and `strip` shims for `open-sime-server`. This ensures `linuxdeploy` does not strip or alter the ELF section offsets of the embedded Node.js sidecar binary.
   - Tauri's AppImage bundler runs with `SIGN=1`, `APPIMAGETOOL_FORCE_SIGN=1`, and `APPIMAGETOOL_SIGN_PASSPHRASE`. If signing encounters any issue, `APPIMAGETOOL_FORCE_SIGN=1` immediately fails the build.
   - The sidecar binary integrity inside the resulting AppImage is extracted and verified via `--port invalid`.
   - The signature is verified using `Open-SIME-linux-x64.AppImage --appimage-signature`.
