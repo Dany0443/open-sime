@@ -33,3 +33,5 @@ sime-desktop/src-tauri/gen/schemas/
 sime-desktop/src-tauri/binaries/
 sime-desktop/.sidecar-staging/
 *.exe
+*.AppImage
+*.dmg

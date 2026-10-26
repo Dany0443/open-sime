@@ -12,7 +12,9 @@
 //   node scripts/stage-release-artifact.mjs --name-only --platform <windows|macos|linux>
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { validateVersions } from "./check-versions.mjs";
 
@@ -125,6 +127,139 @@ export function cleanStaleArtifacts(destDir, keepArtifactName) {
   return removed;
 }
 
+export function optimizeLinuxAppImage(appImagePath, desktopRoot = DESKTOP_ROOT) {
+  if (process.platform !== "linux" || !fs.existsSync(appImagePath)) {
+    return false;
+  }
+
+  // Skip optimization if signing is active or explicitly disabled
+  if (
+    process.env.SIME_NO_APPIMAGE_OPTIMIZE === "1" ||
+    process.env.APPIMAGETOOL_FORCE_SIGN === "1" ||
+    process.env.SIGN === "1"
+  ) {
+    return false;
+  }
+
+  const homedir = os.homedir();
+  const tauriCache = path.join(homedir, ".cache", "tauri");
+  const pluginAppImage = path.join(tauriCache, "linuxdeploy-plugin-appimage.AppImage");
+  let runtimeFile = process.env.LDAI_RUNTIME_FILE || path.join(tauriCache, "runtime-x86_64");
+  if (!fs.existsSync(runtimeFile)) {
+    const altRuntime = path.join(tauriCache, "AppRun-x86_64");
+    if (fs.existsSync(altRuntime)) runtimeFile = altRuntime;
+  }
+
+  let toolAppRun = "";
+  let toolTempDir = null;
+
+  try {
+    const whichOut = execFileSync("which", ["appimagetool"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (whichOut && fs.existsSync(whichOut)) {
+      toolAppRun = whichOut;
+    }
+  } catch {
+    // appimagetool not in PATH
+  }
+
+  if (!toolAppRun && fs.existsSync(pluginAppImage)) {
+    toolTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "sime-tool-"));
+    try {
+      execFileSync(pluginAppImage, ["--appimage-extract"], { cwd: toolTempDir, stdio: "ignore" });
+      const extractedAppRun = path.join(toolTempDir, "squashfs-root", "appimagetool-prefix", "AppRun");
+      if (fs.existsSync(extractedAppRun)) {
+        toolAppRun = extractedAppRun;
+      }
+    } catch {
+      // extraction failed
+    }
+  }
+
+  if (!toolAppRun) {
+    return false;
+  }
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sime-appimage-opt-"));
+  try {
+    execFileSync(appImagePath, ["--appimage-extract"], { cwd: tmpDir, stdio: "ignore" });
+    const appDir = path.join(tmpDir, "squashfs-root");
+    if (!fs.existsSync(appDir)) return false;
+
+    // 1. Ensure genuine high-resolution PNG icons at AppDir root
+    const iconSource = path.join(desktopRoot, "src-tauri", "icons", "icon.png");
+    const fallbackIcon = path.join(desktopRoot, "src-tauri", "icons", "128x128@2x.png");
+    const bestIcon = fs.existsSync(iconSource) ? iconSource : fallbackIcon;
+
+    if (fs.existsSync(bestIcon)) {
+      const iconData = fs.readFileSync(bestIcon);
+      for (const iconName of [".DirIcon", "open-sime-desktop.png", "Open SIME.png"]) {
+        const iconPath = path.join(appDir, iconName);
+        try {
+          fs.rmSync(iconPath, { force: true });
+        } catch {
+          // ignore rm error
+        }
+        fs.writeFileSync(iconPath, iconData);
+      }
+    }
+
+    // 2. Ensure openSUSE/Fedora WebKit helper binaries are present if host requires them
+    const hostWebKitHelpers = "/usr/libexec/libwebkit2gtk-4_1-0";
+    const appDirWebKitHelpers = path.join(appDir, "usr", "libexec", "libwebkit2gtk-4_1-0");
+    if (fs.existsSync(hostWebKitHelpers) && !fs.existsSync(appDirWebKitHelpers)) {
+      fs.mkdirSync(path.dirname(appDirWebKitHelpers), { recursive: true });
+      fs.cpSync(hostWebKitHelpers, appDirWebKitHelpers, { recursive: true });
+    }
+
+    // 3. Ensure frontend binary is stripped if strip command is available
+    const appBinary = path.join(appDir, "usr", "bin", "open-sime-desktop");
+    if (fs.existsSync(appBinary)) {
+      try {
+        execFileSync("strip", ["--strip-unneeded", appBinary], { stdio: "ignore" });
+      } catch {
+        // ignore strip failure
+      }
+    }
+
+    // 4. Repackage with optimal zstd compression
+    const optimizedAppImage = path.join(tmpDir, "optimized.AppImage");
+    const appImageArgs = [
+      "--mksquashfs-opt", "-Xcompression-level",
+      "--mksquashfs-opt", "19",
+      "--mksquashfs-opt", "-b",
+      "--mksquashfs-opt", "1M",
+    ];
+    if (fs.existsSync(runtimeFile)) {
+      appImageArgs.push("--runtime-file", runtimeFile);
+    }
+    appImageArgs.push(appDir, optimizedAppImage);
+
+    execFileSync(toolAppRun, appImageArgs, {
+      env: { ...process.env, ARCH: "x86_64" },
+      stdio: "ignore",
+    });
+
+    if (fs.existsSync(optimizedAppImage)) {
+      const origSize = fs.statSync(appImagePath).size;
+      const newSize = fs.statSync(optimizedAppImage).size;
+      fs.copyFileSync(optimizedAppImage, appImagePath);
+      fs.chmodSync(appImagePath, 0o755);
+      console.log(
+        `✓ Optimized and minified AppImage with zstd-19 and embedded icon: ${(origSize / (1024 * 1024)).toFixed(1)} MB -> ${(newSize / (1024 * 1024)).toFixed(1)} MB`
+      );
+      return true;
+    }
+  } catch (err) {
+    console.warn(`Note: AppImage post-minification skipped: ${err.message}`);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (toolTempDir) {
+      fs.rmSync(toolTempDir, { recursive: true, force: true });
+    }
+  }
+  return false;
+}
+
 export function stageArtifact(options = {}) {
   const desktopRoot = options.desktopRoot || DESKTOP_ROOT;
   const destDir = options.destDir || desktopRoot;
@@ -142,6 +277,11 @@ export function stageArtifact(options = {}) {
 
   // Remove old or conflicting artifacts
   const cleaned = cleanStaleArtifacts(destDir, standardName);
+  const repoRoot = path.resolve(desktopRoot, "..");
+  if (repoRoot !== destDir && fs.existsSync(repoRoot)) {
+    const cleanedRepo = cleanStaleArtifacts(repoRoot, "");
+    cleaned.push(...cleanedRepo);
+  }
   if (cleaned.length > 0) {
     console.log(`Cleaned stale artifact(s): ${cleaned.join(", ")}`);
   }
@@ -154,6 +294,7 @@ export function stageArtifact(options = {}) {
     } catch {
       // ignore on non-posix systems
     }
+    optimizeLinuxAppImage(destPath, desktopRoot);
   }
 
   const stat = fs.statSync(destPath);
