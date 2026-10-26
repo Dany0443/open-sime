@@ -4,21 +4,25 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate-release:
     name: Validate Tag, Versions, Secrets & Tests
     runs-on: ubuntu-22.04
+    outputs:
+      sign_windows: ${{ steps.check-secrets.outputs.sign_windows }}
+      sign_macos: ${{ steps.check-secrets.outputs.sign_macos }}
+      sign_linux: ${{ steps.check-secrets.outputs.sign_linux }}
+      sign_checksums: ${{ steps.check-secrets.outputs.sign_checksums }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -38,7 +42,8 @@ jobs:
         working-directory: desktop
         run: node scripts/check-versions.mjs --tag "${{ github.ref_name }}"
 
-      - name: Validate required signing credentials
+      - name: Validate release signing credentials
+        id: check-secrets
         working-directory: desktop
         run: node scripts/check-release-secrets.mjs
         env:
@@ -58,24 +63,34 @@ jobs:
           RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
 
-      - name: Syntax and lint checks
+      - name: Web checks
+        working-directory: web
+        run: npm run check
+
+      - name: Web unit tests
+        working-directory: web
+        run: npm test
+
+      - name: Desktop checks
         working-directory: desktop
         run: npm run check
 
-      - name: Run test suite
+      - name: Desktop unit tests
         working-directory: desktop
         run: npm test
 
   build-windows:
-    name: Build & Sign Windows x64 (NSIS)
+    name: Build & Package Windows x64 (NSIS)
     needs: validate-release
     runs-on: windows-latest
+    env:
+      SIGN_WINDOWS: ${{ needs.validate-release.outputs.sign_windows }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -84,12 +99,12 @@ jobs:
             desktop/package-lock.json
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: x86_64-pc-windows-msvc
 
       - name: Rust build cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2.7.5
         with:
           workspaces: desktop/src-tauri
 
@@ -102,6 +117,7 @@ jobs:
         run: npm ci
 
       - name: Import Authenticode certificate
+        if: env.SIGN_WINDOWS == 'true'
         id: import-cert
         shell: pwsh
         env:
@@ -129,6 +145,7 @@ jobs:
         run: node scripts/build-sidecar.mjs --target x86_64-pc-windows-msvc
 
       - name: Sign sidecar executable
+        if: env.SIGN_WINDOWS == 'true'
         shell: pwsh
         working-directory: desktop
         run: |
@@ -143,38 +160,42 @@ jobs:
           Write-Host "Sidecar Authenticode signature valid."
 
       - name: Build signed Tauri NSIS package
+        if: env.SIGN_WINDOWS == 'true'
         working-directory: desktop
         run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis --config "{\`"bundle\`":{\`"windows\`":{\`"certificateThumbprint\`":\`"$env:THUMBPRINT\`"}}}"
 
-      - name: Verify NSIS installer signature and rename
+      - name: Build unsigned Tauri NSIS package
+        if: env.SIGN_WINDOWS != 'true'
+        working-directory: desktop
+        run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Stage and verify NSIS installer
         shell: pwsh
         working-directory: desktop
         run: |
-          $installer = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
-          if (-not $installer) {
-              Write-Error "NSIS installer output not found in target bundle directory."
+          $nsisExe = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $nsisExe) {
+              Write-Error "NSIS installer not found in bundle output."
               exit 1
           }
 
-          # Ensure the installer is signed (sign with cert if bundler didn't invoke signtool directly)
-          $sig = Get-AuthenticodeSignature -FilePath $installer.FullName
-          if ($sig.Status -ne "Valid") {
-              $cert = Get-Item "Cert:\CurrentUser\My\$env:THUMBPRINT"
-              Set-AuthenticodeSignature -FilePath $installer.FullName -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
-              $sig = Get-AuthenticodeSignature -FilePath $installer.FullName
+          Move-Item -Path $nsisExe.FullName -Destination "./Open-SIME-windows-x64-setup.exe" -Force
+          Write-Host "Staged installer as ./Open-SIME-windows-x64-setup.exe"
+
+          if ($env:SIGN_WINDOWS -eq "true") {
+              $sig = Get-AuthenticodeSignature -FilePath "./Open-SIME-windows-x64-setup.exe"
+              Write-Host "Installer signature status: $($sig.Status), Signer: $($sig.SignerCertificate.Subject)"
+              if ($sig.Status -ne "Valid") {
+                  Write-Error "Installer signature verification failed: $($sig.StatusMessage)"
+                  exit 1
+              }
+              Write-Host "Verified Windows installer Authenticode signature."
+          } else {
+              Write-Host "Built unsigned Windows installer Open-SIME-windows-x64-setup.exe"
           }
 
-          if ($sig.Status -ne "Valid") {
-              Write-Error "NSIS installer signature verification failed: $($sig.Status) - $($sig.StatusMessage)"
-              exit 1
-          }
-          Write-Host "Verified Authenticode signature for $($installer.Name): $($sig.SignerCertificate.Subject)"
-
-          Move-Item -Path $installer.FullName -Destination "./Open-SIME-windows-x64-setup.exe" -Force
-          Write-Host "Final installer staged as Open-SIME-windows-x64-setup.exe"
-
-      - name: Remove certificate from store (cleanup)
-        if: always()
+      - name: Cleanup certificate from store
+        if: always() && env.SIGN_WINDOWS == 'true'
         shell: pwsh
         run: |
           if ($env:THUMBPRINT) {
@@ -192,7 +213,7 @@ jobs:
           }
 
       - name: Upload Windows installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1
         with:
           name: release-windows
           path: desktop/Open-SIME-windows-x64-setup.exe
@@ -200,7 +221,7 @@ jobs:
           retention-days: 1
 
   build-macos:
-    name: Build, Sign & Notarize macOS (${{ matrix.name }})
+    name: Build & Package macOS (${{ matrix.name }})
     needs: validate-release
     strategy:
       fail-fast: false
@@ -214,12 +235,14 @@ jobs:
             artifact_name: Open-SIME-macos-apple-silicon.dmg
 
     runs-on: macos-latest
+    env:
+      SIGN_MACOS: ${{ needs.validate-release.outputs.sign_macos }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -228,12 +251,12 @@ jobs:
             desktop/package-lock.json
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Rust build cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2.7.5
         with:
           workspaces: desktop/src-tauri
 
@@ -246,6 +269,7 @@ jobs:
         run: npm ci
 
       - name: Setup temporary macOS signing keychain
+        if: env.SIGN_MACOS == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -266,7 +290,7 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
 
       - name: Setup App Store Connect API Key for notarization
-        if: env.APPLE_API_KEY_BASE64 != '' && env.APPLE_API_KEY != ''
+        if: env.SIGN_MACOS == 'true' && env.APPLE_API_KEY_BASE64 != '' && env.APPLE_API_KEY != ''
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
@@ -281,6 +305,7 @@ jobs:
         run: node scripts/build-sidecar.mjs --target ${{ matrix.target }}
 
       - name: Sign sidecar executable
+        if: env.SIGN_MACOS == 'true'
         working-directory: desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -290,6 +315,7 @@ jobs:
             "src-tauri/binaries/open-sime-server-${{ matrix.target }}"
 
       - name: Build signed and notarized DMG
+        if: env.SIGN_MACOS == 'true'
         working-directory: desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -300,6 +326,11 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: npx tauri build --target ${{ matrix.target }} --bundles dmg
+
+      - name: Build unsigned DMG
+        if: env.SIGN_MACOS != 'true'
+        working-directory: desktop
         run: npx tauri build --target ${{ matrix.target }} --bundles dmg
 
       - name: Rename and verify DMG
@@ -314,17 +345,18 @@ jobs:
           mv "$DMG_FILE" "./${{ matrix.artifact_name }}"
           echo "Staged DMG as ./${{ matrix.artifact_name }}"
 
-          # Attempt stapling if not stapled by bundler
-          xcrun stapler staple "./${{ matrix.artifact_name }}" || true
-
-          # Strict signature and Gatekeeper assessment verification
-          codesign --verify --deep --strict --verbose=2 "./${{ matrix.artifact_name }}"
-          spctl --assess --type open --context context:primary-signature --verbose=2 "./${{ matrix.artifact_name }}"
-          xcrun stapler validate "./${{ matrix.artifact_name }}"
-          echo "Verified macOS code signature and notarization for ${{ matrix.artifact_name }}"
+          if [ "$SIGN_MACOS" = "true" ]; then
+            xcrun stapler staple "./${{ matrix.artifact_name }}" || true
+            codesign --verify --deep --strict --verbose=2 "./${{ matrix.artifact_name }}"
+            spctl --assess --type open --context context:primary-signature --verbose=2 "./${{ matrix.artifact_name }}"
+            xcrun stapler validate "./${{ matrix.artifact_name }}"
+            echo "Verified macOS code signature and notarization for ${{ matrix.artifact_name }}"
+          else
+            echo "Staged unsigned macOS DMG: ${{ matrix.artifact_name }}"
+          fi
 
       - name: Cleanup temporary credentials
-        if: always()
+        if: always() && env.SIGN_MACOS == 'true'
         run: |
           rm -rf ~/.appstoreconnect/private_keys
           rm -f "$RUNNER_TEMP/certificate.p12"
@@ -333,7 +365,7 @@ jobs:
           fi
 
       - name: Upload macOS DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1
         with:
           name: release-${{ matrix.name }}
           path: desktop/${{ matrix.artifact_name }}
@@ -341,15 +373,17 @@ jobs:
           retention-days: 1
 
   build-linux:
-    name: Build & Sign Linux x64 (AppImage & deb)
+    name: Build & Package Linux x64 (AppImage & deb)
     needs: validate-release
     runs-on: ubuntu-22.04
+    env:
+      SIGN_LINUX: ${{ needs.validate-release.outputs.sign_linux }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -358,12 +392,12 @@ jobs:
             desktop/package-lock.json
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: x86_64-unknown-linux-gnu
 
       - name: Rust build cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2.7.5
         with:
           workspaces: desktop/src-tauri
 
@@ -386,6 +420,7 @@ jobs:
         run: npm ci
 
       - name: Import GPG private key
+        if: env.SIGN_LINUX == 'true'
         env:
           GPG_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY || secrets.RELEASE_GPG_PRIVATE_KEY }}
         run: |
@@ -396,11 +431,17 @@ jobs:
         run: node scripts/build-sidecar.mjs --target x86_64-unknown-linux-gnu
 
       - name: Build signed Linux AppImage and deb
+        if: env.SIGN_LINUX == 'true'
         working-directory: desktop
         env:
           SIGN: "1"
           APPIMAGETOOL_FORCE_SIGN: "1"
           APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE || secrets.RELEASE_GPG_PASSPHRASE }}
+        run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb
+
+      - name: Build unsigned Linux AppImage and deb
+        if: env.SIGN_LINUX != 'true'
+        working-directory: desktop
         run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb
 
       - name: Rename and verify Linux artifacts
@@ -418,12 +459,15 @@ jobs:
           mv "$DEB_FILE" ./Open-SIME-linux-x64.deb
           chmod +x ./Open-SIME-linux-x64.AppImage
 
-          # Verify embedded signature in AppImage
-          ./Open-SIME-linux-x64.AppImage --appimage-signature
-          echo "Verified embedded AppImage signature."
+          if [ "$SIGN_LINUX" = "true" ]; then
+            ./Open-SIME-linux-x64.AppImage --appimage-signature
+            echo "Verified embedded AppImage signature."
+          else
+            echo "Staged unsigned Linux AppImage and deb."
+          fi
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1
         with:
           name: release-linux
           path: |
@@ -436,15 +480,17 @@ jobs:
     name: Aggregate Artifacts, Sign Checksums & Publish Release
     needs: [validate-release, build-windows, build-macos, build-linux]
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Create release assets directory
         run: mkdir -p release-assets
 
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: release-assets
           pattern: release-*
@@ -475,6 +521,7 @@ jobs:
           cat checksums.txt
 
       - name: Create detached GPG signature for checksums
+        if: needs.validate-release.outputs.sign_checksums == 'true'
         working-directory: release-assets
         env:
           GPG_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY || secrets.LINUX_GPG_PRIVATE_KEY }}
@@ -486,21 +533,87 @@ jobs:
           gpg --verify checksums.txt.sig checksums.txt
           echo "✓ Detached GPG signature created and verified."
 
-      - name: Publish GitHub Release
+      - name: Prepare draft release notes and publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGN_WIN: ${{ needs.validate-release.outputs.sign_windows }}
+          SIGN_MAC: ${{ needs.validate-release.outputs.sign_macos }}
+          SIGN_LNX: ${{ needs.validate-release.outputs.sign_linux }}
+          SIGN_SIG: ${{ needs.validate-release.outputs.sign_checksums }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            release-assets/Open-SIME-windows-x64-setup.exe \
-            release-assets/Open-SIME-macos-intel.dmg \
-            release-assets/Open-SIME-macos-apple-silicon.dmg \
-            release-assets/Open-SIME-linux-x64.AppImage \
-            release-assets/Open-SIME-linux-x64.deb \
-            release-assets/checksums.txt \
-            release-assets/checksums.txt.sig \
-            --title "Open SIME ${{ github.ref_name }}" \
-            --notes "Production release ${{ github.ref_name }} of Open SIME for Windows, macOS, and Linux. See checksums.txt and checksums.txt.sig for verification." \
-            --draft=false \
-            --prerelease=false
-          echo "✓ Release ${{ github.ref_name }} published successfully with all signed platform installers."
+          cat << 'EOF' > release-notes.md
+          ## Open SIME ${{ github.ref_name }}
 
+          Production release ${{ github.ref_name }} of Open SIME for Windows, macOS, and Linux.
+
+          ### Signing Status
+          EOF
+
+          if [ "$SIGN_WIN" = "true" ]; then
+            echo "- **Windows (x64 NSIS)**: Signed with Authenticode certificate" >> release-notes.md
+          else
+            echo "- **Windows (x64 NSIS)**: Unsigned build" >> release-notes.md
+          fi
+
+          if [ "$SIGN_MAC" = "true" ]; then
+            echo "- **macOS (Intel & Apple Silicon DMG)**: Signed with Developer ID and notarized by Apple" >> release-notes.md
+          else
+            echo "- **macOS (Intel & Apple Silicon DMG)**: Unsigned build" >> release-notes.md
+          fi
+
+          if [ "$SIGN_LNX" = "true" ]; then
+            echo "- **Linux (x64 AppImage & deb)**: AppImage signed with GPG key" >> release-notes.md
+          else
+            echo "- **Linux (x64 AppImage & deb)**: Unsigned build" >> release-notes.md
+          fi
+
+          if [ "$SIGN_SIG" = "true" ]; then
+            echo "- **Checksums**: Signed with detached GPG signature (checksums.txt.sig)" >> release-notes.md
+          else
+            echo "- **Checksums**: Unsigned checksums manifest (checksums.txt)" >> release-notes.md
+          fi
+
+          cat << 'EOF' >> release-notes.md
+
+          ### Platform Notes for Unsigned Builds
+          - **Windows**: Microsoft Defender SmartScreen may display *"Windows protected your PC"*. Click **More info**, then click **Run anyway** to launch.
+          - **macOS**: Gatekeeper may state the app cannot be opened because Apple cannot check it for malicious software. In Finder, open the **Applications** folder, right-click (or Control-click) **Open SIME**, select **Open**, and click **Open** in the confirmation dialog.
+          - **Linux**: Make the AppImage executable (`chmod +x Open-SIME-linux-x64.AppImage`) before launching.
+
+          ### Checksum Verification
+          To verify download integrity against `checksums.txt`:
+          ```bash
+          sha256sum -c checksums.txt
+          ```
+          EOF
+
+          if [ "$SIGN_SIG" = "true" ]; then
+            cat << 'EOF' >> release-notes.md
+
+          To verify the GPG signature of the checksums manifest:
+          ```bash
+          gpg --verify checksums.txt.sig checksums.txt
+          ```
+          EOF
+          fi
+
+          RELEASE_ASSETS=(
+            "release-assets/Open-SIME-windows-x64-setup.exe"
+            "release-assets/Open-SIME-macos-intel.dmg"
+            "release-assets/Open-SIME-macos-apple-silicon.dmg"
+            "release-assets/Open-SIME-linux-x64.AppImage"
+            "release-assets/Open-SIME-linux-x64.deb"
+            "release-assets/checksums.txt"
+          )
+          if [ -f "release-assets/checksums.txt.sig" ]; then
+            RELEASE_ASSETS+=("release-assets/checksums.txt.sig")
+          fi
+
+          gh release create "${{ github.ref_name }}" \
+            "${RELEASE_ASSETS[@]}" \
+            --title "Open SIME ${{ github.ref_name }}" \
+            --notes-file release-notes.md \
+            --draft=true \
+            --prerelease=false
+
+          echo "✓ Draft release ${{ github.ref_name }} created successfully."

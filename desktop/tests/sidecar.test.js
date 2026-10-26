@@ -340,16 +340,28 @@ test("Packaged Sidecar Binary: runs standalone without Node.js in PATH and serve
 });
 
 test("Release Secrets: validateReleaseSecrets validates required signing secrets", () => {
-  // 1. Empty environment fails and reports all missing secrets
+  // 1. Empty environment marks platforms as unconfigured (optional signing) and succeeds
   const emptyRes = validateReleaseSecrets({});
-  assert.equal(emptyRes.valid, false);
-  assert.ok(emptyRes.missing.length >= 6);
-  assert.ok(emptyRes.missing.some((m) => m.secret === "WINDOWS_CERTIFICATE"));
-  assert.ok(emptyRes.missing.some((m) => m.secret === "APPLE_CERTIFICATE"));
-  assert.ok(emptyRes.missing.some((m) => m.platform === "Linux"));
-  assert.ok(emptyRes.missing.some((m) => m.platform === "Release"));
+  assert.equal(emptyRes.valid, true);
+  assert.equal(emptyRes.errors.length, 0);
+  assert.equal(emptyRes.sign_windows, false);
+  assert.equal(emptyRes.sign_macos, false);
+  assert.equal(emptyRes.sign_linux, false);
+  assert.equal(emptyRes.sign_checksums, false);
 
-  // 2. Full valid environment passes
+  // 2. Partial configuration fails fast with error messages
+  const partialWin = validateReleaseSecrets({ WINDOWS_CERTIFICATE: "cert-only" });
+  assert.equal(partialWin.valid, false);
+  assert.ok(partialWin.errors.some((e) => e.includes("WINDOWS_CERTIFICATE_PASSWORD")));
+
+  const partialMac = validateReleaseSecrets({
+    APPLE_CERTIFICATE: "cert",
+    APPLE_CERTIFICATE_PASSWORD: "pwd",
+  });
+  assert.equal(partialMac.valid, false);
+  assert.ok(partialMac.errors.some((e) => e.includes("APPLE_SIGNING_IDENTITY")));
+
+  // 3. Full valid environment passes and enables signing
   const validEnv = {
     WINDOWS_CERTIFICATE: "base64-dummy-pfx",
     WINDOWS_CERTIFICATE_PASSWORD: "secret-password",
@@ -367,9 +379,13 @@ test("Release Secrets: validateReleaseSecrets validates required signing secrets
   };
   const validRes = validateReleaseSecrets(validEnv);
   assert.equal(validRes.valid, true);
-  assert.equal(validRes.missing.length, 0);
+  assert.equal(validRes.errors.length, 0);
+  assert.equal(validRes.sign_windows, true);
+  assert.equal(validRes.sign_macos, true);
+  assert.equal(validRes.sign_linux, true);
+  assert.equal(validRes.sign_checksums, true);
 
-  // 3. Apple ID fallback for notarization works
+  // 4. Apple ID fallback for notarization works
   const appleIdEnv = {
     ...validEnv,
     APPLE_API_KEY: "",
@@ -380,6 +396,7 @@ test("Release Secrets: validateReleaseSecrets validates required signing secrets
   };
   const appleIdRes = validateReleaseSecrets(appleIdEnv);
   assert.equal(appleIdRes.valid, true);
-  assert.equal(appleIdRes.missing.length, 0);
+  assert.equal(appleIdRes.errors.length, 0);
+  assert.equal(appleIdRes.sign_macos, true);
 });
 

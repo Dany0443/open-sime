@@ -50,16 +50,22 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   // Must not contain tabs (invalid YAML)
   assert.ok(!content.includes("\t"), "release.yml must use spaces, not tabs");
 
-  // Write permissions for release publishing
-  assert.ok(content.includes("permissions:\n  contents: write"), "Release must have contents: write permission");
+  // Workflow permissions: read-only at workflow level, write only for publish job
+  assert.ok(content.includes("permissions:\n  contents: read"), "Release must have contents: read at workflow level");
+  assert.ok(content.includes("permissions:\n      contents: write"), "Publish job must have contents: write permission");
 
-  // Tag trigger
+  // Tag trigger only (no untagged workflow_dispatch)
+  assert.ok(!content.includes("workflow_dispatch"), "Release workflow must not have workflow_dispatch");
   assert.ok(content.includes('tags:\n      - "v*"'), "Release must trigger on v* tags");
 
-  // Validation job
+  // Validation job & signing outputs
   assert.ok(content.includes("validate-release:"), "Release must have validate-release job");
   assert.ok(content.includes("check-versions.mjs --tag"), "Release must validate git tag against project versions");
   assert.ok(content.includes("check-release-secrets.mjs"), "Release must validate required signing secrets");
+  assert.ok(content.includes("sign_windows:"), "Release outputs must include sign_windows");
+  assert.ok(content.includes("sign_macos:"), "Release outputs must include sign_macos");
+  assert.ok(content.includes("sign_linux:"), "Release outputs must include sign_linux");
+  assert.ok(content.includes("sign_checksums:"), "Release outputs must include sign_checksums");
 
   // Downstream jobs depend on validation
   assert.ok(content.includes("needs: validate-release"), "Build jobs must require validate-release");
@@ -92,5 +98,8 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   assert.ok(content.includes("spctl --assess"), "Release must verify macOS Gatekeeper assessment");
   assert.ok(content.includes("xcrun stapler validate"), "Release must verify macOS notarization ticket");
   assert.ok(content.includes("--appimage-signature"), "Release must verify Linux AppImage signature");
+
+  // Draft release creation
+  assert.ok(content.includes("--draft=true"), "Release must create a draft release");
 });
 
