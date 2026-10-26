@@ -16,9 +16,6 @@ export function getGitCommitsSince(prevTag, repoRoot = REPO_ROOT) {
   try {
     const range = prevTag ? `${prevTag}..HEAD` : "HEAD";
     const args = ["log", range, "--pretty=format:* %s (%h)", "--no-merges"];
-    if (!prevTag) {
-      args.push("-n", "50");
-    }
     const out = execFileSync("git", args, {
       cwd: repoRoot,
       encoding: "utf8",
@@ -29,6 +26,21 @@ export function getGitCommitsSince(prevTag, repoRoot = REPO_ROOT) {
       .map((l) => l.trim())
       .filter(Boolean);
   } catch {
+    if (prevTag) {
+      try {
+        const out = execFileSync("git", ["log", "HEAD", "--pretty=format:* %s (%h)", "--no-merges"], {
+          cwd: repoRoot,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+        return out
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
     return [];
   }
 }
@@ -37,6 +49,7 @@ export function generateReleaseNotes({
   version,
   prevTag = null,
   commits = null,
+  customNotes = null,
   signStatus = {},
   repoRoot = REPO_ROOT,
 } = {}) {
@@ -65,16 +78,21 @@ export function generateReleaseNotes({
 
   lines.push("");
   lines.push("### Changes");
-  const commitList = Array.isArray(commits)
-    ? commits
-    : getGitCommitsSince(prevTag, repoRoot);
 
-  if (commitList.length > 0) {
-    for (const c of commitList) {
-      lines.push(c.startsWith("* ") ? c : `* ${c}`);
-    }
+  if (customNotes && String(customNotes).trim()) {
+    lines.push(String(customNotes).trim());
   } else {
-    lines.push("* Initial release improvements and bug fixes.");
+    const commitList = Array.isArray(commits)
+      ? commits
+      : getGitCommitsSince(prevTag, repoRoot);
+
+    if (commitList.length > 0) {
+      for (const c of commitList) {
+        lines.push(c.startsWith("* ") ? c : `* ${c}`);
+      }
+    } else {
+      lines.push("* Initial release improvements and bug fixes.");
+    }
   }
 
   lines.push("");
@@ -157,6 +175,20 @@ export function parseCliArgs(argv = process.argv) {
       i += 1;
     } else if (arg.startsWith("--output=")) {
       options.output = arg.slice("--output=".length);
+    } else if (arg === "--notes-file" && argv[i + 1]) {
+      try {
+        options.customNotes = fs.readFileSync(path.resolve(argv[i + 1]), "utf8");
+      } catch {}
+      i += 1;
+    } else if (arg.startsWith("--notes-file=")) {
+      try {
+        options.customNotes = fs.readFileSync(path.resolve(arg.slice("--notes-file=".length)), "utf8");
+      } catch {}
+    } else if (arg === "--custom-notes" && argv[i + 1]) {
+      options.customNotes = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith("--custom-notes=")) {
+      options.customNotes = arg.slice("--custom-notes=".length);
     } else if (arg === "--sign-windows") {
       options.signStatus.windows = argv[i + 1] === "true";
       i += 1;

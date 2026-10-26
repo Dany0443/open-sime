@@ -77,6 +77,22 @@ test("Release Notes CLI: generates and writes release notes to file", () => {
     assert.ok(content2.includes("## Open SIME v1.2.0"));
     assert.ok(content2.includes("Changes since v1.1.0:"));
     assert.ok(content2.includes("Signed with Authenticode certificate"));
+
+    // 3. Custom notes invocation (e.g. from GitHub generate-notes API)
+    execFileSync(
+      "node",
+      [
+        SCRIPT_PATH,
+        "--version", "1.3.0",
+        "--prev-tag", "v1.2.0",
+        "--custom-notes", "### Highlights\n* Awesome feature",
+        "--output", outFile,
+      ],
+      { cwd: DESKTOP_ROOT, encoding: "utf8" }
+    );
+    const content3 = fs.readFileSync(outFile, "utf8");
+    assert.ok(content3.includes("## Open SIME v1.3.0"));
+    assert.ok(content3.includes("* Awesome feature"));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

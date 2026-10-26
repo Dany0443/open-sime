@@ -7,9 +7,6 @@ on:
         description: "Release version override (defaults to authoritative version from package.json)"
         required: false
         default: ""
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read
@@ -35,6 +32,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch git tags
+        run: git fetch --tags --force
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -59,8 +59,6 @@ jobs:
           INPUT_VER="${{ github.event.inputs.version }}"
           if [ -n "$INPUT_VER" ]; then
             node scripts/check-versions.mjs --expected "$INPUT_VER"
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            node scripts/check-versions.mjs --tag "${{ github.ref_name }}"
           else
             node scripts/check-versions.mjs
           fi
@@ -465,20 +463,38 @@ jobs:
           retention-days: 1
 
   publish-release:
-    name: Aggregate Artifacts, Sign Checksums & Publish Release
+    name: Aggregate Artifacts, Sign Checksums & Create Draft Release
     needs: [validate-release, build-windows, build-macos, build-linux]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch git tags
+        run: git fetch --tags --force
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
 
       - name: Create release assets directory
         run: mkdir -p release-assets
 
       - name: Download all release artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@v4
         with:
           path: release-assets
           pattern: release-*
@@ -540,7 +556,16 @@ jobs:
           fi
           echo "Previous release tag: ${PREV_TAG:-none}"
 
-          # 2. Generate release notes
+          # 2. Check for GitHub-generated notes if a previous tag exists
+          GH_NOTES=""
+          if [ -n "$PREV_TAG" ]; then
+            GH_NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$TARGET_TAG" \
+              -f previous_tag_name="$PREV_TAG" \
+              --jq .body 2>/dev/null || echo "")
+          fi
+
+          # 3. Generate release notes
           NOTES_ARGS=(
             "--version" "$VERSION"
             "--output" "release-notes.md"
@@ -552,12 +577,15 @@ jobs:
           if [ -n "$PREV_TAG" ]; then
             NOTES_ARGS+=("--prev-tag" "$PREV_TAG")
           fi
+          if [ -n "$GH_NOTES" ]; then
+            NOTES_ARGS+=("--custom-notes" "$GH_NOTES")
+          fi
           node desktop/scripts/generate-release-notes.mjs "${NOTES_ARGS[@]}"
 
           echo "=== Release Notes ==="
           cat release-notes.md
 
-          # 3. Assemble release assets
+          # 4. Assemble release assets
           WIN_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform windows)
           MAC_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform macos)
           LNX_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform linux)
@@ -572,7 +600,7 @@ jobs:
             RELEASE_ASSETS+=("release-assets/checksums.txt.sig")
           fi
 
-          # 4. Create or update draft release (never publish automatically, avoid duplicates on retry)
+          # 5. Create or update draft release (never publish automatically, avoid duplicates on retry)
           if gh release view "$TARGET_TAG" >/dev/null 2>&1; then
             echo "Draft release $TARGET_TAG already exists; updating notes and assets..."
             gh release edit "$TARGET_TAG" \

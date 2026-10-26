@@ -63,9 +63,13 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   assert.ok(content.includes("permissions:\n  contents: read"), "Release must have contents: read at workflow level");
   assert.ok(content.includes("permissions:\n      contents: write"), "Publish job must have contents: write permission");
 
-  // Triggered by workflow_dispatch and tag push
+  // Triggered ONLY manually via workflow_dispatch
   assert.ok(content.includes("workflow_dispatch:"), "Release workflow must be triggered by workflow_dispatch");
-  assert.ok(content.includes('tags:\n      - "v*"'), "Release must trigger on v* tags");
+  assert.ok(!content.includes("push:"), "Release workflow must not be triggered on push");
+
+  // Git history depth and tag fetching
+  assert.ok(content.includes("fetch-depth: 0"), "Release workflow checkout must fetch full Git history depth");
+  assert.ok(content.includes("git fetch --tags --force"), "Release workflow must fetch all git tags");
 
   // Validation job & signing outputs
   assert.ok(content.includes("validate-release:"), "Release must have validate-release job");
