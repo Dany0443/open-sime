@@ -67,6 +67,15 @@ fn show_startup_error(app: &AppHandle, code: &str, detail: &str) {
   if let Some(window) = app.get_webview_window("main") {
     let script = build_show_startup_error_script(code, detail);
     let _ = window.eval(&script);
+    if let Ok(mut current_url) = window.url() {
+      current_url
+        .query_pairs_mut()
+        .clear()
+        .append_pair("error", "1")
+        .append_pair("code", code)
+        .append_pair("detail", detail);
+      let _ = window.navigate(current_url);
+    }
     let _ = window.show();
     let _ = window.set_focus();
   }

@@ -37,6 +37,11 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   assert.ok(content.includes("working-directory: desktop"), "CI must use desktop working directory");
   assert.ok(content.includes("working-directory: web"), "CI must use web working directory");
 
+  // Sidecar protection in Linux packaging
+  assert.ok(content.includes('NO_STRIP: "true"'), "CI must set NO_STRIP: true for Linux bundling");
+  assert.ok(content.includes("Skipping patchelf for sidecar"), "CI must protect sidecar from patchelf");
+  assert.ok(content.includes("Verify Linux sidecar binary in AppImage"), "CI must verify AppImage sidecar integrity");
+
   // Must NOT expose or reference signing secrets in CI
   assert.ok(!content.includes("secrets.WINDOWS_CERTIFICATE"), "CI must not access WINDOWS_CERTIFICATE");
   assert.ok(!content.includes("secrets.APPLE_CERTIFICATE"), "CI must not access APPLE_CERTIFICATE");
@@ -98,6 +103,11 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   assert.ok(content.includes("spctl --assess"), "Release must verify macOS Gatekeeper assessment");
   assert.ok(content.includes("xcrun stapler validate"), "Release must verify macOS notarization ticket");
   assert.ok(content.includes("--appimage-signature"), "Release must verify Linux AppImage signature");
+
+  // Linux sidecar protection and verification
+  assert.ok(content.includes('NO_STRIP: "true"'), "Release must set NO_STRIP: true for Linux AppImage packaging");
+  assert.ok(content.includes("Skipping patchelf for sidecar"), "Release must protect sidecar from patchelf");
+  assert.ok(content.includes("Successfully verified Linux sidecar binary integrity inside AppImage"), "Release must verify sidecar integrity");
 
   // Draft release creation
   assert.ok(content.includes("--draft=true"), "Release must create a draft release");

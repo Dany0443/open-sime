@@ -127,11 +127,46 @@ jobs:
         working-directory: desktop
         run: node scripts/build-sidecar.mjs --target ${{ matrix.target }}
 
+      - name: Setup Linux bundling environment
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          cat << 'EOF' > "$RUNNER_TEMP/bin/patchelf"
+#!/bin/bash
+TARGET="${@: -1}"
+if [[ "$TARGET" == *"open-sime-server"* ]]; then
+  echo "[patchelf shim] Skipping patchelf for sidecar: $TARGET"
+  exit 0
+fi
+REAL_PATCHELF=$(which -a patchelf | grep -v "$RUNNER_TEMP/bin/patchelf" | head -n 1)
+exec "$REAL_PATCHELF" "$@"
+EOF
+          chmod +x "$RUNNER_TEMP/bin/patchelf"
+          echo "$RUNNER_TEMP/bin" >> $GITHUB_PATH
+
       - name: Build Tauri application (unsigned preview)
         working-directory: desktop
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
         env:
           CI: "true"
+          NO_STRIP: "true"
+
+      - name: Verify Linux sidecar binary in AppImage
+        if: runner.os == 'Linux'
+        working-directory: desktop
+        run: |
+          APPIMAGE_FILE=$(find src-tauri/target/${{ matrix.target }}/release/bundle/appimage -name "*.AppImage" | head -n 1)
+          if [ -n "$APPIMAGE_FILE" ]; then
+            chmod +x "$APPIMAGE_FILE"
+            rm -rf /tmp/ci-appimage-verify
+            "$APPIMAGE_FILE" --appimage-extract
+            mv squashfs-root /tmp/ci-appimage-verify
+            OUTPUT=$(/tmp/ci-appimage-verify/usr/bin/open-sime-server --port invalid 2>&1 || true)
+            echo "$OUTPUT"
+            echo "$OUTPUT" | grep -q "INVALID_PORT" || { echo "Sidecar in AppImage failed validation: $OUTPUT"; exit 1; }
+            rm -rf /tmp/ci-appimage-verify
+            echo "Successfully verified Linux sidecar binary integrity inside AppImage"
+          fi
 
       - name: Upload preview installer artifact
         uses: actions/upload-artifact@v4
