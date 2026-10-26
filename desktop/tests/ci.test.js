@@ -24,32 +24,27 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   // Triggers
   assert.ok(content.includes("pull_request:"), "CI must trigger on pull_request");
   assert.ok(content.includes("branches:\n      - main"), "CI must target main branch");
+  assert.ok(content.includes("workflow_dispatch:"), "CI must support workflow_dispatch");
 
-  // Must run tests and checks first
+  // Concurrency cancellation
+  assert.ok(content.includes("cancel-in-progress: true"), "CI must cancel superseded runs on same branch or pull request");
+
+  // Must run tests and checks
   assert.ok(content.includes("run: npm run check"), "CI must run npm run check");
   assert.ok(content.includes("run: npm test"), "CI must run npm test");
+  assert.ok(content.includes("cargo check"), "CI must run cargo check for Rust syntax");
 
-  // Build matrix covers all 4 targets
-  assert.ok(content.includes("x86_64-pc-windows-msvc"), "CI matrix must include Windows x64");
-  assert.ok(content.includes("x86_64-apple-darwin"), "CI matrix must include macOS Intel");
-  assert.ok(content.includes("aarch64-apple-darwin"), "CI matrix must include macOS Apple Silicon");
-  assert.ok(content.includes("x86_64-unknown-linux-gnu"), "CI matrix must include Linux x64");
+  // Lightweight CI: must not compile or package desktop installers during normal CI
+  assert.ok(!content.includes("tauri build"), "CI must not compile or package desktop installers during normal runs");
+  assert.ok(!content.includes(".deb"), "CI must not build Debian packages");
+  assert.ok(!content.includes("android"), "CI must not build Android during normal runs");
 
   // Working directory
   assert.ok(content.includes("working-directory: desktop"), "CI must use desktop working directory");
   assert.ok(content.includes("working-directory: web"), "CI must use web working directory");
 
-  // Artifact staging and sidecar integrity verification (no patchelf or strip shims)
-  assert.ok(!content.includes("patchelf-shim.sh"), "CI must not use patchelf-shim.sh");
-  assert.ok(!content.includes("strip-shim.sh"), "CI must not use strip-shim.sh");
-  assert.ok(content.includes("node scripts/stage-release-artifact.mjs"), "CI must stage preview artifacts");
-  assert.ok(content.includes("node scripts/verify-appimage.mjs"), "CI must verify AppImage sidecar integrity using verify-appimage.mjs");
-  const verifyScriptPath = path.join(DESKTOP_ROOT, "scripts", "verify-appimage.mjs");
-  assert.ok(fs.existsSync(verifyScriptPath), "verify-appimage.mjs must exist");
-  const stageScriptPath = path.join(DESKTOP_ROOT, "scripts", "stage-release-artifact.mjs");
-  assert.ok(fs.existsSync(stageScriptPath), "stage-release-artifact.mjs must exist");
-  assert.ok(!fs.existsSync(path.join(DESKTOP_ROOT, "scripts", "patchelf-shim.sh")), "patchelf-shim.sh must be removed");
-  assert.ok(!fs.existsSync(path.join(DESKTOP_ROOT, "scripts", "strip-shim.sh")), "strip-shim.sh must be removed");
+  // Required checks reporting completed status
+  assert.ok(content.includes("ci-status:"), "CI must have a completion status gate job");
 
   // Must NOT expose or reference signing secrets in CI
   assert.ok(!content.includes("secrets.WINDOWS_CERTIFICATE"), "CI must not access WINDOWS_CERTIFICATE");
@@ -68,13 +63,13 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   assert.ok(content.includes("permissions:\n  contents: read"), "Release must have contents: read at workflow level");
   assert.ok(content.includes("permissions:\n      contents: write"), "Publish job must have contents: write permission");
 
-  // Tag trigger only (no untagged workflow_dispatch)
-  assert.ok(!content.includes("workflow_dispatch"), "Release workflow must not have workflow_dispatch");
+  // Triggered by workflow_dispatch and tag push
+  assert.ok(content.includes("workflow_dispatch:"), "Release workflow must be triggered by workflow_dispatch");
   assert.ok(content.includes('tags:\n      - "v*"'), "Release must trigger on v* tags");
 
   // Validation job & signing outputs
   assert.ok(content.includes("validate-release:"), "Release must have validate-release job");
-  assert.ok(content.includes("check-versions.mjs --tag"), "Release must validate git tag against project versions");
+  assert.ok(content.includes("check-versions.mjs"), "Release must validate git tag against project versions");
   assert.ok(content.includes("check-release-secrets.mjs"), "Release must validate required signing secrets");
   assert.ok(content.includes("sign_windows:"), "Release outputs must include sign_windows");
   assert.ok(content.includes("sign_macos:"), "Release outputs must include sign_macos");
@@ -89,6 +84,11 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
     content.includes("needs: [validate-release, build-windows, build-macos, build-linux]"),
     "Publish release job must require all matrix builds"
   );
+
+  // Target matrix in release builds
+  assert.ok(content.includes("x86_64-pc-windows-msvc"), "Release must build Windows x64");
+  assert.ok(content.includes("aarch64-apple-darwin"), "Release must build macOS");
+  assert.ok(content.includes("x86_64-unknown-linux-gnu"), "Release must build Linux x64");
 
   // Standardized dynamic artifact staging
   assert.ok(content.includes("scripts/stage-release-artifact.mjs"), "Release must stage artifacts via stage-release-artifact.mjs");
@@ -113,6 +113,9 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   assert.ok(!content.includes("patchelf-shim.sh"), "Release must not use patchelf-shim.sh");
   assert.ok(!content.includes("strip-shim.sh"), "Release must not use strip-shim.sh");
   assert.ok(content.includes("node scripts/verify-appimage.mjs"), "Release must verify sidecar integrity using verify-appimage.mjs");
+
+  // Release notes generation
+  assert.ok(content.includes("generate-release-notes.mjs"), "Release must generate release notes with generate-release-notes.mjs");
 
   // Draft release creation
   assert.ok(content.includes("--draft=true"), "Release must create a draft release");

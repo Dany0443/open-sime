@@ -98,7 +98,9 @@ export function parseCliArgs(argv = process.argv) {
   const options = {};
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--tag" && argv[i + 1]) {
+    if (arg === "--print" || arg === "--version-only") {
+      options.printOnly = true;
+    } else if (arg === "--tag" && argv[i + 1]) {
       options.tag = argv[i + 1];
       i += 1;
     } else if (arg.startsWith("--tag=")) {
@@ -117,7 +119,11 @@ if (path.resolve(process.argv[1] || "") === path.resolve(fileURLToPath(import.me
   try {
     const options = parseCliArgs(process.argv);
     const result = validateVersions(options);
-    console.log(`✓ Versions consistent: ${result.version} (web/package.json, desktop/package.json, tauri.conf.json, Cargo.toml)`);
+    if (options.printOnly) {
+      console.log(result.version);
+    } else {
+      console.log(`✓ Versions consistent: ${result.version} (web/package.json, desktop/package.json, tauri.conf.json, Cargo.toml)`);
+    }
     process.exit(0);
   } catch (err) {
     console.error(`✗ Version check failed: ${err.message}`);

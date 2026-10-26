@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version override (defaults to authoritative version from package.json)"
+        required: false
+        default: ""
   push:
     tags:
       - "v*"
@@ -8,21 +14,29 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate-release:
     name: Validate Tag, Versions, Secrets & Tests
     runs-on: ubuntu-22.04
     outputs:
+      version: ${{ steps.version-info.outputs.version }}
+      tag: ${{ steps.version-info.outputs.tag }}
       sign_windows: ${{ steps.check-secrets.outputs.sign_windows }}
       sign_macos: ${{ steps.check-secrets.outputs.sign_macos }}
       sign_linux: ${{ steps.check-secrets.outputs.sign_linux }}
       sign_checksums: ${{ steps.check-secrets.outputs.sign_checksums }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
@@ -38,9 +52,22 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Verify versions match git tag
+      - name: Determine and verify authoritative version
+        id: version-info
         working-directory: desktop
-        run: node scripts/check-versions.mjs --tag "${{ github.ref_name }}"
+        run: |
+          INPUT_VER="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT_VER" ]; then
+            node scripts/check-versions.mjs --expected "$INPUT_VER"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            node scripts/check-versions.mjs --tag "${{ github.ref_name }}"
+          else
+            node scripts/check-versions.mjs
+          fi
+          VER=$(node scripts/check-versions.mjs --print)
+          echo "Authoritative version: $VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
 
       - name: Validate release signing credentials
         id: check-secrets
@@ -496,70 +523,41 @@ jobs:
           gpg --verify checksums.txt.sig checksums.txt
           echo "✓ Detached GPG signature created and verified."
 
-      - name: Prepare draft release notes and publish
+      - name: Generate release notes and create or update draft release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate-release.outputs.version }}
+          TARGET_TAG: ${{ needs.validate-release.outputs.tag }}
           SIGN_WIN: ${{ needs.validate-release.outputs.sign_windows }}
           SIGN_MAC: ${{ needs.validate-release.outputs.sign_macos }}
           SIGN_LNX: ${{ needs.validate-release.outputs.sign_linux }}
           SIGN_SIG: ${{ needs.validate-release.outputs.sign_checksums }}
         run: |
-          cat << 'EOF' > release-notes.md
-          ## Open SIME ${{ github.ref_name }}
-
-          Production release ${{ github.ref_name }} of Open SIME for Windows, macOS, and Linux.
-
-          ### Signing Status
-          EOF
-
-          if [ "$SIGN_WIN" = "true" ]; then
-            echo "- **Windows (x64 NSIS)**: Signed with Authenticode certificate" >> release-notes.md
-          else
-            echo "- **Windows (x64 NSIS)**: Unsigned build" >> release-notes.md
+          # 1. Determine previous published release tag
+          PREV_TAG=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git describe --tags --abbrev=0 "${TARGET_TAG}^" 2>/dev/null || git describe --tags --abbrev=0 "HEAD^" 2>/dev/null || echo "")
           fi
+          echo "Previous release tag: ${PREV_TAG:-none}"
 
-          if [ "$SIGN_MAC" = "true" ]; then
-            echo "- **macOS (DMG)**: Signed with Developer ID and notarized by Apple" >> release-notes.md
-          else
-            echo "- **macOS (DMG)**: Unsigned build" >> release-notes.md
+          # 2. Generate release notes
+          NOTES_ARGS=(
+            "--version" "$VERSION"
+            "--output" "release-notes.md"
+            "--sign-windows" "$SIGN_WIN"
+            "--sign-macos" "$SIGN_MAC"
+            "--sign-linux" "$SIGN_LNX"
+            "--sign-checksums" "$SIGN_SIG"
+          )
+          if [ -n "$PREV_TAG" ]; then
+            NOTES_ARGS+=("--prev-tag" "$PREV_TAG")
           fi
+          node desktop/scripts/generate-release-notes.mjs "${NOTES_ARGS[@]}"
 
-          if [ "$SIGN_LNX" = "true" ]; then
-            echo "- **Linux (x64 AppImage)**: AppImage signed with GPG key" >> release-notes.md
-          else
-            echo "- **Linux (x64 AppImage)**: Unsigned build" >> release-notes.md
-          fi
+          echo "=== Release Notes ==="
+          cat release-notes.md
 
-          if [ "$SIGN_SIG" = "true" ]; then
-            echo "- **Checksums**: Signed with detached GPG signature (checksums.txt.sig)" >> release-notes.md
-          else
-            echo "- **Checksums**: Unsigned checksums manifest (checksums.txt)" >> release-notes.md
-          fi
-
-          cat << 'EOF' >> release-notes.md
-
-          ### Platform Notes for Unsigned Builds
-          - **Windows**: Microsoft Defender SmartScreen may display *"Windows protected your PC"*. Click **More info**, then click **Run anyway** to launch.
-          - **macOS**: Gatekeeper may state the app cannot be opened because Apple cannot check it for malicious software. In Finder, open the **Applications** folder, right-click (or Control-click) **Open SIME**, select **Open**, and click **Open** in the confirmation dialog.
-          - **Linux**: Make the AppImage executable (`chmod +x Open-SIME-v*.AppImage`) before launching.
-
-          ### Checksum Verification
-          To verify download integrity against `checksums.txt`:
-          ```bash
-          sha256sum -c checksums.txt
-          ```
-          EOF
-
-          if [ "$SIGN_SIG" = "true" ]; then
-            cat << 'EOF' >> release-notes.md
-
-          To verify the GPG signature of the checksums manifest:
-          ```bash
-          gpg --verify checksums.txt.sig checksums.txt
-          ```
-          EOF
-          fi
-
+          # 3. Assemble release assets
           WIN_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform windows)
           MAC_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform macos)
           LNX_FILE=$(node desktop/scripts/stage-release-artifact.mjs --name-only --platform linux)
@@ -574,11 +572,22 @@ jobs:
             RELEASE_ASSETS+=("release-assets/checksums.txt.sig")
           fi
 
-          gh release create "${{ github.ref_name }}" \
-            "${RELEASE_ASSETS[@]}" \
-            --title "Open SIME ${{ github.ref_name }}" \
-            --notes-file release-notes.md \
-            --draft=true \
-            --prerelease=false
+          # 4. Create or update draft release (never publish automatically, avoid duplicates on retry)
+          if gh release view "$TARGET_TAG" >/dev/null 2>&1; then
+            echo "Draft release $TARGET_TAG already exists; updating notes and assets..."
+            gh release edit "$TARGET_TAG" \
+              --title "Open SIME $TARGET_TAG" \
+              --notes-file release-notes.md \
+              --draft=true
+            gh release upload "$TARGET_TAG" "${RELEASE_ASSETS[@]}" --clobber
+          else
+            echo "Creating draft release $TARGET_TAG..."
+            gh release create "$TARGET_TAG" \
+              "${RELEASE_ASSETS[@]}" \
+              --title "Open SIME $TARGET_TAG" \
+              --notes-file release-notes.md \
+              --draft=true \
+              --prerelease=false
+          fi
 
-          echo "✓ Draft release ${{ github.ref_name }} created successfully."
+          echo "✓ Draft release $TARGET_TAG created/updated successfully (not published)."
