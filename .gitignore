@@ -3,6 +3,8 @@
 .env.*
 *.env
 data/
+web/data/
+desktop/data/
 sime-desktop/data/
 *.key
 PROGRESS.md
@@ -17,9 +19,15 @@ skills-lock.json
 .idea/
 .vscode/
 node_modules/
+web/node_modules/
+desktop/node_modules/
 sime-desktop/node_modules/
 
 # Tauri / Rust / Sidecar build artifacts
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+desktop/src-tauri/binaries/
+desktop/.sidecar-staging/
 sime-desktop/src-tauri/target/
 sime-desktop/src-tauri/gen/schemas/
 sime-desktop/src-tauri/binaries/

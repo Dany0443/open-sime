@@ -34,7 +34,8 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   assert.ok(content.includes("x86_64-unknown-linux-gnu"), "CI matrix must include Linux x64");
 
   // Working directory
-  assert.ok(content.includes("working-directory: sime-desktop"), "CI must use sime-desktop working directory");
+  assert.ok(content.includes("working-directory: desktop"), "CI must use desktop working directory");
+  assert.ok(content.includes("working-directory: web"), "CI must use web working directory");
 
   // Must NOT expose or reference signing secrets in CI
   assert.ok(!content.includes("secrets.WINDOWS_CERTIFICATE"), "CI must not access WINDOWS_CERTIFICATE");

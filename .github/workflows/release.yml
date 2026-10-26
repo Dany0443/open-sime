@@ -22,18 +22,24 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: sime-desktop/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
 
-      - name: Install dependencies
-        working-directory: sime-desktop
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: desktop
         run: npm ci
 
       - name: Verify versions match git tag
-        working-directory: sime-desktop
+        working-directory: desktop
         run: node scripts/check-versions.mjs --tag "${{ github.ref_name }}"
 
       - name: Validate required signing credentials
-        working-directory: sime-desktop
+        working-directory: desktop
         run: node scripts/check-release-secrets.mjs
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -53,11 +59,11 @@ jobs:
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
 
       - name: Syntax and lint checks
-        working-directory: sime-desktop
+        working-directory: desktop
         run: npm run check
 
       - name: Run test suite
-        working-directory: sime-desktop
+        working-directory: desktop
         run: npm test
 
   build-windows:
@@ -73,7 +79,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: sime-desktop/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -83,10 +91,14 @@ jobs:
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: sime-desktop/src-tauri
+          workspaces: desktop/src-tauri
 
-      - name: Install dependencies
-        working-directory: sime-desktop
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: desktop
         run: npm ci
 
       - name: Import Authenticode certificate
@@ -113,12 +125,12 @@ jobs:
           Write-Host "Authenticode certificate imported. Subject: $($cert.Subject), Thumbprint: $($cert.Thumbprint)"
 
       - name: Build Node.js sidecar executable
-        working-directory: sime-desktop
+        working-directory: desktop
         run: node scripts/build-sidecar.mjs --target x86_64-pc-windows-msvc
 
       - name: Sign sidecar executable
         shell: pwsh
-        working-directory: sime-desktop
+        working-directory: desktop
         run: |
           $sidecar = "src-tauri/binaries/open-sime-server-x86_64-pc-windows-msvc.exe"
           $cert = Get-Item "Cert:\CurrentUser\My\$env:THUMBPRINT"
@@ -131,12 +143,12 @@ jobs:
           Write-Host "Sidecar Authenticode signature valid."
 
       - name: Build signed Tauri NSIS package
-        working-directory: sime-desktop
+        working-directory: desktop
         run: npx tauri build --target x86_64-pc-windows-msvc --bundles nsis --config "{\`"bundle\`":{\`"windows\`":{\`"certificateThumbprint\`":\`"$env:THUMBPRINT\`"}}}"
 
       - name: Verify NSIS installer signature and rename
         shell: pwsh
-        working-directory: sime-desktop
+        working-directory: desktop
         run: |
           $installer = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
           if (-not $installer) {
@@ -183,7 +195,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-windows
-          path: sime-desktop/Open-SIME-windows-x64-setup.exe
+          path: desktop/Open-SIME-windows-x64-setup.exe
           if-no-files-found: error
           retention-days: 1
 
@@ -211,7 +223,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: sime-desktop/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -221,10 +235,14 @@ jobs:
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: sime-desktop/src-tauri
+          workspaces: desktop/src-tauri
 
-      - name: Install dependencies
-        working-directory: sime-desktop
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: desktop
         run: npm ci
 
       - name: Setup temporary macOS signing keychain
@@ -259,11 +277,11 @@ jobs:
           echo "APPLE_API_KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY}.p8" >> $GITHUB_ENV
 
       - name: Build Node.js sidecar executable
-        working-directory: sime-desktop
+        working-directory: desktop
         run: node scripts/build-sidecar.mjs --target ${{ matrix.target }}
 
       - name: Sign sidecar executable
-        working-directory: sime-desktop
+        working-directory: desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
@@ -272,7 +290,7 @@ jobs:
             "src-tauri/binaries/open-sime-server-${{ matrix.target }}"
 
       - name: Build signed and notarized DMG
-        working-directory: sime-desktop
+        working-directory: desktop
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -285,7 +303,7 @@ jobs:
         run: npx tauri build --target ${{ matrix.target }} --bundles dmg
 
       - name: Rename and verify DMG
-        working-directory: sime-desktop
+        working-directory: desktop
         run: |
           DMG_FILE=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" | head -n 1)
           if [ -z "$DMG_FILE" ]; then
@@ -318,7 +336,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.name }}
-          path: sime-desktop/${{ matrix.artifact_name }}
+          path: desktop/${{ matrix.artifact_name }}
           if-no-files-found: error
           retention-days: 1
 
@@ -335,7 +353,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: sime-desktop/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -345,7 +365,7 @@ jobs:
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: sime-desktop/src-tauri
+          workspaces: desktop/src-tauri
 
       - name: Install Linux build dependencies & FUSE
         run: |
@@ -357,8 +377,12 @@ jobs:
             patchelf \
             libfuse2
 
-      - name: Install dependencies
-        working-directory: sime-desktop
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: desktop
         run: npm ci
 
       - name: Import GPG private key
@@ -368,11 +392,11 @@ jobs:
           echo "$GPG_KEY" | gpg --batch --import
 
       - name: Build Node.js sidecar executable
-        working-directory: sime-desktop
+        working-directory: desktop
         run: node scripts/build-sidecar.mjs --target x86_64-unknown-linux-gnu
 
       - name: Build signed Linux AppImage and deb
-        working-directory: sime-desktop
+        working-directory: desktop
         env:
           SIGN: "1"
           APPIMAGETOOL_FORCE_SIGN: "1"
@@ -380,7 +404,7 @@ jobs:
         run: npx tauri build --target x86_64-unknown-linux-gnu --bundles appimage,deb
 
       - name: Rename and verify Linux artifacts
-        working-directory: sime-desktop
+        working-directory: desktop
         run: |
           APPIMAGE_FILE=$(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage -name "*.AppImage" | head -n 1)
           DEB_FILE=$(find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb -name "*.deb" | head -n 1)
@@ -403,8 +427,8 @@ jobs:
         with:
           name: release-linux
           path: |
-            sime-desktop/Open-SIME-linux-x64.AppImage
-            sime-desktop/Open-SIME-linux-x64.deb
+            desktop/Open-SIME-linux-x64.AppImage
+            desktop/Open-SIME-linux-x64.deb
           if-no-files-found: error
           retention-days: 1
 

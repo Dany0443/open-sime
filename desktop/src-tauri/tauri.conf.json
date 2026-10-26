@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "identifier": "md.sime.opensime",
   "build": {
-    "beforeDevCommand": "npm start",
+    "beforeDevCommand": "npm run start --prefix ../web",
     "devUrl": "http://127.0.0.1:3000",
     "beforeBuildCommand": "npm run sidecar:build",
     "frontendDist": "../dist-tauri"

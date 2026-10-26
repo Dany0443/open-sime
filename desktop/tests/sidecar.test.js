@@ -14,14 +14,15 @@ import {
   getRememberStorePath,
   isProductionSidecar,
   resolveDataDir,
-} from "../server.js";
+} from "../../web/server.js";
 import { buildSidecar, getSidecarOutputPath, resolveTargetTriple } from "../scripts/build-sidecar.mjs";
 import { readProjectVersions, validateVersions, parseCliArgs } from "../scripts/check-versions.mjs";
 import { validateReleaseSecrets } from "../scripts/check-release-secrets.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_ROOT = path.resolve(__dirname, "..");
-const SERVER_JS = path.join(DESKTOP_ROOT, "server.js");
+const WEB_ROOT = path.resolve(DESKTOP_ROOT, "..", "web");
+const SERVER_JS = path.join(WEB_ROOT, "server.js");
 
 test("Sidecar Build Script: target triple resolution and binary naming across all supported platforms", () => {
   assert.equal(
@@ -66,9 +67,11 @@ test("Sidecar Build Script: target triple resolution and binary naming across al
 
 test("Version Consistency: package.json, tauri.conf.json, and Cargo.toml versions match and CLI validation works", () => {
   const versions = readProjectVersions(DESKTOP_ROOT);
-  assert.ok(versions.packageJson, "package.json version must be present");
-  assert.equal(versions.packageJson, versions.tauriConf, "tauri.conf.json version must match package.json");
-  assert.equal(versions.packageJson, versions.cargoToml, "Cargo.toml version must match package.json");
+  assert.ok(versions.webPackageJson, "web/package.json version must be present");
+  assert.ok(versions.desktopPackageJson, "desktop/package.json version must be present");
+  assert.equal(versions.webPackageJson, versions.desktopPackageJson, "web/package.json must match desktop/package.json");
+  assert.equal(versions.desktopPackageJson, versions.tauriConf, "tauri.conf.json version must match package.json");
+  assert.equal(versions.desktopPackageJson, versions.cargoToml, "Cargo.toml version must match package.json");
 
   // Validating matching version succeeds
   const res = validateVersions({ desktopRoot: DESKTOP_ROOT, tag: `v${versions.packageJson}` });
@@ -102,7 +105,7 @@ test("Sidecar Storage: OS application-data directory resolution for remember-tok
 
   // Dev mode uses local data/ directory
   const devDataDir = resolveDataDir({}, "win32", ["node", "server.js"]);
-  assert.equal(devDataDir, path.join(DESKTOP_ROOT, "data"));
+  assert.equal(devDataDir, path.join(WEB_ROOT, "data"));
 
   // Explicit SIME_DATA_DIR override wins
   const customDir = path.join(os.tmpdir(), "custom-open-sime-data");

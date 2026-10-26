@@ -19,6 +19,7 @@ import { exec as pkgExec } from "@yao-pkg/pkg";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_ROOT = path.resolve(__dirname, "..");
+const WEB_ROOT = path.resolve(DESKTOP_ROOT, "..", "web");
 const BINARIES_DIR = path.join(DESKTOP_ROOT, "src-tauri", "binaries");
 const STAGING_DIR = path.join(DESKTOP_ROOT, ".sidecar-staging");
 const SIDECAR_BASE_NAME = "open-sime-server";
@@ -94,15 +95,15 @@ export function getSidecarOutputPath(targetTriple) {
   return path.join(BINARIES_DIR, `${SIDECAR_BASE_NAME}-${targetTriple}${targetInfo.ext}`);
 }
 
-function collectEmbeddedAssets(desktopRoot) {
+function collectEmbeddedAssets(webRoot) {
   const assets = {};
-  const indexHtmlPath = path.join(desktopRoot, "index.html");
+  const indexHtmlPath = path.join(webRoot, "index.html");
   if (!fs.existsSync(indexHtmlPath)) {
     throw new Error(`Missing required asset: ${indexHtmlPath}`);
   }
   assets["/index.html"] = fs.readFileSync(indexHtmlPath).toString("base64");
 
-  const publicRoot = path.join(desktopRoot, "public");
+  const publicRoot = path.join(webRoot, "public");
   if (!fs.existsSync(publicRoot)) {
     throw new Error(`Missing required public directory: ${publicRoot}`);
   }
@@ -180,7 +181,7 @@ export async function buildSidecar(options = {}) {
   }
 
   const outputPath = getSidecarOutputPath(targetTriple);
-  const embeddedAssets = collectEmbeddedAssets(DESKTOP_ROOT);
+  const embeddedAssets = collectEmbeddedAssets(WEB_ROOT);
 
   fs.rmSync(STAGING_DIR, { recursive: true, force: true });
   fs.mkdirSync(STAGING_DIR, { recursive: true });
@@ -196,7 +197,7 @@ export async function buildSidecar(options = {}) {
     ].join("\n");
 
     await esbuild({
-      entryPoints: [path.join(DESKTOP_ROOT, "server.js")],
+      entryPoints: [path.join(WEB_ROOT, "server.js")],
       outfile: bundledCjsPath,
       bundle: true,
       platform: "node",

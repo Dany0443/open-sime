@@ -6,7 +6,7 @@ This document explains how **Open SIME** packages its Node.js backend as a self-
 
 ## 1. Architecture Overview
 
-Open SIME uses an Express + Cheerio backend (`sime-desktop/server.js`) to authenticate with `agenda.sime.md`, enforce student data isolation, and serve the web interface (`index.html` and `public/`).
+Open SIME uses an Express + Cheerio backend (`web/server.js`) to authenticate with `agenda.sime.md`, enforce student data isolation, and serve the web interface (`web/index.html` and `web/public/`).
 
 | Mode | Command | How the Backend Runs | Default Origin |
 | --- | --- | --- | --- |
@@ -29,7 +29,7 @@ Open SIME uses an Express + Cheerio backend (`sime-desktop/server.js`) to authen
 
 ## 2. Target-Triple Naming Convention
 
-Tauri 2 resolves `bundle.externalBin` (`["binaries/open-sime-server"]`) by appending the Rust target triple to the binary name inside `sime-desktop/src-tauri/binaries/`:
+Tauri 2 resolves `bundle.externalBin` (`["binaries/open-sime-server"]`) by appending the Rust target triple to the binary name inside `desktop/src-tauri/binaries/`:
 
 | Platform / Architecture | Rust Target Triple | Sidecar Binary Path (`src-tauri/binaries/`) |
 | --- | --- | --- |
@@ -41,7 +41,7 @@ Tauri 2 resolves `bundle.externalBin` (`["binaries/open-sime-server"]`) by appen
 To build the sidecar for the current host or a specific cross-compilation target:
 
 ```bash
-cd sime-desktop
+cd desktop
 
 # Auto-detects target from TAURI_ENV_TARGET_TRIPLE, CARGO_BUILD_TARGET, rustc -vV, or host OS/arch
 npm run sidecar:build
@@ -90,7 +90,7 @@ In production mode (`--production`, `SIME_DESKTOP_PRODUCTION=1`, or packaged bin
 
 When launched by Tauri, Rust also passes `app.path().app_data_dir()` via `SIME_DATA_DIR`.
 
-In local web development (`npm start`), data defaults to `sime-desktop/data/` unless `SIME_DATA_DIR`, `SIME_REMEMBER_STORE`, or `SIME_REMEMBER_KEY_FILE` is set.
+In local web development (`npm start`), data defaults to `web/data/` unless `SIME_DATA_DIR`, `SIME_REMEMBER_STORE`, or `SIME_REMEMBER_KEY_FILE` is set.
 
 ### Security Protections Preserved
 
@@ -102,16 +102,17 @@ In local web development (`npm start`), data defaults to `sime-desktop/data/` un
 
 ## 5. Version Synchronization
 
-Version consistency across all components is strictly enforced by `sime-desktop/scripts/check-versions.mjs`.
+Version consistency across all components is strictly enforced by `desktop/scripts/check-versions.mjs`.
 
-Three files must keep identical semver versions:
-1. `sime-desktop/package.json` (`"version": "X.Y.Z"`)
-2. `sime-desktop/src-tauri/tauri.conf.json` (`"version": "X.Y.Z"`)
-3. `sime-desktop/src-tauri/Cargo.toml` (`version = "X.Y.Z"`)
+Four files must keep identical semver versions:
+1. `web/package.json` (`"version": "X.Y.Z"`)
+2. `desktop/package.json` (`"version": "X.Y.Z"`)
+3. `desktop/src-tauri/tauri.conf.json` (`"version": "X.Y.Z"`)
+4. `desktop/src-tauri/Cargo.toml` (`version = "X.Y.Z"`)
 
 To check version consistency locally:
 ```bash
-cd sime-desktop
+cd desktop
 npm run check:versions
 ```
 

@@ -14,13 +14,17 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_ROOT = path.resolve(__dirname, "..");
 
-export function readProjectVersions(desktopRoot = DESKTOP_ROOT) {
-  const packageJsonPath = path.join(desktopRoot, "package.json");
+export function readProjectVersions(desktopRoot = DESKTOP_ROOT, webRoot = path.resolve(desktopRoot, "..", "web")) {
+  const webPackageJsonPath = path.join(webRoot, "package.json");
+  const desktopPackageJsonPath = path.join(desktopRoot, "package.json");
   const tauriConfPath = path.join(desktopRoot, "src-tauri", "tauri.conf.json");
   const cargoTomlPath = path.join(desktopRoot, "src-tauri", "Cargo.toml");
 
-  if (!fs.existsSync(packageJsonPath)) {
-    throw new Error(`Missing ${packageJsonPath}`);
+  if (!fs.existsSync(webPackageJsonPath)) {
+    throw new Error(`Missing ${webPackageJsonPath}`);
+  }
+  if (!fs.existsSync(desktopPackageJsonPath)) {
+    throw new Error(`Missing ${desktopPackageJsonPath}`);
   }
   if (!fs.existsSync(tauriConfPath)) {
     throw new Error(`Missing ${tauriConfPath}`);
@@ -29,7 +33,8 @@ export function readProjectVersions(desktopRoot = DESKTOP_ROOT) {
     throw new Error(`Missing ${cargoTomlPath}`);
   }
 
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  const webPackageJson = JSON.parse(fs.readFileSync(webPackageJsonPath, "utf8"));
+  const desktopPackageJson = JSON.parse(fs.readFileSync(desktopPackageJsonPath, "utf8"));
   const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, "utf8"));
   const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
 
@@ -39,7 +44,9 @@ export function readProjectVersions(desktopRoot = DESKTOP_ROOT) {
   }
 
   return {
-    packageJson: packageJson.version?.trim(),
+    webPackageJson: webPackageJson.version?.trim(),
+    desktopPackageJson: desktopPackageJson.version?.trim(),
+    packageJson: desktopPackageJson.version?.trim(),
     tauriConf: tauriConf.version?.trim(),
     cargoToml: cargoMatch[1]?.trim(),
   };
@@ -47,17 +54,23 @@ export function readProjectVersions(desktopRoot = DESKTOP_ROOT) {
 
 export function validateVersions(options = {}) {
   const desktopRoot = options.desktopRoot || DESKTOP_ROOT;
-  const versions = readProjectVersions(desktopRoot);
-  const { packageJson, tauriConf, cargoToml } = versions;
+  const webRoot = options.webRoot || path.resolve(desktopRoot, "..", "web");
+  const versions = readProjectVersions(desktopRoot, webRoot);
+  const { webPackageJson, desktopPackageJson, tauriConf, cargoToml } = versions;
 
-  if (!packageJson || !tauriConf || !cargoToml) {
+  if (!webPackageJson || !desktopPackageJson || !tauriConf || !cargoToml) {
     throw new Error(`Incomplete versions found: ${JSON.stringify(versions)}`);
   }
 
-  if (packageJson !== tauriConf || packageJson !== cargoToml) {
+  if (
+    webPackageJson !== desktopPackageJson ||
+    desktopPackageJson !== tauriConf ||
+    desktopPackageJson !== cargoToml
+  ) {
     throw new Error(
       `Version mismatch between project files:\n` +
-        `  package.json:        ${packageJson}\n` +
+        `  web/package.json:          ${webPackageJson}\n` +
+        `  desktop/package.json:      ${desktopPackageJson}\n` +
         `  src-tauri/tauri.conf.json: ${tauriConf}\n` +
         `  src-tauri/Cargo.toml:      ${cargoToml}`
     );
@@ -69,14 +82,14 @@ export function validateVersions(options = {}) {
     expected = cleanTag.startsWith("v") ? cleanTag.slice(1) : cleanTag;
   }
 
-  if (expected && packageJson !== expected) {
+  if (expected && desktopPackageJson !== expected) {
     throw new Error(
-      `Project version (${packageJson}) does not match expected version (${expected}).`
+      `Project version (${desktopPackageJson}) does not match expected version (${expected}).`
     );
   }
 
   return {
-    version: packageJson,
+    version: desktopPackageJson,
     versions,
   };
 }
@@ -104,7 +117,7 @@ if (path.resolve(process.argv[1] || "") === path.resolve(fileURLToPath(import.me
   try {
     const options = parseCliArgs(process.argv);
     const result = validateVersions(options);
-    console.log(`✓ Versions consistent: ${result.version} (package.json, tauri.conf.json, Cargo.toml)`);
+    console.log(`✓ Versions consistent: ${result.version} (web/package.json, desktop/package.json, tauri.conf.json, Cargo.toml)`);
     process.exit(0);
   } catch (err) {
     console.error(`✗ Version check failed: ${err.message}`);
