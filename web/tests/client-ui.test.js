@@ -1156,7 +1156,7 @@ test("Tauri 2 Desktop: configuration, sidecar externalBin, scripts, capabilities
   assert.equal(pkg.scripts["tauri:dev"], "tauri dev");
   assert.equal(pkg.scripts["tauri:build"], "tauri build");
   assert.ok(pkg.devDependencies["@tauri-apps/cli"], "Must include @tauri-apps/cli v2 in devDependencies");
-  assert.ok(pkg.devDependencies["@tauri-apps/plugin-shell"], "Must include @tauri-apps/plugin-shell in devDependencies");
+  assert.equal(pkg.devDependencies["@tauri-apps/plugin-shell"], undefined, "Must NOT include unused @tauri-apps/plugin-shell");
 
   const tauriConf = JSON.parse(fs.readFileSync(path.join(desktopRoot, "src-tauri/tauri.conf.json"), "utf8"));
   assert.equal(tauriConf.productName, "Open SIME");
@@ -1177,8 +1177,9 @@ test("Tauri 2 Desktop: configuration, sidecar externalBin, scripts, capabilities
   assert.ok(cap.windows.includes("main"));
   assert.ok(cap.permissions.includes("core:default"));
   const spawnPerm = cap.permissions.find((p) => typeof p === "object" && p.identifier === "shell:allow-spawn");
-  assert.ok(spawnPerm, "Capabilities must include shell:allow-spawn for the sidecar");
-  assert.ok(spawnPerm.allow.some((a) => a.name === "binaries/open-sime-server" && a.sidecar === true));
+  assert.equal(spawnPerm, undefined, "Capabilities must NOT expose shell:allow-spawn to webview");
+  const execPerm = cap.permissions.find((p) => typeof p === "object" && p.identifier === "shell:allow-execute");
+  assert.equal(execPerm, undefined, "Capabilities must NOT expose shell:allow-execute to webview");
 
   const cargoToml = fs.readFileSync(path.join(desktopRoot, "src-tauri/Cargo.toml"), "utf8");
   assert.ok(cargoToml.includes("tauri-plugin-shell"), "Cargo.toml must include tauri-plugin-shell");
