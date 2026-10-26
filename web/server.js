@@ -2933,9 +2933,24 @@ function checkResumeRate(ip) {
   return { allowed: true };
 }
 
+function isAllowedDesktopHost(host) {
+  if (typeof host !== "string" || !host.trim()) return false;
+  return /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(host.trim());
+}
+
 function createApp() {
   const app = express();
   app.disable("x-powered-by");
+
+  app.use((req, res, next) => {
+    if (isProductionSidecar()) {
+      const host = req.headers.host;
+      if (!isAllowedDesktopHost(host)) {
+        return res.status(403).json(makeErrorPayload("FORBIDDEN", "Forbidden host"));
+      }
+    }
+    next();
+  });
 
   app.use((req, res, next) => {
     const headers = {
@@ -3530,6 +3545,7 @@ export {
   APP_IDENTIFIER,
   DEFAULT_DEV_PORT,
   DEFAULT_PROD_PORT,
+  isAllowedDesktopHost,
   isProductionSidecar,
   resolveDataDir,
   getRememberStorePath,

@@ -31,6 +31,7 @@ import {
   findReportAjaxId,
   fingerprintHeaders,
   inspectParserHealth,
+  isAllowedDesktopHost,
   loginGuard,
   normalizeMark,
   splitMarkTokens,
@@ -1233,6 +1234,88 @@ test("Security: server responses return UTF-8 in Content-Type header", async () 
       );
     }
   } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("Security: reject unexpected host headers in desktop mode", async () => {
+  assert.equal(isAllowedDesktopHost("127.0.0.1"), true);
+  assert.equal(isAllowedDesktopHost("127.0.0.1:17321"), true);
+  assert.equal(isAllowedDesktopHost("localhost"), true);
+  assert.equal(isAllowedDesktopHost("localhost:17321"), true);
+  assert.equal(isAllowedDesktopHost("localhost:3000"), true);
+  assert.equal(isAllowedDesktopHost("evil.com"), false);
+  assert.equal(isAllowedDesktopHost("127.0.0.1.evil.com"), false);
+  assert.equal(isAllowedDesktopHost("attacker.com:17321"), false);
+  assert.equal(isAllowedDesktopHost("192.168.1.100:17321"), false);
+  assert.equal(isAllowedDesktopHost(""), false);
+  assert.equal(isAllowedDesktopHost(null), false);
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+
+  const sendRequest = (hostHeader) => {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port,
+          path: "/api/health",
+          method: "GET",
+          headers: hostHeader !== undefined ? { Host: hostHeader } : {},
+        },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => {
+            let json = null;
+            try {
+              json = JSON.parse(body);
+            } catch {
+              // Ignore
+            }
+            resolve({ status: res.statusCode, body, json });
+          });
+        }
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  };
+
+  const prevEnv = process.env.SIME_DESKTOP_PRODUCTION;
+  try {
+    // 1. In standalone / dev mode: requests from any Host are allowed
+    delete process.env.SIME_DESKTOP_PRODUCTION;
+    const devRes = await sendRequest("arbitrary-host.com");
+    assert.equal(devRes.status, 200, "Dev mode should remain open to arbitrary host");
+
+    // 2. In desktop mode (isProductionSidecar() is true):
+    process.env.SIME_DESKTOP_PRODUCTION = "1";
+
+    // Allowed hosts
+    const okRes1 = await sendRequest(`127.0.0.1:${port}`);
+    assert.equal(okRes1.status, 200);
+
+    const okRes2 = await sendRequest(`localhost:${port}`);
+    assert.equal(okRes2.status, 200);
+
+    // Rejected hosts
+    const blockedRes = await sendRequest("evil.com");
+    assert.equal(blockedRes.status, 403);
+    assert.equal(blockedRes.json?.error?.code, "FORBIDDEN");
+
+    const blockedSub = await sendRequest(`127.0.0.1.evil.com:${port}`);
+    assert.equal(blockedSub.status, 403);
+    assert.equal(blockedSub.json?.error?.code, "FORBIDDEN");
+  } finally {
+    if (prevEnv !== undefined) {
+      process.env.SIME_DESKTOP_PRODUCTION = prevEnv;
+    } else {
+      delete process.env.SIME_DESKTOP_PRODUCTION;
+    }
     await new Promise((resolve) => server.close(resolve));
   }
 });
