@@ -193,6 +193,7 @@ function loadClientContext() {
     document: doc,
     doc,
     elements,
+    fetch: (...args) => (sandbox.mockFetch ? sandbox.mockFetch(...args) : Promise.reject(new Error("fetch not mocked: " + args[0]))),
     window: {
       location: { hash: "" },
       matchMedia: (q) => ({ matches: q.includes("dark"), addEventListener: () => {} }),
@@ -206,6 +207,7 @@ function loadClientContext() {
       getComputedStyle: () => ({ getPropertyValue: () => "#000" }),
       scrollTo: () => {},
       requestAnimationFrame: (cb) => cb(),
+      fetch: (...args) => (sandbox.mockFetch ? sandbox.mockFetch(...args) : Promise.reject(new Error("fetch not mocked: " + args[0]))),
     },
     navigator: { serviceWorker: { register: () => Promise.resolve() } },
     URL,
@@ -217,7 +219,7 @@ function loadClientContext() {
   vm.runInContext(cleanStrings, sandbox);
   vm.runInContext(cleanApp, sandbox);
   vm.runInContext(
-    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, setLanguage, applyLocalization, describeError, ApiError, pluralForm, tp, setTab, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score, scaleChip, getSubjectScale, normalizeSubjectName, emptyMarkText, subjectCard, recentMarks, bandOf, renderMetrics, renderRecent });",
+    "Object.assign(globalThis, { STRINGS, getString, state, store, KEYS, boot, cycleTheme, setLanguage, applyLocalization, describeError, ApiError, pluralForm, tp, setTab, render, renderAbsences, renderHome, renderMarks, renderLessons, renderHomework, renderProfile, weekDays, todayIso, renderStudents, score, scaleChip, getSubjectScale, normalizeSubjectName, emptyMarkText, subjectCard, recentMarks, bandOf, renderMetrics, renderRecent, api, apiFetch, resumeSession, endSession, logout });",
     sandbox
   );
   return sandbox;
@@ -1196,4 +1198,232 @@ test("Tauri 2 Desktop: configuration, sidecar externalBin, scripts, capabilities
   assert.ok(fs.existsSync(path.join(desktopRoot, "src-tauri/src/main.rs")), "Must have src-tauri/src/main.rs");
   assert.ok(fs.existsSync(path.join(desktopRoot, "src-tauri/icons/icon.ico")), "Must have src-tauri/icons/icon.ico");
   assert.ok(fs.existsSync(path.join(desktopRoot, "src-tauri/icons/128x128.png")), "Must have src-tauri/icons/128x128.png");
+});
+
+test("Auth Recovery: cold start with old session token transparently recovers via resume and retries original request", async () => {
+  const ctx = loadClientContext();
+  ctx.state.token = "stale-session-token";
+  ctx.store.set(ctx.KEYS.token, "stale-session-token");
+
+  const calls = [];
+  ctx.mockFetch = async (path, init = {}) => {
+    calls.push({ path, auth: init.headers?.Authorization });
+    if (path === "/api/overview" && init.headers?.Authorization === "Bearer stale-session-token") {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "APP_SESSION_INVALID", message: "Sesiunea a expirat." } }),
+      };
+    }
+    if (path === "/api/auth/resume") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          token: "new-fresh-token-12345",
+          role: "student",
+          data: { student: { id: "101", fullName: "Ion" }, students: [] },
+        }),
+      };
+    }
+    if (path === "/api/overview" && init.headers?.Authorization === "Bearer new-fresh-token-12345") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, data: { student: { id: "101", fullName: "Ion" } } }),
+      };
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  };
+
+  const result = await ctx.api("/api/overview");
+  assert.equal(result?.ok, true);
+  assert.equal(ctx.state.token, "new-fresh-token-12345");
+  assert.equal(ctx.store.get(ctx.KEYS.token), "new-fresh-token-12345");
+  assert.deepEqual(calls.map((c) => c.path), ["/api/overview", "/api/auth/resume", "/api/overview"]);
+  assert.equal(calls[2].auth, "Bearer new-fresh-token-12345");
+});
+
+test("Auth Recovery: resume failure on APP_SESSION_INVALID calls endSession and clears stored token", async () => {
+  const ctx = loadClientContext();
+  ctx.state.token = "stale-session-token";
+  ctx.store.set(ctx.KEYS.token, "stale-session-token");
+
+  const calls = [];
+  ctx.mockFetch = async (path) => {
+    calls.push(path);
+    if (path === "/api/overview") {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "APP_SESSION_INVALID", message: "Sesiunea a expirat." } }),
+      };
+    }
+    if (path === "/api/auth/resume") {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "APP_SESSION_INVALID", message: "Remember token expired" } }),
+      };
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  };
+
+  await assert.rejects(
+    async () => ctx.api("/api/overview"),
+    (err) => err instanceof ctx.ApiError && err.code === "APP_SESSION_INVALID"
+  );
+  assert.equal(ctx.state.token, null);
+  assert.equal(ctx.store.get(ctx.KEYS.token), null);
+  assert.deepEqual(calls, ["/api/overview", "/api/auth/resume"]);
+});
+
+test("Auth Recovery: concurrent requests encountering APP_SESSION_INVALID deduplicate to a single resume", async () => {
+  const ctx = loadClientContext();
+  ctx.state.token = "stale-session-token";
+  ctx.store.set(ctx.KEYS.token, "stale-session-token");
+
+  let resumeCount = 0;
+  ctx.mockFetch = async (path, init = {}) => {
+    if (path === "/api/overview" && init.headers?.Authorization === "Bearer stale-session-token") {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "APP_SESSION_INVALID", message: "Sesiunea a expirat." } }),
+      };
+    }
+    if (path === "/api/catalog?student=101" && init.headers?.Authorization === "Bearer stale-session-token") {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "APP_SESSION_INVALID", message: "Sesiunea a expirat." } }),
+      };
+    }
+    if (path === "/api/auth/resume") {
+      resumeCount += 1;
+      await new Promise((r) => setTimeout(r, 10));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          token: "new-fresh-token-multi",
+          role: "student",
+          data: { student: { id: "101", fullName: "Ion" }, students: [] },
+        }),
+      };
+    }
+    if (path === "/api/overview" && init.headers?.Authorization === "Bearer new-fresh-token-multi") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, source: "overview" }),
+      };
+    }
+    if (path === "/api/catalog?student=101" && init.headers?.Authorization === "Bearer new-fresh-token-multi") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, source: "catalog" }),
+      };
+    }
+    throw new Error(`Unexpected request: ${path} with auth ${init.headers?.Authorization}`);
+  };
+
+  const [res1, res2] = await Promise.all([
+    ctx.api("/api/overview"),
+    ctx.api("/api/catalog?student=101"),
+  ]);
+
+  assert.equal(resumeCount, 1, "Must issue exactly one /api/auth/resume call for concurrent requests");
+  assert.equal(res1?.source, "overview");
+  assert.equal(res2?.source, "catalog");
+  assert.equal(ctx.state.token, "new-fresh-token-multi");
+  assert.equal(ctx.store.get(ctx.KEYS.token), "new-fresh-token-multi");
+});
+
+test("Auth Recovery: retried request receiving APP_SESSION_INVALID again terminates without looping", async () => {
+  const ctx = loadClientContext();
+  ctx.state.token = "stale-session-token";
+  ctx.store.set(ctx.KEYS.token, "stale-session-token");
+
+  let overviewAttempts = 0;
+  let resumeAttempts = 0;
+  ctx.mockFetch = async (path) => {
+    if (path === "/api/overview") {
+      overviewAttempts += 1;
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "APP_SESSION_INVALID", message: "Sesiunea a expirat." } }),
+      };
+    }
+    if (path === "/api/auth/resume") {
+      resumeAttempts += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          token: "new-bad-token",
+          role: "student",
+          data: { student: { id: "101", fullName: "Ion" }, students: [] },
+        }),
+      };
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  };
+
+  await assert.rejects(
+    async () => ctx.api("/api/overview"),
+    (err) => err instanceof ctx.ApiError && err.code === "APP_SESSION_INVALID"
+  );
+  assert.equal(overviewAttempts, 2, "Original attempt + exactly 1 retry");
+  assert.equal(resumeAttempts, 1, "Resume must be called once");
+  assert.equal(ctx.state.token, null, "Session must end after retry failure");
+});
+
+test("Auth Recovery: non-APP_SESSION_INVALID 401 does not trigger resumeSession", async () => {
+  const ctx = loadClientContext();
+  ctx.state.token = "active-token";
+
+  let resumeCalled = false;
+  ctx.mockFetch = async (path) => {
+    if (path === "/api/overview") {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: "PORTAL_FORBIDDEN", message: "Interzis" } }),
+      };
+    }
+    if (path === "/api/auth/resume") {
+      resumeCalled = true;
+      return { ok: true, status: 200, json: async () => ({ token: "t", data: {} }) };
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  };
+
+  await assert.rejects(
+    async () => ctx.api("/api/overview"),
+    (err) => err instanceof ctx.ApiError && err.code === "PORTAL_FORBIDDEN"
+  );
+  assert.equal(resumeCalled, false, "Must not attempt resume for other 401 codes");
+});
+
+test("Auth Recovery: logout passes retryAuth: false and clears credentials", async () => {
+  const ctx = loadClientContext();
+  ctx.state.token = "session-to-logout";
+  ctx.store.set(ctx.KEYS.token, "session-to-logout");
+
+  let logoutOptions = null;
+  ctx.mockFetch = async (path, init = {}) => {
+    if (path === "/api/auth/logout") {
+      logoutOptions = init;
+      return { ok: true, status: 204 };
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  };
+
+  await ctx.logout();
+  assert.ok(logoutOptions, "logout endpoint must be called");
+  assert.equal(ctx.state.token, null);
+  assert.equal(ctx.store.get(ctx.KEYS.token), null);
 });

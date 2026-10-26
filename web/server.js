@@ -3171,17 +3171,25 @@ function createApp() {
     return res.json({ ok: true });
   });
 
-  app.post("/api/auth/logout", requireSession, (req, res) => {
-    if (req.session) {
-      req.session.cache.clear();
-      for (const k of Object.keys(req.session.students)) {
-        delete req.session.students[k];
+  app.post("/api/auth/logout", (req, res) => {
+    if (isCrossOrigin(req)) {
+      return res.status(403).json(makeErrorPayload("FORBIDDEN", "Cross-origin request blocked"));
+    }
+    const m = /^Bearer ([A-Za-z0-9_-]{20,128})$/.exec(req.get("authorization") || "");
+    const token = m ? m[1] : null;
+    const session = token ? sessions.get(token) : undefined;
+    if (session) {
+      session.cache.clear();
+      for (const k of Object.keys(session.students)) {
+        delete session.students[k];
       }
-      if (req.session.client?.studentPages) {
-        req.session.client.studentPages.clear();
+      if (session.client?.studentPages) {
+        session.client.studentPages.clear();
       }
     }
-    sessions.delete(req.token);
+    if (token) {
+      sessions.delete(token);
+    }
     const rawToken = parseCookie(req.headers.cookie, "sime_remember");
     if (rawToken) {
       const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");

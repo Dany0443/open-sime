@@ -606,6 +606,60 @@ test("Student Isolation: logout drops every cache of the account", async () => {
   });
 });
 
+test("Auth & Isolation: logout without active session still revokes remember cookie and prevents silent resume", async () => {
+  const orig = SimeClient.prototype.loginAndParsePortal;
+  SimeClient.prototype.loginAndParsePortal = async function () {
+    this.auth.sessionId = SESSION;
+    this.auth.portalUrl = PORTAL_URL;
+    const portal = createPortal();
+    this.http.request = portal.request;
+    const page = await this.fetchDashboard(PORTAL_URL, { bypassCache: true });
+    this.registerStudents(page);
+    const data = await this.enrichPortalPage(page);
+    return { html: page.html, data };
+  };
+
+  const server = http.createServer(app);
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const loginRes = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "student1", password: "pw", role: "student", remember: true }),
+    });
+    assert.equal(loginRes.status, 200);
+    const cookie = loginRes.headers.get("set-cookie");
+    assert.ok(cookie?.includes("sime_remember="));
+    const token = decodeURIComponent(cookie.match(/sime_remember=([^;]+)/)[1]);
+
+    const logoutRes = await fetch(`${base}/api/auth/logout`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer invalid_expired_token_1234567890",
+        Cookie: `sime_remember=${encodeURIComponent(token)}`,
+        Origin: base,
+      },
+    });
+    assert.equal(logoutRes.status, 204);
+    const clearCookie = logoutRes.headers.get("set-cookie");
+    assert.ok(clearCookie?.includes("Max-Age=0"), "Logout must clear remember cookie");
+
+    const resumeRes = await fetch(`${base}/api/auth/resume`, {
+      method: "POST",
+      headers: {
+        Cookie: `sime_remember=${encodeURIComponent(token)}`,
+        Origin: base,
+      },
+    });
+    assert.equal(resumeRes.status, 401);
+  } finally {
+    SimeClient.prototype.loginAndParsePortal = orig;
+    await new Promise((r) => server.close(r));
+  }
+});
+
 test("Student Role: server rejects student role switching with 400 and preserves role in responses", async () => {
   const portal = makeSingleStudentPortal("A");
   const orig = SimeClient.prototype.loginAndParsePortal;

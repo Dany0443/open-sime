@@ -628,6 +628,31 @@ async function apiFetch(path, init) {
   return fetch(path, init);
 }
 
+let resumePromise = null;
+
+async function resumeSession() {
+  if (resumePromise) return resumePromise;
+  const resumeSeq = state.seq;
+  resumePromise = (async () => {
+    try {
+      const res = await api("/api/auth/resume", { method: "POST", auth: false, retryAuth: false });
+      if (resumeSeq !== state.seq) return null;
+      if (!res || !res.token || !res.data) throw new Error("no session");
+      state.token = res.token;
+      state.role = res.role || "student";
+      store.set(KEYS.token, res.token);
+      store.set(KEYS.role, state.role);
+      const payload = res.data;
+      if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students;
+      setData(payload, Date.now());
+      return res.token;
+    } finally {
+      resumePromise = null;
+    }
+  })();
+  return resumePromise;
+}
+
 async function api(path, options = {}) {
   const headers = { Accept: "application/json" };
   if (state.token && options.auth !== false) headers.Authorization = "Bearer " + state.token;
@@ -654,8 +679,32 @@ async function api(path, options = {}) {
     const code = errObj?.code || null;
     const message = errObj?.message || (typeof payload?.error === "string" ? payload.error : t("err_request_failed"));
     const wait = Number(errObj?.retryAfter || payload?.waitSeconds) || 0;
-    if (code === "APP_SESSION_INVALID" || (res.status === 401 && options.auth !== false && path !== "/api/auth/login")) {
+
+    if (
+      code === "APP_SESSION_INVALID" &&
+      options.retryAuth !== false &&
+      options.auth !== false &&
+      path !== "/api/auth/resume" &&
+      path !== "/api/auth/login" &&
+      path !== "/api/auth/logout"
+    ) {
+      const resumeSeq = state.seq;
+      try {
+        const newToken = await resumeSession();
+        if (newToken && resumeSeq === state.seq) {
+          return await api(path, { ...options, retryAuth: false });
+        }
+      } catch {
+        // Recovery failed; proceed to endSession
+      }
       endSession(t("err_session_expired"));
+      throw new ApiError(message, res.status, wait, code);
+    }
+
+    if (options.auth !== false && path !== "/api/auth/login" && path !== "/api/auth/resume") {
+      if (code === "APP_SESSION_INVALID" || res.status === 401) {
+        endSession(t("err_session_expired"));
+      }
     }
     throw new ApiError(message, res.status, wait, code);
   }
@@ -2627,6 +2676,7 @@ async function onLogin(event) {
 }
 
 function endSession(message) {
+  resumePromise = null;
   state.seq += 1;
   state.token = null;
   state.studentKey = "";
@@ -2654,7 +2704,7 @@ async function logout() {
   const btn = $("logout-btn");
   btn.disabled = true;
   try {
-    await api("/api/auth/logout", { method: "POST" });
+    await api("/api/auth/logout", { method: "POST", retryAuth: false });
   } catch {
     btn.disabled = false;
   }
@@ -2883,17 +2933,9 @@ function boot() {
     render();
     refresh({ background: true });
   } else {
-    api("/api/auth/resume", { method: "POST", auth: false, retry: false })
-      .then((res) => {
-        if (!res || !res.token || !res.data) throw new Error("no session");
-        state.seq += 1;
-        state.token = res.token;
-        state.role = res.role || "student";
-        store.set(KEYS.token, res.token);
-        store.set(KEYS.role, state.role);
-        const payload = res.data;
-        if (!Array.isArray(payload.students) && Array.isArray(res.students)) payload.students = res.students;
-        setData(payload, Date.now());
+    resumeSession()
+      .then((newToken) => {
+        if (!newToken) throw new Error("no session");
         showShell();
         setTab(state.tab);
         render();
