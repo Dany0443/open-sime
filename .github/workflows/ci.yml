@@ -87,16 +87,30 @@ jobs:
       - name: Check for Rust changes
         id: filter
         run: |
+          RUST_PATHS="desktop/src-tauri/ desktop/scripts/build-sidecar.mjs desktop/package.json .github/workflows/ci.yml"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="origin/${{ github.base_ref }}"
-            CHANGED=$(git diff --name-only "$BASE"...HEAD -- desktop/src-tauri/ || true)
-            if [ -z "$CHANGED" ]; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "No Rust files changed in this pull request. Skipping cargo check."
-              exit 0
+            CHANGED=$(git diff --name-only "$BASE"...HEAD -- $RUST_PATHS || true)
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BEFORE="${{ github.event.before }}"
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" >/dev/null 2>&1; then
+              CHANGED=$(git diff --name-only "$BEFORE"...HEAD -- $RUST_PATHS || true)
+            elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              CHANGED=$(git diff --name-only HEAD~1...HEAD -- $RUST_PATHS || true)
+            else
+              CHANGED="initial"
             fi
+          else
+            CHANGED="manual"
           fi
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$CHANGED" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No Rust or Tauri build files changed. Skipping cargo check."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Rust changes detected: $CHANGED"
+          fi
 
       - name: Setup Rust toolchain
         if: steps.filter.outputs.skip != 'true'
@@ -111,8 +125,12 @@ jobs:
       - name: Install Linux WebKitGTK headers
         if: steps.filter.outputs.skip != 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
+          if ! pkg-config --exists webkit2gtk-4.1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
+          else
+            echo "WebKitGTK 4.1 development headers already present."
+          fi
 
       - name: Cargo check
         if: steps.filter.outputs.skip != 'true'

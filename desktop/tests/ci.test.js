@@ -33,6 +33,8 @@ test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   assert.ok(content.includes("run: npm run check"), "CI must run npm run check");
   assert.ok(content.includes("run: npm test"), "CI must run npm test");
   assert.ok(content.includes("cargo check"), "CI must run cargo check for Rust syntax");
+  assert.ok(content.includes("swatinem/rust-cache@v2"), "CI must use swatinem/rust-cache@v2");
+  assert.ok(content.includes("desktop/src-tauri/"), "CI must filter Rust checks based on relevant file changes");
 
   // Lightweight CI: must not compile or package desktop installers during normal CI
   assert.ok(!content.includes("tauri build"), "CI must not compile or package desktop installers during normal runs");

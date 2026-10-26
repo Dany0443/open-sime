@@ -53,26 +53,26 @@ export function generateReleaseNotes({
   signStatus = {},
   repoRoot = REPO_ROOT,
 } = {}) {
-  const cleanVersion = String(version || "").trim().replace(/^v/, "") || "1.0.0";
+  const cleanVersion = String(version || "").trim().replace(/^v/, "") || "0.1.0";
   const tag = `v${cleanVersion}`;
   const isFirstRelease = !prevTag;
 
   const lines = [];
 
   if (isFirstRelease) {
-    lines.push("## First release of Open SIME");
+    lines.push("## First official beta release of Open SIME");
     lines.push("");
     lines.push(
       "Open SIME este un client neoficial, gratuit și privat pentru agenda electronică școlară agenda.sime.md, destinat elevilor și părinților."
     );
     lines.push("");
     lines.push(
-      "Initial production release for Windows (x64 NSIS), macOS (Apple Silicon DMG), and Linux (x64 AppImage)."
+      "Initial official beta release for Windows (x64 NSIS), macOS (Apple Silicon DMG), and Linux (x64 AppImage)."
     );
   } else {
     lines.push(`## Open SIME ${tag}`);
     lines.push("");
-    lines.push(`Production release ${tag} of Open SIME for Windows, macOS, and Linux.`);
+    lines.push(`Release ${tag} of Open SIME for Windows, macOS, and Linux.`);
     lines.push(`Changes since ${prevTag}:`);
   }
 

@@ -19,7 +19,7 @@ test("Release Notes: first-release notes fallback when no previous release exist
     signStatus: { windows: false, macos: false, linux: false, checksums: false },
   });
 
-  assert.ok(notes.startsWith("## First release of Open SIME"), "Must start with 'First release of Open SIME' heading");
+  assert.ok(notes.startsWith("## First official beta release of Open SIME"), "Must start with 'First official beta release of Open SIME' heading");
   assert.ok(
     notes.includes("Open SIME este un client neoficial, gratuit și privat pentru agenda electronică școlară agenda.sime.md"),
     "Must include Romanian introductory description"
@@ -44,7 +44,7 @@ test("Release Notes: subsequent-release notes logic with previous release tag", 
   assert.ok(notes.startsWith("## Open SIME v1.1.0"), "Must start with 'Open SIME v1.1.0' heading");
   assert.ok(notes.includes("Changes since v1.0.0:"), "Must indicate changes since previous tag");
   assert.ok(notes.includes("* fix(auth): improve session recovery"), "Must list commits");
-  assert.ok(!notes.includes("## First release of Open SIME"), "Subsequent release must not use first release heading");
+  assert.ok(!notes.includes("## First official beta release of Open SIME"), "Subsequent release must not use first release heading");
   assert.ok(notes.includes("Signed with Authenticode certificate"), "Windows must reflect signed status");
   assert.ok(notes.includes("Signed with Developer ID"), "macOS must reflect signed status");
   assert.ok(notes.includes("Unsigned build"), "Linux must reflect unsigned status");
@@ -64,7 +64,7 @@ test("Release Notes CLI: generates and writes release notes to file", () => {
     );
     assert.ok(fs.existsSync(outFile), "Output file must be created");
     const content1 = fs.readFileSync(outFile, "utf8");
-    assert.ok(content1.includes("## First release of Open SIME"));
+    assert.ok(content1.includes("## First official beta release of Open SIME"));
     assert.ok(content1.includes("### Checksum Verification"));
 
     // 2. Subsequent release invocation

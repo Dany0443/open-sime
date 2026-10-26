@@ -147,14 +147,15 @@ Two independent, purpose-built workflows live under `.github/workflows/`:
 - **Permissions**: `contents: read` (strictly read-only; no release creation permissions).
 - **Secrets Policy**: Does **not** require, expose, or access any signing credentials. Safe for untrusted pull requests and forks.
 - **Jobs**:
-  1. `checks`: Runs on `ubuntu-22.04`. Executes `npm run check` (file syntax and version validation) and `npm test` (full 112+ test suite).
-  2. `build-preview`: Matrix job building all 4 platform targets (`windows-latest`, `macos-latest` Intel, `macos-latest` Apple Silicon, `ubuntu-22.04`). Packages unsigned preview installers and uploads them as GitHub Actions workflow artifacts (retained for 7 days).
+  1. `web-checks`: Executes web syntax checks and unit test suite.
+  2. `desktop-checks`: Installs dependencies and runs desktop test suite.
+  3. `rust-checks`: Fast Rust syntax validation (`cargo check`) using `swatinem/rust-cache`, conditionally executed when relevant Rust/build files change.
+  4. `ci-status`: Verifies completion of all required checks for branch protection.
 
 ### 6.2. Production Release Workflow (`release.yml`)
 
 - **Triggers**:
-  - Pushed version tags matching `v*` (e.g. `v1.0.0`, `v1.2.3`)
-  - Manual dispatch (`workflow_dispatch`)
+  - Manual dispatch only (`workflow_dispatch`)
 - **Permissions**: `contents: write` (required to publish the GitHub Release).
 - **Execution Flow**:
   - **Fail-Fast Validation**: The `validate-release` job runs before any build runner starts. It validates tag-version equality, verifies that all unit tests pass, and checks that all required signing secrets exist in the repository. If any secret is missing, it aborts immediately with a clear error report.
