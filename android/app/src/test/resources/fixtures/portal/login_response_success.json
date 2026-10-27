@@ -1,0 +1,4 @@
+{
+  "redirectURL": "javascript:apex.navigation.dialog.close(true,function(pDialog){ apex.navigation.redirect(atob(\"L29yZHMvci9hZ2VuZGEvbWFpbi9tYWluLXBhZ2U/c2Vzc2lvbj05OTk5OTk=\")); });"
+}
+

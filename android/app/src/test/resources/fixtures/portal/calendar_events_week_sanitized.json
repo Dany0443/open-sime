@@ -1,0 +1,19 @@
+[
+  {
+    "start": "2026-10-24T08:00:00",
+    "end": "2026-10-24T08:45:00",
+    "title": "<span class=\"lesson-text-wrap\">Chimia</span><span class=\"lesson-room\">101</span><span class=\"lesson-teacher\">Profesor 1</span>"
+  },
+  {
+    "start": "2026-10-24T09:00:00",
+    "end": "2026-10-24T09:45:00",
+    "title": "<span class=\"absent-nemotivat lesson-text-wrap\">Fizica</span><span class=\"lesson-room\">101</span><span class=\"lesson-teacher\">Profesor 2</span>"
+  },
+  {
+    "start": "2026-10-24T10:00:00",
+    "end": "2026-10-24T10:45:00",
+    "className": "motivat",
+    "title": "<span class=\"lesson-text-wrap\">Biologie</span><span class=\"lesson-room\">101</span><span class=\"lesson-teacher\">Profesor 3</span>"
+  }
+]
+

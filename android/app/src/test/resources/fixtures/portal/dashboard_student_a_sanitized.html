@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head><meta charset="utf-8"><title>SIME Agenda Dashboard</title></head>
+<body>
+  <input type="hidden" id="pFlowId" name="p_flow_id" value="104">
+  <input type="hidden" id="pFlowStepId" name="p_flow_step_id" value="1">
+  <input type="hidden" id="pInstance" name="p_instance" value="999999">
+  <input type="hidden" id="pPageSubmissionId" name="p_page_submission_id" value="111111">
+  <input type="hidden" id="pSalt" value="222222">
+  <input type="hidden" id="pPageItemsProtected" value="PROT_CHECKSUM_SANITIZED">
+
+  <input type="hidden" id="P1_ELEVE_ID" name="P1_ELEVE_ID" value="ID_101">
+  <input type="hidden" data-for="P1_ELEVE_ID" value="ITEM_CHECKSUM_SANITIZED">
+  <input type="hidden" id="P1_ELEVE" name="P1_ELEVE" value="Elev 1">
+  <input type="hidden" id="P1_CLASS_NAME" name="P1_CLASS_NAME" value="10A">
+  <input type="hidden" id="P1_INSTITUTION_NAME" name="P1_INSTITUTION_NAME" value="Liceul Teoretic Sanitize">
+  <input type="hidden" id="P1_DIRIGINTE" name="P1_DIRIGINTE" value="Profesor 1">
+  <input type="hidden" id="P1_BIRTH_DATE" name="P1_BIRTH_DATE" value="01.01.2010">
+  <input type="hidden" id="P1_ADDRESS" name="P1_ADDRESS" value="Str. Exemplu 1, Chisinau">
+  <input type="hidden" id="P1_ELEVE_UK" name="P1_ELEVE_UK" value="UK_SANITIZED_1">
+  <input type="hidden" id="P1_SEMESTER_NUMBER" name="P1_SEMESTER_NUMBER" value="1">
+  <input type="hidden" id="P1_STATUS" name="P1_STATUS" value="Activ">
+
+  <input type="hidden" id="P1_PRESENCE_PERCENT" name="P1_PRESENCE_PERCENT" value="95">
+  <input type="hidden" id="P1_MOTIVATED" name="P1_MOTIVATED" value="1">
+  <input type="hidden" id="P1_UNMOTIVATED" name="P1_UNMOTIVATED" value="1">
+  <input type="hidden" id="P1_TOTAL_ABSENCES1" name="P1_TOTAL_ABSENCES1" value="2">
+  <input type="hidden" id="P1_MOTIVATED2" name="P1_MOTIVATED2" value="0">
+  <input type="hidden" id="P1_UNMOTIVATED2" name="P1_UNMOTIVATED2" value="0">
+  <input type="hidden" id="P1_TOTAL_ABSENCES2" name="P1_TOTAL_ABSENCES2" value="0">
+  <input type="hidden" id="P1_JSON_ABSENCES" name="P1_JSON_ABSENCES" value="[{&quot;monthYear&quot;:&quot;October 2026&quot;,&quot;lessonDate&quot;:&quot;14.10.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Fizica&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:1},{&quot;monthYear&quot;:&quot;October 2026&quot;,&quot;lessonDate&quot;:&quot;22.10.2026&quot;,&quot;lessonOrderId&quot;:3,&quot;discipliny&quot;:&quot;Biologie&quot;,&quot;absenceName&quot;:&quot;motivat&quot;,&quot;cumulativeAbsences&quot;:2}]">
+
+  <input type="hidden" id="P1_LAST_3_EVAL_LIST" value="&lt;ul&gt;&lt;li&gt;&lt;span class=&quot;eval-date&quot;&gt;20.10.2026&lt;/span&gt;&lt;span class=&quot;eval-discipline&quot;&gt;Matematica:&lt;/span&gt;&lt;span class=&quot;grade&quot;&gt;10&lt;/span&gt;&lt;/li&gt;&lt;li&gt;19.10.2026 Educație fizică: FB&lt;/li&gt;&lt;/ul&gt;">
+  <input type="hidden" id="P1_HOMEWORK" value="&lt;b&gt;25.10.2026&lt;/b&gt;&lt;ul&gt;&lt;li&gt;&lt;span&gt;Matematica:&lt;/span&gt;&lt;span&gt;Ex. 12 pag. 44&lt;/span&gt;&lt;/li&gt;&lt;/ul&gt;">
+
+  <div id="t_TreeNav">
+    <ul>
+      <li data-current="true"><a href="/ords/f?p=AGENDA:1:999999::NO::P1_ELEVE_ID:ID_501&amp;cs=CHECKSUM_SANITIZED">Elev 1</a></li>
+      <li><a href="/ords/f?p=AGENDA:1:999999::NO::P1_ELEVE_ID:ID_601&amp;cs=CHECKSUM_SANITIZED">Elev 2</a></li>
+    </ul>
+  </div>
+
+  <div id="SEMESTER_REG_1">
+    <table class="t-Report-report">
+      <tr>
+        <td headers="DISCIPLINA">Matematica</td>
+        <td headers="LISTA_EVALUATION"><span title="20.10.2026">10</span>, <span title="12.10.2026">8</span></td>
+        <td headers="MED_SEM">9,00</td>
+        <td headers="PROFESOR">Profesor 2</td>
+      </tr>
+    </table>
+  </div>
+
+  <script>
+    apex.widget.fullCalendar({"x":1,"ajaxIdentifier":"AJAX_CAL_SANITIZED_1"});
+    apex.widget.report.init("sem1","AJAX_SEM1_SANITIZED_1",{});
+    apex.widget.report.init("sem2","AJAX_SEM2_SANITIZED_1",{});
+  </script>
+</body>
+</html>
+
