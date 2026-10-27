@@ -32,12 +32,18 @@ data class PortalLoginDialogTokens(
     val pPageItemsProtected: String,
     val pReloadOnSubmit: String,
     val checksums: Map<String, String>,
-)
+) {
+    override fun toString(): String =
+        "PortalLoginDialogTokens(actionUrl=${SimeLogScrubber.scrubUrl(actionUrl)}, pFlowId=$pFlowId, pFlowStepId=$pFlowStepId, pInstance=${SimeLogScrubber.REDACTED}, pPageSubmissionId=${SimeLogScrubber.REDACTED}, pSalt=${SimeLogScrubber.REDACTED}, pPageItemsProtected=${SimeLogScrubber.REDACTED}, checksumKeys=${checksums.keys})"
+}
 
 data class PortalLoginRedirect(
     val portalUrl: String,
     val sessionId: String,
-)
+) {
+    override fun toString(): String =
+        "PortalLoginRedirect(portalUrl=${SimeLogScrubber.scrubUrl(portalUrl)}, sessionId=${SimeLogScrubber.REDACTED})"
+}
 
 data class PortalPageFlowInfo(
     val flowId: String,
@@ -474,6 +480,29 @@ internal object SimpleJson {
         return result
     }
 
+    fun quoteString(value: String): String = buildString(value.length + 2) {
+        append('"')
+        for (ch in value) {
+            when (ch) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> {
+                    if (ch.code < 0x20) {
+                        append(String.format(Locale.ROOT, "\\u%04x", ch.code))
+                    } else {
+                        append(ch)
+                    }
+                }
+            }
+        }
+        append('"')
+    }
+
     private class Reader(private val s: String) {
         var pos: Int = 0
 
@@ -631,3 +660,4 @@ internal object SimpleJson {
         }
     }
 }
+

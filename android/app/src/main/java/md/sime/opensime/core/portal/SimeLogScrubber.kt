@@ -41,7 +41,11 @@ object SimeLogScrubber {
         RegexOption.IGNORE_CASE,
     )
     private val URL_SESSION_STUDENT_PARAM_RE = Regex(
-        """\b(f_elev|p_session|p_instance|x01|x02)=[0-9A-Za-z_\-:]+""",
+        """\b(f_elev|p_session|session|p_instance|user_eleve_id|p1_eleve_id|x01|x02)([=:])[0-9A-Za-z_\-]+""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val APEX_FP_SESSION_RE = Regex(
+        """(f\?p=[^:&\s]+:[^:&\s]+:)([0-9A-Za-z_\-]+)""",
         RegexOption.IGNORE_CASE,
     )
 
@@ -73,7 +77,8 @@ object SimeLogScrubber {
             .replace(COOKIE_HEADER_RE) { match -> "${match.groupValues[1]}: $REDACTED" }
             .replace(CHECKSUM_PARAM_RE) { match -> "${match.groupValues[1]}=$REDACTED" }
             .replace(SALT_SUBMISSION_PARAM_RE) { match -> "${match.groupValues[1]}=$REDACTED" }
-            .replace(URL_SESSION_STUDENT_PARAM_RE) { match -> "${match.groupValues[1]}=$REDACTED" }
+            .replace(URL_SESSION_STUDENT_PARAM_RE) { match -> "${match.groupValues[1]}${match.groupValues[2]}$REDACTED" }
+            .replace(APEX_FP_SESSION_RE) { match -> "${match.groupValues[1]}$REDACTED" }
 
     /**
      * Redacts query tokens (`f_elev`, `cs`, `p_session`, `pSalt`, etc.) from a URL string.

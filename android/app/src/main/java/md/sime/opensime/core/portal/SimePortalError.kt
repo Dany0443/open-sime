@@ -29,7 +29,10 @@ sealed class SimePortalError(
     val code: SimeErrorCode,
     val retryAfterSeconds: Int? = null,
     cause: Throwable? = null,
-) : Exception(message, cause) {
+) : Exception(SimeLogScrubber.scrubString(message), cause) {
+
+    override fun toString(): String =
+        "${this::class.simpleName}(code=$code, message=${SimeLogScrubber.scrubString(message.orEmpty())})"
 
     companion object {
         const val DEFAULT_WAIT_SECONDS: Int = 900

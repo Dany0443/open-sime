@@ -43,6 +43,14 @@ enum class DataSourceMode {
 }
 
 /**
+ * Portal account role matching `role === "student" ? "student" : "parent"` in `web/server.js`.
+ */
+enum class AccountRole {
+    PARENT,
+    STUDENT,
+}
+
+/**
  * Standard qualifiers used in Moldovan schools alongside numeric 1..10 grades.
  * Qualifier marks are never counted in numeric averages.
  */

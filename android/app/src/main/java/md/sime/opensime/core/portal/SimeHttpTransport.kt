@@ -1,5 +1,6 @@
 package md.sime.opensime.core.portal
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -85,6 +86,8 @@ class UrlConnectionHttpExecutor(
             val validatedUrl = SimeUrlValidator.requireSimeUrl(request.url)
             val conn = try {
                 connectionOpener(URL(validatedUrl))
+            } catch (err: CancellationException) {
+                throw err
             } catch (err: SimePortalError) {
                 throw err
             } catch (err: Exception) {
@@ -148,6 +151,8 @@ class UrlConnectionHttpExecutor(
                     headers = rawHeaders,
                     bodyBytes = bodyBytes,
                 )
+            } catch (err: CancellationException) {
+                throw err
             } catch (err: SimePortalError) {
                 throw err
             } catch (err: SocketTimeoutException) {
@@ -247,6 +252,8 @@ class SimeHttpTransport(
                         maxBodyBytes = maxBodyBytes,
                     ),
                 )
+            } catch (err: CancellationException) {
+                throw err
             } catch (err: SimeRateLimitError) {
                 breaker.trip(err.waitSeconds)
                 throw err
@@ -418,3 +425,4 @@ class SimeHttpTransport(
         }
     }
 }
+
