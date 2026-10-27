@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from web/public/assets/favicon.svg by desktop/scripts/sync-brand-icons.mjs -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.125"
+        android:scaleY="1.125"
+        android:translateX="18"
+        android:translateY="18">
+        <path
+            android:fillColor="#D9E2FF"
+            android:pathData="M14 24 32 15l18 9-18 9z" />
+        <path
+            android:fillColor="#B0C6FF"
+            android:pathData="M22 31v10c0 3 4.5 6 10 6s10-3 10-6V31l-10 5z" />
+    </group>
+</vector>

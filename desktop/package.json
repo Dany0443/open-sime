@@ -6,11 +6,12 @@
   "type": "module",
   "scripts": {
     "sidecar:build": "node scripts/build-sidecar.mjs",
+    "icons:sync": "node scripts/sync-brand-icons.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:info": "tauri info",
-    "check": "node --check dist-tauri/loader.js && node --check scripts/build-sidecar.mjs && node --check scripts/stage-release-artifact.mjs && node --check scripts/verify-appimage.mjs && node --check scripts/check-versions.mjs && node --check scripts/check-release-secrets.mjs && node --check scripts/generate-release-notes.mjs && node scripts/check-versions.mjs",
+    "check": "node --check dist-tauri/loader.js && node --check scripts/build-sidecar.mjs && node --check scripts/sync-brand-icons.mjs && node --check scripts/stage-release-artifact.mjs && node --check scripts/verify-appimage.mjs && node --check scripts/check-versions.mjs && node --check scripts/check-release-secrets.mjs && node --check scripts/generate-release-notes.mjs && node scripts/check-versions.mjs",
     "check:versions": "node scripts/check-versions.mjs",
     "check:release-secrets": "node scripts/check-release-secrets.mjs",
     "test": "node --test tests/*.test.js"
