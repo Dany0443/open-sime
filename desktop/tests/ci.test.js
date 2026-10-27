@@ -10,6 +10,7 @@ const DESKTOP_ROOT = path.resolve(__dirname, "..");
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CI_WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "ci.yml");
 const RELEASE_WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "release.yml");
+const ANDROID_RELEASE_WORKFLOW = path.join(REPO_ROOT, ".github", "workflows", "android-release.yml");
 
 test("CI Workflow: .github/workflows/ci.yml structure and security", () => {
   assert.ok(fs.existsSync(CI_WORKFLOW), "ci.yml must exist under .github/workflows/");
@@ -128,13 +129,76 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   assert.ok(content.includes("--draft=true"), "Release must create a draft release");
 });
 
+test("Android Release Workflow: .github/workflows/android-release.yml validation and draft release", () => {
+  assert.ok(fs.existsSync(ANDROID_RELEASE_WORKFLOW), "android-release.yml must exist under .github/workflows/");
+  const content = fs.readFileSync(ANDROID_RELEASE_WORKFLOW, "utf8").replace(/\r\n/g, "\n");
+
+  // Must not contain tabs (invalid YAML)
+  assert.ok(!content.includes("\t"), "android-release.yml must use spaces, not tabs");
+
+  // Workflow permissions: write permission for creating/updating draft release
+  assert.ok(content.includes("permissions:\n  contents: write"), "Android release must have contents: write permission");
+
+  // Triggered ONLY manually via workflow_dispatch
+  assert.ok(content.includes("workflow_dispatch:"), "Android release must support workflow_dispatch");
+  assert.ok(!content.includes("push:"), "Android release must not trigger on push");
+
+  // Full Git history and tag fetching
+  assert.ok(content.includes("fetch-depth: 0"), "Android release must fetch full history");
+  assert.ok(content.includes("git fetch --tags --force"), "Android release must fetch remote tags");
+
+  // Version validation and consistency
+  assert.ok(content.includes("check-versions.mjs"), "Android release must validate version against check-versions.mjs");
+  assert.ok(content.includes("versionName"), "Android release must verify Android app versionName matches authoritative version");
+
+  // Signing secrets validation
+  assert.ok(content.includes("Validate release secrets"), "Android release must validate release secrets");
+  assert.ok(content.includes("ANDROID_KEYSTORE_BASE64"), "Android release must require ANDROID_KEYSTORE_BASE64");
+
+  // Unit tests and lint before release packaging
+  assert.ok(content.includes("./gradlew testDebugUnitTest"), "Android release must run JVM unit tests");
+  assert.ok(content.includes("./gradlew lintDebug"), "Android release must run lintDebug");
+
+  // Secure keystore handling and signed build
+  assert.ok(content.includes("mktemp -d"), "Android release must use temporary directory for keystore");
+  assert.ok(content.includes("umask 077"), "Android release must restrict keystore file permissions");
+  assert.ok(content.includes("shred -u"), "Android release must shred keystore after build");
+  assert.ok(content.includes("assembleRelease bundleRelease"), "Android release must build assembleRelease and bundleRelease");
+
+  // Staged release artifacts and checksum manifest
+  assert.ok(content.includes("Open-SIME-android.apk"), "Android release must stage Open-SIME-android.apk");
+  assert.ok(content.includes("Open-SIME-android.aab"), "Android release must stage Open-SIME-android.aab");
+  assert.ok(content.includes("checksums-android.txt"), "Android release must generate checksums-android.txt");
+
+  // Actions artifact upload
+  assert.ok(content.includes("actions/upload-artifact@v4"), "Android release must upload release artifact");
+  assert.ok(content.includes("open-sime-android-release"), "Android release artifact must be named open-sime-android-release");
+
+  // Draft release creation & safe updates
+  assert.ok(content.includes("--draft=true"), "Android release must create a draft release");
+  assert.ok(!content.includes("--draft=false"), "Android release must never publish automatically");
+  assert.ok(content.includes("gh release view"), "Android release must check existing release status");
+  assert.ok(content.includes("gh release upload"), "Android release must upload individual assets to release");
+  assert.ok(content.includes("--clobber"), "Android release must clobber only matching assets on retry");
+
+  // Safety checks against overwriting published releases or tag mismatches
+  assert.ok(content.includes("isDraft"), "Android release must verify existing release is a draft before updating");
+  assert.ok(content.includes("already published"), "Android release must fail if release is already published");
+  assert.ok(content.includes("TAG_COMMIT"), "Android release must check existing tag commit");
+
+  // Workflow summary with draft distinction
+  assert.ok(content.includes("GITHUB_STEP_SUMMARY"), "Android release must write to GITHUB_STEP_SUMMARY");
+  assert.ok(content.includes("Draft Release Prepared (NOT published)"), "Summary must clearly state draft status");
+  assert.ok(content.includes("Draft Release URL"), "Summary must include draft release URL");
+});
+
 test("Workflow YAML Validation: .github/workflows/*.yml must be valid YAML syntax", () => {
   try {
     execFileSync(
       "python3",
       [
         "-c",
-        "import yaml; yaml.safe_load(open('.github/workflows/release.yml')); yaml.safe_load(open('.github/workflows/ci.yml'))",
+        "import glob, yaml; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]",
       ],
       { cwd: REPO_ROOT, encoding: "utf8" }
     );

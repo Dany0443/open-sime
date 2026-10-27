@@ -25,12 +25,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch git tags
+        run: git fetch --tags --force
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Check version consistency
+      - name: Determine and verify authoritative version
+        id: version-info
         working-directory: desktop
         run: |
           INPUT_VER="${{ github.event.inputs.version }}"
@@ -38,6 +42,16 @@ jobs:
             node scripts/check-versions.mjs --expected "$INPUT_VER"
           else
             node scripts/check-versions.mjs
+          fi
+          VER=$(node scripts/check-versions.mjs --print)
+          echo "Authoritative version: $VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+
+          # Verify Android app versionName matches authoritative release version
+          if ! grep -q "versionName = \"$VER\"" ../android/app/build.gradle.kts; then
+            echo "::error::Android app versionName in android/app/build.gradle.kts does not match authoritative version $VER"
+            exit 1
           fi
 
       - name: Validate release secrets
@@ -110,4 +124,129 @@ jobs:
           name: open-sime-android-release
           path: release-dist/android/*
           if-no-files-found: error
+
+      - name: Create or update GitHub draft release
+        id: create-draft-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_TAG: ${{ steps.version-info.outputs.tag }}
+          VERSION: ${{ steps.version-info.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          APK_FILE="release-dist/android/Open-SIME-android.apk"
+          AAB_FILE="release-dist/android/Open-SIME-android.aab"
+          SUMS_FILE="release-dist/android/checksums-android.txt"
+
+          # 1. Verify that all 3 required release assets exist and are non-empty
+          for f in "$APK_FILE" "$AAB_FILE" "$SUMS_FILE"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Required release asset not found: $f"
+              exit 1
+            fi
+            if [ ! -s "$f" ]; then
+              echo "::error::Release asset is empty: $f"
+              exit 1
+            fi
+          done
+
+          RELEASE_ASSETS=(
+            "$APK_FILE"
+            "$AAB_FILE"
+            "$SUMS_FILE"
+          )
+
+          # 2. Check existing Git tag: prevent tag hijacking or commit mismatch
+          TAG_COMMIT=$(git rev-parse -q --verify "refs/tags/${TARGET_TAG}^{commit}" 2>/dev/null || echo "")
+          if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
+            echo "::error::Git tag ${TARGET_TAG} already exists and points to commit ${TAG_COMMIT}, but current build commit is ${GITHUB_SHA}. Incompatible tag state."
+            exit 1
+          fi
+
+          # 3. Check existing GitHub Release status
+          EXISTING_IS_DRAFT=$(gh release view "$TARGET_TAG" --json isDraft -q .isDraft 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_IS_DRAFT" ]; then
+            # Release already exists on GitHub
+            if [ "$EXISTING_IS_DRAFT" != "true" ]; then
+              echo "::error::Release ${TARGET_TAG} is already published on GitHub. Overwriting or attaching assets to a published release is strictly forbidden."
+              exit 1
+            fi
+
+            # Draft release exists. Verify target commit compatibility if specific commit is set
+            EXISTING_TARGET=$(gh release view "$TARGET_TAG" --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")
+            if [ -n "$EXISTING_TARGET" ] && [ "${#EXISTING_TARGET}" -eq 40 ] && [ "$EXISTING_TARGET" != "$GITHUB_SHA" ]; then
+              echo "::error::Existing draft release ${TARGET_TAG} targets commit ${EXISTING_TARGET}, but current build commit is ${GITHUB_SHA}. Incompatible commit target."
+              exit 1
+            fi
+
+            echo "Existing draft release ${TARGET_TAG} found. Uploading Android release assets while preserving draft state..."
+            gh release edit "$TARGET_TAG" --draft=true
+            gh release upload "$TARGET_TAG" "${RELEASE_ASSETS[@]}" --clobber
+            echo "✓ Android assets uploaded to draft release ${TARGET_TAG}."
+          else
+            # Release does not exist yet. Create a new draft release.
+            echo "Creating new draft release ${TARGET_TAG} targeting commit ${GITHUB_SHA}..."
+            gh release create "$TARGET_TAG" \
+              "${RELEASE_ASSETS[@]}" \
+              --title "Open SIME ${TARGET_TAG}" \
+              --notes "Open SIME ${TARGET_TAG} (Android release)." \
+              --draft=true \
+              --prerelease=false \
+              --target "$GITHUB_SHA"
+            echo "✓ Draft release ${TARGET_TAG} created."
+          fi
+
+          # 4. Resolve draft release URL for workflow summary
+          RELEASE_URL=$(gh release view "$TARGET_TAG" --json url -q .url 2>/dev/null || echo "")
+          if [ -z "$RELEASE_URL" ]; then
+            RELEASE_URL="https://github.com/${REPOSITORY}/releases/tag/${TARGET_TAG}"
+          fi
+          echo "release_url=${RELEASE_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release workflow summary
+        if: success()
+        env:
+          TARGET_TAG: ${{ steps.version-info.outputs.tag }}
+          VERSION: ${{ steps.version-info.outputs.version }}
+          RELEASE_URL: ${{ steps.create-draft-release.outputs.release_url }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          APK_FILE="release-dist/android/Open-SIME-android.apk"
+          AAB_FILE="release-dist/android/Open-SIME-android.aab"
+          SUMS_FILE="release-dist/android/checksums-android.txt"
+
+          APK_SIZE=$(wc -c < "$APK_FILE" | tr -d ' ')
+          AAB_SIZE=$(wc -c < "$AAB_FILE" | tr -d ' ')
+          SUMS_SIZE=$(wc -c < "$SUMS_FILE" | tr -d ' ')
+          CHECKSUMS=$(cat "$SUMS_FILE")
+
+          {
+            echo "## Open SIME Android Release (Draft)"
+            echo ""
+            echo "> [!IMPORTANT]"
+            echo "> **Status: Draft Release Prepared (NOT published)**"
+            echo ">"
+            echo "> This release is saved as a **draft** on GitHub. It has **NOT** been published to users."
+            echo "> You can review the draft release, verify the assets, and publish manually when ready."
+            echo ""
+            echo "| Property | Value |"
+            echo "| :--- | :--- |"
+            echo "| **Version** | \`${VERSION}\` |"
+            echo "| **Tag** | \`${TARGET_TAG}\` |"
+            echo "| **Commit** | \`${COMMIT_SHA}\` |"
+            echo "| **Draft Release URL** | [View Draft Release on GitHub](${RELEASE_URL}) |"
+            echo ""
+            echo "### Attached Release Assets"
+            echo "- **\`Open-SIME-android.apk\`** — ${APK_SIZE} bytes (direct sideload package)"
+            echo "- **\`Open-SIME-android.aab\`** — ${AAB_SIZE} bytes (Android App Bundle)"
+            echo "- **\`checksums-android.txt\`** — ${SUMS_SIZE} bytes (SHA-256 checksums)"
+            echo ""
+            echo "#### SHA-256 Checksums"
+            echo "\`\`\`"
+            echo "${CHECKSUMS}"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
