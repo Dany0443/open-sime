@@ -16,10 +16,12 @@ This is an independent, unofficial open-source project. It is not affiliated wit
 | --- | --- |
 | `web/` | Web client and Express server (`server.js`, `index.html`, `public/`, unit tests) |
 | `desktop/` | Tauri 2 desktop application packaging (`src-tauri/`, `dist-tauri/`, scripts, tests) |
-| `android/` | Reserved for future Android application |
-| `docs/` | Project architecture and desktop build documentation |
+| `android/` | Native Kotlin + Jetpack Compose Android client (`app/`, Material 3 Expressive UI, unit tests) |
+| `docs/` | Project architecture, Android architecture, and desktop build documentation |
 
 ## Running Locally
+
+### Web
 
 To run the web application locally with Node.js 20+:
 
@@ -30,6 +32,24 @@ npm start
 ```
 
 Open `http://localhost:3000` in your web browser.
+
+### Android
+
+The Android client (`android/`) is a native Kotlin and Jetpack Compose application (not a WebView wrapper). It is designed to communicate directly with `https://agenda.sime.md` on the user's device without requiring an Open SIME backend server.
+
+> **Current status:** The Android UI foundation (`Acasă`, `Reușita`, `Orar`, `Absențe`, `Teme`, `Profil și profesori`, `Setări`, adaptive compact/medium/expanded navigation, student isolation, and trilingual `ro`/`ru`/`en` theming) currently runs with clearly labeled synthetic sample data (`DataSourceMode.SAMPLE_PREVIEW`). Direct `agenda.sime.md` portal integration is planned for the next phase.
+
+To build, test, lint, and install the debug app on a connected Android device or emulator (requires JDK 21 and the Android SDK):
+
+```bash
+cd android
+./gradlew assembleDebug
+./gradlew testDebugUnitTest
+./gradlew lintDebug
+./gradlew installDebug
+```
+
+See [`android/README.md`](android/README.md) and [`docs/android-architecture.md`](docs/android-architecture.md) for package structure, toolchain versions, and release signing configuration.
 
 ## Releases
 

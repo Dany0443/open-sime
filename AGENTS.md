@@ -95,7 +95,7 @@ For an overview, see the root `README.md`.
 ```
 web/                 Web client and server (server.js, index.html, public/, tests/, scripts/)
 desktop/             Tauri 2 desktop client (src-tauri/, dist-tauri/, tests/, scripts/)
-android/             Reserved for future Android development
+android/             Native Kotlin + Jetpack Compose Android client (app/, gradle/)
 docs/                Architecture and build documentation
 ```
 
@@ -114,9 +114,17 @@ Inside `desktop/`:
 ```
 src-tauri/           Tauri Rust source (lib.rs, main.rs, capabilities, config)
 dist-tauri/          Embedded startup loader page
-scripts/             build-sidecar.mjs, check-versions.mjs, check-release-secrets.mjs
+scripts/             build-sidecar.mjs, check-versions.mjs, check-release-secrets.mjs, sync-brand-icons.mjs
 tests/               Desktop sidecar and CI workflow automated tests
 package.json         Desktop build tooling dependencies
+```
+
+Inside `android/`:
+
+```
+app/src/main/        Kotlin + Jetpack Compose source (core/, navigation/, feature/) and resources
+app/src/test/        Automated JVM unit tests (student isolation, marks, localization, session coordinator)
+app/build.gradle.kts Module build configuration, dependencies, R8, and release signing validation
 ```
 
 Useful commands:
@@ -129,6 +137,13 @@ npm run check        # syntax check of web server and client files
 cd ../desktop
 npm test             # run desktop test suite
 npm run check        # syntax and version checks of desktop files
+npm run icons:sync   # regenerate Android and desktop icon assets from web/public/assets/favicon.svg
+
+cd ../android
+./gradlew testDebugUnitTest  # run Android JVM unit test suite
+./gradlew lintDebug          # run Android Lint checks
+./gradlew assembleDebug      # build debug APK (no release credentials required)
+./gradlew installDebug       # install debug APK on a connected device or emulator
 ```
 
 Enable parser health diagnostics (never returns personal data):
@@ -169,20 +184,22 @@ Any change touching switching, caching or student-scoped routes needs a test wit
 
 No new dependency without a one-sentence justification and the maintainers' agreement. Prefer the standard library. The test runner is the built-in `node:test`.
 
-### Repository structure and desktop separation
+### Repository structure, platform separation, and shared branding
 
-- The web app has no desktop dependencies: `web/` must run and test completely standalone without `desktop/`.
+- The web app has no desktop or Android dependencies: `web/` must run and test completely standalone without `desktop/` or `android/`.
 - The desktop app builds on the web app without duplication: `desktop/` has no second copy of the server or UI. `desktop/scripts/build-sidecar.mjs` bundles `../web/server.js` and embeds `../web/index.html` and `../web/public/`.
 - In desktop mode, `web/server.js` rejects unexpected `Host` headers (allowing only `127.0.0.1:<port>` and `localhost:<port>`) with HTTP 403. Dev and standalone modes remain open.
-- Release signing is optional per platform in `.github/workflows/release.yml`. `desktop/scripts/check-release-secrets.mjs` outputs platform booleans, does not fail when secrets are missing (allowing unsigned builds), and fails only on partial configuration. NEVER print, echo or log secret values.
-- Version consistency: versions across all four project files (`web/package.json`, `desktop/package.json`, `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml`) must stay strictly synchronized. `desktop/scripts/check-versions.mjs` validates this.
+- The Android app (`android/`) is a native Kotlin and Jetpack Compose application, not a WebView wrapper. It currently runs with clearly labeled synthetic sample data (`DataSourceMode.SAMPLE_PREVIEW`) while the UI foundation is established, and is architected to communicate directly with `https://agenda.sime.md` on-device without requiring an Open SIME backend server.
+- Canonical brand icon: `web/public/assets/favicon.svg` is the single source of truth for the Open SIME icon across web, Android (`mipmap-*` and adaptive `ic_launcher_*` drawables), and desktop (`desktop/src-tauri/icons/`). Run `cd desktop && npm run icons:sync` (`desktop/scripts/sync-brand-icons.mjs`) to regenerate platform icon assets whenever `favicon.svg` changes.
+- Release signing is optional per platform in `.github/workflows/release.yml`. `desktop/scripts/check-release-secrets.mjs` outputs platform booleans, does not fail when secrets are missing (allowing unsigned builds), and fails only on partial configuration. On Android, debug builds work without credentials while release tasks (`assembleRelease`, `installRelease`, `bundleRelease`) require private signing credentials via environment variables or untracked `android/keystore.properties`. NEVER print, echo or log secret values.
+- Version consistency: versions across all four web/desktop project files (`web/package.json`, `desktop/package.json`, `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml`) must stay strictly synchronized. `desktop/scripts/check-versions.mjs` validates this. Android (`android/app/build.gradle.kts`) tracks `versionName` (aligned with the semantic release version, e.g. `0.1.0`) and a monotonically increasing integer `versionCode`.
 
 ## UI conventions
 
-- Material 3 Expressive on web and desktop (and later Android). Use design tokens (CSS custom properties) for color, shape, type and spacing. Components never hardcode colors.
-- Support light, dark and high-contrast themes, text scaling, reduced motion and the simple mode for young users. Touch targets are at least 48 by 48 px. Contrast is at least 4.5:1 for text and 3:1 for controls.
-- Use the window size classes: compact below 600px (bottom navigation), medium 600 to 839px (rail), expanded 840px and up (drawer).
-- All user-facing text lives in `public/strings.js`. Romanian is the default and the source of truth. Provide ru and en for new keys, with fallback to ro. Files are UTF-8. Never type a placeholder `?` in place of a diacritic.
+- Material 3 Expressive on web, desktop and Android. Use design tokens (CSS custom properties on web/desktop, `MaterialTheme` tokens in Compose on Android) for color, shape, type and spacing. Components never hardcode colors.
+- Support light, dark and high-contrast themes, text scaling, reduced motion and the simple mode for young users. Touch targets are at least 48 by 48 px/dp. Contrast is at least 4.5:1 for text and 3:1 for controls.
+- Use the window size classes: compact below 600px/dp (bottom navigation), medium 600 to 839px/dp (rail), expanded 840px/dp and up (drawer).
+- All user-facing text lives in `web/public/strings.js` (web/desktop) and `android/app/src/main/java/md/sime/opensime/core/i18n/AppStrings.kt` (Android). Romanian is the default and the source of truth. Provide ru and en for new keys, with fallback to ro. Files are UTF-8. Never type a placeholder `?` in place of a diacritic.
 - Color is never the only signal. Every colored element also has text or a shape.
 - Tone toward children: friendly and honest, never alarming.
 

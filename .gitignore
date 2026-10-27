@@ -2,7 +2,7 @@
 .env
 .env.*
 *.env
-data/
+/data/
 web/data/
 desktop/data/
 sime-desktop/data/
@@ -12,6 +12,7 @@ PROGRESS.md
 # Agent harness
 .agents/
 .claude/
+/.local/
 tmp/
 skills-lock.json
 

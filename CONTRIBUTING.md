@@ -25,8 +25,8 @@ Read `AGENTS.md` in the repository root before doing anything, including reading
 
 - `web/`: web client and server (`server.js`, `index.html`, `public/`, unit tests). Runs standalone.
 - `desktop/`: Tauri 2 desktop wrapper (`src-tauri/`, `dist-tauri/`, build scripts, tests).
-- `android/`: reserved for future mobile development.
-- `docs/`: architecture and desktop distribution documentation.
+- `android/`: native Kotlin and Jetpack Compose Android client (`app/`, Material 3 Expressive UI, unit tests). Communicates directly with `agenda.sime.md` without an intermediate server (currently in UI foundation preview with synthetic sample data; direct portal networking is planned next).
+- `docs/`: architecture, Android design, and desktop distribution documentation.
 
 ## Making a change
 
@@ -37,7 +37,9 @@ Read `AGENTS.md` in the repository root before doing anything, including reading
    ```bash
    cd web && npm run check && npm test
    cd ../desktop && npm run check && npm test
+   cd ../android && ./gradlew testDebugUnitTest lintDebug assembleDebug
    ```
+   When modifying the Android UI, also install and verify on a connected device or emulator with `./gradlew installDebug` when available.
 5. If you change how the portal is parsed, add a sanitized fixture and its expected output in the same pull request. Portal fixes start from a real fixture, not a guess.
 6. Describe what changed, why, and how you tested it.
 
