@@ -54,6 +54,14 @@ jobs:
             exit 1
           fi
 
+          # Prevent tag collision with a different commit
+          TARGET_TAG="v$VER"
+          TAG_COMMIT=$(git rev-parse -q --verify "refs/tags/${TARGET_TAG}^{commit}" 2>/dev/null || echo "")
+          if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "${{ github.sha }}" ]; then
+            echo "::error::Git tag ${TARGET_TAG} already exists and points to commit ${TAG_COMMIT}, but current build commit is ${{ github.sha }}."
+            exit 1
+          fi
+
       - name: Validate release secrets
         id: check-secrets
         env:

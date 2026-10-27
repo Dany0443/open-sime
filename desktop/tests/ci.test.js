@@ -127,6 +127,22 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
 
   // Draft release creation
   assert.ok(content.includes("--draft=true"), "Release must create a draft release");
+  assert.ok(!content.includes("--draft=false"), "Release must never publish automatically");
+  assert.ok(content.includes("gh release view"), "Release must check existing release status");
+  assert.ok(content.includes("gh release upload"), "Release must upload individual assets to release");
+  assert.ok(content.includes("--clobber"), "Release must clobber only matching assets on retry");
+  assert.ok(content.includes("--target \"$GITHUB_SHA\""), "Release must target the specific commit SHA");
+
+  // Safety checks against overwriting published releases or tag mismatches
+  assert.ok(content.includes("versionName"), "Release must verify Android app versionName matches authoritative version");
+  assert.ok(content.includes("isDraft"), "Release must verify existing release is a draft before updating");
+  assert.ok(content.includes("already published"), "Release must fail if release is already published");
+  assert.ok(content.includes("TAG_COMMIT"), "Release must check existing tag commit");
+
+  // Workflow summary with draft distinction
+  assert.ok(content.includes("GITHUB_STEP_SUMMARY"), "Release must write to GITHUB_STEP_SUMMARY");
+  assert.ok(content.includes("Draft Release Prepared (NOT published)"), "Summary must clearly state draft status");
+  assert.ok(content.includes("Draft Release URL"), "Summary must include draft release URL");
 });
 
 test("Android Release Workflow: .github/workflows/android-release.yml validation and draft release", () => {
@@ -190,6 +206,60 @@ test("Android Release Workflow: .github/workflows/android-release.yml validation
   assert.ok(content.includes("GITHUB_STEP_SUMMARY"), "Android release must write to GITHUB_STEP_SUMMARY");
   assert.ok(content.includes("Draft Release Prepared (NOT published)"), "Summary must clearly state draft status");
   assert.ok(content.includes("Draft Release URL"), "Summary must include draft release URL");
+});
+
+test("Cross-Workflow Release Coordination: Desktop and Android merge safely into one draft release", () => {
+  const desktopYaml = fs.readFileSync(RELEASE_WORKFLOW, "utf8").replace(/\r\n/g, "\n");
+  const androidYaml = fs.readFileSync(ANDROID_RELEASE_WORKFLOW, "utf8").replace(/\r\n/g, "\n");
+
+  // Both workflows must enforce tag format tag=v$VER
+  assert.ok(desktopYaml.includes('tag=v$VER'), "Desktop release must use v$VER tag format");
+  assert.ok(androidYaml.includes('tag=v$VER'), "Android release must use v$VER tag format");
+
+  // Both workflows must verify Android versionName matches authoritative version
+  assert.ok(desktopYaml.includes('versionName = \\"$VER\\"'), "Desktop release must verify android versionName");
+  assert.ok(androidYaml.includes('versionName = \\"$VER\\"'), "Android release must verify android versionName");
+
+  // Both workflows must use --draft=true and NEVER --draft=false
+  assert.ok(desktopYaml.includes("--draft=true") && !desktopYaml.includes("--draft=false"), "Desktop must only draft");
+  assert.ok(androidYaml.includes("--draft=true") && !androidYaml.includes("--draft=false"), "Android must only draft");
+
+  // Both workflows must guard against overwriting published releases
+  assert.ok(desktopYaml.includes('Release ${TARGET_TAG} is already published'), "Desktop must guard published release");
+  assert.ok(androidYaml.includes('Release ${TARGET_TAG} is already published'), "Android must guard published release");
+
+  // Both workflows must guard against Git tag commit mismatch
+  assert.ok(desktopYaml.includes('Git tag ${TARGET_TAG} already exists and points to commit'), "Desktop must guard tag commit mismatch");
+  assert.ok(androidYaml.includes('Git tag ${TARGET_TAG} already exists and points to commit'), "Android must guard tag commit mismatch");
+
+  // Both workflows must guard against draft targetCommitish mismatch
+  assert.ok(desktopYaml.includes('targets commit ${EXISTING_TARGET}'), "Desktop must guard targetCommitish mismatch");
+  assert.ok(androidYaml.includes('targets commit ${EXISTING_TARGET}'), "Android must guard targetCommitish mismatch");
+
+  // Both workflows must specify --target "$GITHUB_SHA" when creating new releases
+  assert.ok(desktopYaml.includes('--target "$GITHUB_SHA"'), "Desktop must create release with target commit");
+  assert.ok(androidYaml.includes('--target "$GITHUB_SHA"'), "Android must create release with target commit");
+
+  // Both workflows must upload with --clobber for safe idempotent asset uploads
+  assert.ok(desktopYaml.includes('gh release upload "$TARGET_TAG" "${RELEASE_ASSETS[@]}" --clobber'), "Desktop upload must clobber");
+  assert.ok(androidYaml.includes('gh release upload "$TARGET_TAG" "${RELEASE_ASSETS[@]}" --clobber'), "Android upload must clobber");
+
+  // Verify asset filename disjointness:
+  // Android assets: Open-SIME-android.apk, Open-SIME-android.aab, checksums-android.txt
+  // Desktop assets: Open-SIME-installer-*-windows-x64.exe, Open-SIME-*-macos-apple-silicon.dmg, Open-SIME-*-linux-x64.AppImage, checksums.txt, checksums.txt.sig
+  assert.ok(androidYaml.includes("checksums-android.txt"), "Android must use checksums-android.txt to prevent collision with checksums.txt");
+  assert.ok(desktopYaml.includes("checksums.txt"), "Desktop must use checksums.txt");
+  assert.ok(!desktopYaml.includes("checksums-android.txt"), "Desktop must not touch checksums-android.txt");
+  assert.ok(!androidYaml.includes("Open-SIME-installer-"), "Android must not produce installer exe");
+  assert.ok(!androidYaml.includes(".AppImage"), "Android must not produce AppImage");
+  assert.ok(!androidYaml.includes(".dmg"), "Android must not produce dmg");
+
+  // On draft update, Android release must NOT pass --notes or --notes-file, preserving desktop's release-notes.md
+  const androidEditCall = androidYaml.match(/gh release edit[^\n]+/g);
+  assert.ok(androidEditCall && androidEditCall.length > 0, "Android must have gh release edit call");
+  for (const call of androidEditCall) {
+    assert.ok(!call.includes("--notes"), "Android release edit must not overwrite existing release notes");
+  }
 });
 
 test("Workflow YAML Validation: .github/workflows/*.yml must be valid YAML syntax", () => {
