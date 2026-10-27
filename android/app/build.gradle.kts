@@ -16,17 +16,20 @@ val keystoreProps = Properties().apply {
     }
 }
 
-fun resolveSigningValue(envKey: String, propKey: String): String? {
-    val fromEnv = System.getenv(envKey)?.trim()?.takeIf { it.isNotEmpty() }
-    if (fromEnv != null) return fromEnv
+fun resolveSigningValue(vararg envKeys: String, propKey: String): String? {
+    for (key in envKeys) {
+        val fromEnv = System.getenv(key)?.trim()?.takeIf { it.isNotEmpty() }
+        if (fromEnv != null) return fromEnv
+    }
     return keystoreProps.getProperty(propKey)?.trim()?.takeIf { it.isNotEmpty() }
 }
 
-val releaseStorePath = resolveSigningValue("SIME_ANDROID_KEYSTORE_PATH", "sime.release.storeFile")
-val releaseStorePassword = resolveSigningValue("SIME_ANDROID_KEYSTORE_PASSWORD", "sime.release.storePassword")
-val releaseKeyAlias = resolveSigningValue("SIME_ANDROID_KEY_ALIAS", "sime.release.keyAlias")
-val releaseKeyPassword = resolveSigningValue("SIME_ANDROID_KEY_PASSWORD", "sime.release.keyPassword")
+val releaseStorePath = resolveSigningValue("SIME_ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PATH", propKey = "sime.release.storeFile")
+val releaseStorePassword = resolveSigningValue("SIME_ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEYSTORE_PASSWORD", propKey = "sime.release.storePassword")
+val releaseKeyAlias = resolveSigningValue("SIME_ANDROID_KEY_ALIAS", "ANDROID_KEY_ALIAS", propKey = "sime.release.keyAlias")
+val releaseKeyPassword = resolveSigningValue("SIME_ANDROID_KEY_PASSWORD", "ANDROID_KEY_PASSWORD", propKey = "sime.release.keyPassword")
 val releaseStoreFile = releaseStorePath?.let { rootProject.file(it) }
+    ?: rootProject.file("open-sime-release.jks").takeIf { it.isFile }
 
 val hasCompleteReleaseSigning =
     releaseStoreFile != null &&
@@ -109,19 +112,17 @@ val validateReleaseSigning = tasks.register("validateReleaseSigning") {
     doLast {
         if (!hasCompleteReleaseSigning) {
             val missing = buildList {
-                if (releaseStorePath.isNullOrEmpty()) {
-                    add("SIME_ANDROID_KEYSTORE_PATH (or sime.release.storeFile)")
-                } else if (releaseStoreFile?.isFile != true) {
-                    add("Keystore file not found at configured path")
+                if (releaseStoreFile == null || !releaseStoreFile.isFile) {
+                    add("ANDROID_KEYSTORE_PATH or SIME_ANDROID_KEYSTORE_PATH (or open-sime-release.jks / sime.release.storeFile)")
                 }
                 if (releaseStorePassword.isNullOrEmpty()) {
-                    add("SIME_ANDROID_KEYSTORE_PASSWORD (or sime.release.storePassword)")
+                    add("ANDROID_KEYSTORE_PASSWORD or SIME_ANDROID_KEYSTORE_PASSWORD (or sime.release.storePassword)")
                 }
                 if (releaseKeyAlias.isNullOrEmpty()) {
-                    add("SIME_ANDROID_KEY_ALIAS (or sime.release.keyAlias)")
+                    add("ANDROID_KEY_ALIAS or SIME_ANDROID_KEY_ALIAS (or sime.release.keyAlias)")
                 }
                 if (releaseKeyPassword.isNullOrEmpty()) {
-                    add("SIME_ANDROID_KEY_PASSWORD (or sime.release.keyPassword)")
+                    add("ANDROID_KEY_PASSWORD or SIME_ANDROID_KEY_PASSWORD (or sime.release.keyPassword)")
                 }
             }
             throw GradleException(

@@ -387,10 +387,15 @@ class SimePortalClientTest {
         assertEquals(StudentId("id_101"), snapA.studentId)
         assertEquals("10A", snapA.student.className)
         assertEquals("Profesor 1", snapA.student.classMasterName)
+        assertTrue("Teachers must be populated in snapshot", snapA.teachers.isNotEmpty())
+        assertTrue("Class master must be flagged as class master", snapA.teachers.any { it.isClassMaster && it.name == "Profesor 1" })
+        assertTrue("Subject teachers must be present", snapA.teachers.any { it.name == "Profesor 2" })
 
         assertEquals(StudentId("id_201"), snapB.studentId)
         assertEquals("7B", snapB.student.className)
         assertEquals("Profesor 3", snapB.student.classMasterName)
+        assertTrue("Student B teachers must be populated", snapB.teachers.isNotEmpty())
+        assertTrue("Student B class master must be flagged", snapB.teachers.any { it.isClassMaster && it.name == "Profesor 3" })
     }
 
     @Test

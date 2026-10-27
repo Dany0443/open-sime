@@ -147,6 +147,7 @@ class LiveAgendaRepository(
             currentSemester = cachedSnap?.student?.currentSemester ?: 1,
             academicYear = cachedSnap?.student?.academicYear.orEmpty(),
             enrollmentStatus = cachedSnap?.student?.enrollmentStatus,
+            birthDate = cachedSnap?.student?.birthDate,
         )
     }
 

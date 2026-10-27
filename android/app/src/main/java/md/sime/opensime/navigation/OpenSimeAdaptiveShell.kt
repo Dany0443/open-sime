@@ -1,6 +1,7 @@
 package md.sime.opensime.navigation
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,6 +76,8 @@ fun OpenSimeAdaptiveShell(
     simpleMode: Boolean,
     isSamplePreview: Boolean,
     modifier: Modifier = Modifier,
+    onSignInClick: (() -> Unit)? = null,
+    onSignOutClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val strings = LocalAppStrings.current
@@ -117,6 +120,7 @@ fun OpenSimeAdaptiveShell(
                             availableStudents = availableStudents,
                             selectedStudentId = selectedStudentId,
                             onSelectStudent = onSelectStudent,
+                            onSignInClick = onSignInClick,
                         )
                     },
                     bottomBar = {
@@ -179,6 +183,8 @@ fun OpenSimeAdaptiveShell(
                             onSelectDestination = onSelectDestination,
                             onSelectProfile = onSelectProfile,
                             onOpenSettings = onOpenSettings,
+                            onSignInClick = onSignInClick,
+                            onSignOutClick = onSignOutClick,
                         )
 
                         VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -206,6 +212,7 @@ fun OpenSimeAdaptiveShell(
                                 selectedStudentId = selectedStudentId,
                                 onSelectStudent = onSelectStudent,
                                 applyTopStatusInset = false,
+                                onSignInClick = onSignInClick,
                             )
 
                             Box(
@@ -237,6 +244,8 @@ private fun OpenSimeSideNavigation(
     onSelectDestination: (TopLevelDestination) -> Unit,
     onSelectProfile: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSignInClick: (() -> Unit)? = null,
+    onSignOutClick: (() -> Unit)? = null,
 ) {
     val strings = LocalAppStrings.current
     val navWidth = if (isExpandedDrawer) 264.dp else 84.dp
@@ -342,6 +351,26 @@ private fun OpenSimeSideNavigation(
             onClick = onOpenSettings,
             modifier = Modifier.testTag("rail_action_settings"),
         )
+
+        if (isSamplePreview && onSignInClick != null) {
+            SideNavItem(
+                label = strings.connectToSime,
+                icon = OpenSimeIcons.Login,
+                selected = false,
+                expanded = isExpandedDrawer,
+                onClick = onSignInClick,
+                modifier = Modifier.testTag("rail_action_signin"),
+            )
+        } else if (!isSamplePreview && onSignOutClick != null) {
+            SideNavItem(
+                label = strings.logoutAction,
+                icon = OpenSimeIcons.Logout,
+                selected = false,
+                expanded = isExpandedDrawer,
+                onClick = onSignOutClick,
+                modifier = Modifier.testTag("rail_action_signout"),
+            )
+        }
     }
 }
 
@@ -471,6 +500,7 @@ private fun OpenSimeHeader(
     selectedStudentId: StudentId,
     onSelectStudent: (StudentId) -> Unit,
     applyTopStatusInset: Boolean = true,
+    onSignInClick: (() -> Unit)? = null,
 ) {
     val strings = LocalAppStrings.current
     val colorScheme = MaterialTheme.colorScheme
@@ -521,7 +551,15 @@ private fun OpenSimeHeader(
                             StatusChip(
                                 text = strings.samplePreviewBadge,
                                 tone = ChipTone.NEUTRAL,
-                                modifier = Modifier.testTag("sample_preview_chip"),
+                                modifier = Modifier
+                                    .testTag("sample_preview_chip")
+                                    .then(
+                                        if (onSignInClick != null) {
+                                            Modifier.clickable { onSignInClick() }
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
                             )
                         }
                     }

@@ -57,6 +57,7 @@ internal object SimePortalSnapshotMapper {
             currentSemester = currentSemester,
             academicYear = portalPage.metadata.studyYear.orEmpty(),
             enrollmentStatus = portalPage.metadata.enrollmentStatus,
+            birthDate = portalPage.metadata.birthDate?.ifBlank { null },
         )
 
         val recentMarks = portalPage.grades.mapIndexed { idx, g ->

@@ -136,6 +136,31 @@ class NavigationAndLocalizationTest {
     }
 
     @Test
+    fun `absence empty state strings distinguish zero absences from portal count with unavailable details across RO, RU, EN`() {
+        val ro = AppStringCatalog.forLanguage(AppLanguage.RO)
+        val ru = AppStringCatalog.forLanguage(AppLanguage.RU)
+        val en = AppStringCatalog.forLanguage(AppLanguage.EN)
+
+        assertEquals("Detaliile nu sunt disponibile pe portal", ro.absencesNoDetailsTitle)
+        assertEquals(
+            "Portalul raportează 5 absențe în acest semestru, dar fără detalii pe ore.",
+            ro.absencesNoDetailsSubTemplate.replace("{total}", "5"),
+        )
+
+        assertEquals("Детали недоступны на портале", ru.absencesNoDetailsTitle)
+        assertEquals(
+            "Портал сообщает о 5 пропусках в этом семестре, но без деталей по урокам.",
+            ru.absencesNoDetailsSubTemplate.replace("{total}", "5"),
+        )
+
+        assertEquals("Details unavailable on portal", en.absencesNoDetailsTitle)
+        assertEquals(
+            "The portal reports 5 absences in this semester, but without lesson breakdown.",
+            en.absencesNoDetailsSubTemplate.replace("{total}", "5"),
+        )
+    }
+
+    @Test
     fun `settings state round-trips through Saver and text size multipliers match web`() {
         assertEquals(0.90f, AppTextSize.S.scaleFactor, 0.001f)
         assertEquals(1.00f, AppTextSize.M.scaleFactor, 0.001f)
@@ -150,9 +175,38 @@ class NavigationAndLocalizationTest {
             simpleMode = true,
             highContrast = true,
             reduceMotion = true,
+            onboardingCompleted = true,
         )
         assertTrue(custom.reduceMotion)
         assertTrue(custom.highContrast)
         assertTrue(custom.simpleMode)
+        assertTrue(custom.onboardingCompleted)
+
+        val defaultState = OpenSimeSettingsState()
+        assertFalse(defaultState.onboardingCompleted)
+    }
+
+    @Test
+    fun `onboarding and signed-out strings are populated across RO, RU, and EN without placeholders`() {
+        for (lang in AppLanguage.entries) {
+            val s = AppStringCatalog.forLanguage(lang)
+            assertTrue("onboardingBadge must not be blank for $lang", s.onboardingBadge.isNotBlank())
+            assertTrue("onboardingTitle must not be blank for $lang", s.onboardingTitle.isNotBlank())
+            assertTrue("onboardingSubtitle must not be blank for $lang", s.onboardingSubtitle.isNotBlank())
+            assertTrue("onboardingFeatureDirectTitle must not be blank for $lang", s.onboardingFeatureDirectTitle.isNotBlank())
+            assertTrue("onboardingFeaturePrivacyTitle must not be blank for $lang", s.onboardingFeaturePrivacyTitle.isNotBlank())
+            assertTrue("onboardingFeatureCleanTitle must not be blank for $lang", s.onboardingFeatureCleanTitle.isNotBlank())
+            assertTrue("onboardingActionContinue must not be blank for $lang", s.onboardingActionContinue.isNotBlank())
+            assertTrue("onboardingActionSettings must not be blank for $lang", s.onboardingActionSettings.isNotBlank())
+            assertTrue("signedOutHeroTitle must not be blank for $lang", s.signedOutHeroTitle.isNotBlank())
+            assertTrue("signedOutHeroSubtitle must not be blank for $lang", s.signedOutHeroSubtitle.isNotBlank())
+            assertTrue("signedOutNoticeTitle must not be blank for $lang", s.signedOutNoticeTitle.isNotBlank())
+            assertTrue("signedOutNoticeDesc must not be blank for $lang", s.signedOutNoticeDesc.isNotBlank())
+            assertTrue("signedOutActionSignIn must not be blank for $lang", s.signedOutActionSignIn.isNotBlank())
+
+            // Must never use literal '?' placeholder for diacritics
+            assertFalse("Placeholder '?' in onboardingTitle for $lang", s.onboardingTitle.contains("?"))
+            assertFalse("Placeholder '?' in onboardingSubtitle for $lang", s.onboardingSubtitle.contains("?"))
+        }
     }
 }

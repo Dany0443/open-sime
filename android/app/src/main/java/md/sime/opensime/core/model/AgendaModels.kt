@@ -176,6 +176,7 @@ data class StudentProfile(
     val currentSemester: Int,
     val academicYear: String,
     val enrollmentStatus: String? = null,
+    val birthDate: String? = null,
 )
 
 data class MarkItem(

@@ -3,6 +3,7 @@ package md.sime.opensime.core.designsystem
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.res.Configuration
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
@@ -75,6 +76,7 @@ data class OpenSimeSettingsState(
     val simpleMode: Boolean = false,
     val reduceMotion: Boolean = false,
     val language: AppLanguage = AppLanguage.RO,
+    val onboardingCompleted: Boolean = false,
 ) {
     companion object {
         private const val PREFS_NAME = "open_sime_settings"
@@ -85,6 +87,34 @@ data class OpenSimeSettingsState(
         private const val KEY_SIMPLE_MODE = "simple_mode"
         private const val KEY_REDUCE_MOTION = "reduce_motion"
         private const val KEY_LANGUAGE = "language"
+        private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
+        private const val KEY_EXPLICITLY_LOGGED_OUT = "explicitly_logged_out"
+
+        fun detectSystemTheme(context: Context): ThemeMode {
+            val nightModeFlags = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            return if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) ThemeMode.DARK else ThemeMode.LIGHT
+        }
+
+        fun detectSystemLanguage(): AppLanguage {
+            val lang = java.util.Locale.getDefault().language.lowercase()
+            return when {
+                lang.startsWith("ro") -> AppLanguage.RO
+                lang.startsWith("ru") -> AppLanguage.RU
+                else -> AppLanguage.EN
+            }
+        }
+
+        fun isExplicitlyLoggedOut(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return prefs.getBoolean(KEY_EXPLICITLY_LOGGED_OUT, false)
+        }
+
+        fun setExplicitlyLoggedOut(context: Context, value: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_EXPLICITLY_LOGGED_OUT, value)
+                .apply()
+        }
 
         val Saver: Saver<OpenSimeSettingsState, List<String>> = Saver(
             save = { state ->
@@ -96,6 +126,7 @@ data class OpenSimeSettingsState(
                     state.simpleMode.toString(),
                     state.reduceMotion.toString(),
                     state.language.name,
+                    state.onboardingCompleted.toString(),
                 )
             },
             restore = { saved ->
@@ -107,20 +138,53 @@ data class OpenSimeSettingsState(
                     simpleMode = saved.getOrNull(4)?.toBooleanStrictOrNull() ?: false,
                     reduceMotion = saved.getOrNull(5)?.toBooleanStrictOrNull() ?: false,
                     language = saved.getOrNull(6)?.let { runCatching { AppLanguage.valueOf(it) }.getOrNull() } ?: AppLanguage.RO,
+                    onboardingCompleted = saved.getOrNull(7)?.toBooleanStrictOrNull() ?: false,
                 )
             },
         )
 
         fun loadFromPreferences(context: Context): OpenSimeSettingsState {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val hasSavedTheme = prefs.contains(KEY_THEME_MODE)
+            val hasSavedLanguage = prefs.contains(KEY_LANGUAGE)
+
+            val resolvedTheme = if (hasSavedTheme) {
+                val saved = prefs.getString(KEY_THEME_MODE, null)
+                val parsed = saved?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
+                if (parsed == null || parsed == ThemeMode.SYSTEM) {
+                    detectSystemTheme(context)
+                } else {
+                    parsed
+                }
+            } else {
+                detectSystemTheme(context)
+            }
+
+            val resolvedLanguage = if (hasSavedLanguage) {
+                prefs.getString(KEY_LANGUAGE, null)?.let { runCatching { AppLanguage.valueOf(it) }.getOrNull() }
+                    ?: detectSystemLanguage()
+            } else {
+                detectSystemLanguage()
+            }
+
+            // Persist initial configuration on first launch or when migrating legacy SYSTEM
+            if (!hasSavedTheme || !hasSavedLanguage || prefs.getString(KEY_THEME_MODE, null) == ThemeMode.SYSTEM.name) {
+                prefs.edit().apply {
+                    putString(KEY_THEME_MODE, resolvedTheme.name)
+                    putString(KEY_LANGUAGE, resolvedLanguage.name)
+                    apply()
+                }
+            }
+
             return OpenSimeSettingsState(
-                themeMode = prefs.getString(KEY_THEME_MODE, null)?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.SYSTEM,
+                themeMode = resolvedTheme,
                 textSize = prefs.getString(KEY_TEXT_SIZE, null)?.let { runCatching { AppTextSize.valueOf(it) }.getOrNull() } ?: AppTextSize.M,
                 namedPalette = prefs.getString(KEY_PALETTE, null)?.let { runCatching { NamedThemePalette.valueOf(it) }.getOrNull() } ?: NamedThemePalette.SIME_INDIGO,
                 highContrast = prefs.getBoolean(KEY_HIGH_CONTRAST, false),
                 simpleMode = prefs.getBoolean(KEY_SIMPLE_MODE, false),
                 reduceMotion = prefs.getBoolean(KEY_REDUCE_MOTION, false),
-                language = prefs.getString(KEY_LANGUAGE, null)?.let { runCatching { AppLanguage.valueOf(it) }.getOrNull() } ?: AppLanguage.RO,
+                language = resolvedLanguage,
+                onboardingCompleted = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false),
             )
         }
 
@@ -134,6 +198,7 @@ data class OpenSimeSettingsState(
                 .putBoolean(KEY_SIMPLE_MODE, state.simpleMode)
                 .putBoolean(KEY_REDUCE_MOTION, state.reduceMotion)
                 .putString(KEY_LANGUAGE, state.language.name)
+                .putBoolean(KEY_ONBOARDING_COMPLETED, state.onboardingCompleted)
                 .apply()
         }
     }

@@ -62,6 +62,7 @@ class SampleAgendaRepository(
                 currentSemester = 1,
                 academicYear = "2026–2027",
                 enrollmentStatus = "Înmatriculat",
+                birthDate = "15.05.2012",
             )
 
             val mathMarks = listOf(
@@ -351,6 +352,7 @@ class SampleAgendaRepository(
                 currentSemester = 1,
                 academicYear = "2026–2027",
                 enrollmentStatus = "Înmatriculat",
+                birthDate = "15.05.2012",
             )
 
             val csMarks = listOf(

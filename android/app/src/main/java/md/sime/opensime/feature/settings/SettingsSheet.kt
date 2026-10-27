@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +50,11 @@ fun SettingsDialog(
     settings: OpenSimeSettingsState,
     onUpdateSettings: (OpenSimeSettingsState) -> Unit,
     onDismiss: () -> Unit,
+    hasSavedCredentials: Boolean = false,
+    savedLoginUsername: String? = null,
+    onForgetSavedCredentials: (() -> Unit)? = null,
+    isLoggedIn: Boolean = false,
+    onLogout: (() -> Unit)? = null,
 ) {
     val strings = LocalAppStrings.current
     val colorScheme = MaterialTheme.colorScheme
@@ -134,15 +141,14 @@ fun SettingsDialog(
                         )
                     }
 
-                    // Section 3: Theme (`Temă`)
+                    // Section 3: Theme (`Temă` - Light and Dark only)
                     SettingsSection(title = strings.settingsThemeTitle) {
                         SegmentedOptionRow(
                             options = listOf(
-                                ThemeMode.SYSTEM to strings.settingsThemeSystem,
                                 ThemeMode.LIGHT to strings.settingsThemeLight,
                                 ThemeMode.DARK to strings.settingsThemeDark,
                             ),
-                            selectedOption = settings.themeMode,
+                            selectedOption = if (settings.themeMode == ThemeMode.DARK) ThemeMode.DARK else ThemeMode.LIGHT,
                             onSelectOption = { onUpdateSettings(settings.copy(themeMode = it)) },
                             testTagPrefix = "setting_theme",
                         )
@@ -174,6 +180,84 @@ fun SettingsDialog(
                                 onCheckedChange = { onUpdateSettings(settings.copy(reduceMotion = it)) },
                                 testTag = "setting_reduce_motion",
                             )
+                        }
+                    }
+
+                    // Section 5: Saved Login management (only if credentials exist in vault)
+                    if (hasSavedCredentials && onForgetSavedCredentials != null) {
+                        SettingsSection(title = strings.rememberMeLabel) {
+                            Surface(
+                                shape = MaterialTheme.shapes.large,
+                                color = colorScheme.surfaceContainerLow,
+                                border = if (highContrast) BorderStroke(1.5.dp, colorScheme.onSurface) else null,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_saved_credentials_card"),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = OpenSimeIcons.Lock,
+                                            contentDescription = null,
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                        Text(
+                                            text = if (!savedLoginUsername.isNullOrBlank()) {
+                                                "${strings.studentLabel}: ${maskUsername(savedLoginUsername)}"
+                                            } else {
+                                                strings.rememberMeDesc
+                                            },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colorScheme.onSurface,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = onForgetSavedCredentials,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .sizeIn(minHeight = 48.dp)
+                                            .testTag("settings_action_forget_credentials"),
+                                    ) {
+                                        Icon(
+                                            imageVector = OpenSimeIcons.Delete,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .padding(end = 8.dp)
+                                                .size(18.dp),
+                                        )
+                                        Text(strings.forgetSavedLogin)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Section 6: Log out (only when active session exists)
+                    if (isLoggedIn && onLogout != null) {
+                        SettingsSection(title = strings.logoutAction) {
+                            OutlinedButton(
+                                onClick = onLogout,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .sizeIn(minHeight = 48.dp)
+                                    .testTag("settings_action_logout"),
+                            ) {
+                                Icon(
+                                    imageVector = OpenSimeIcons.Logout,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .size(18.dp),
+                                )
+                                Text(strings.logoutAction)
+                            }
                         }
                     }
                 }
@@ -244,5 +328,14 @@ private fun SettingToggleRow(
                 color = colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+internal fun maskUsername(raw: String): String {
+    val trimmed = raw.trim()
+    return when {
+        trimmed.length <= 2 -> "***"
+        trimmed.length <= 4 -> "${trimmed.first()}***"
+        else -> "${trimmed.take(2)}***${trimmed.takeLast(1)}"
     }
 }

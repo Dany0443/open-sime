@@ -381,6 +381,7 @@ test("Release Secrets: validateReleaseSecrets validates required signing secrets
   assert.equal(emptyRes.sign_macos, false);
   assert.equal(emptyRes.sign_linux, false);
   assert.equal(emptyRes.sign_checksums, false);
+  assert.equal(emptyRes.sign_android, false);
 
   // 2. Partial configuration fails fast with error messages
   const partialWin = validateReleaseSecrets({ WINDOWS_CERTIFICATE: "cert-only" });
@@ -393,6 +394,10 @@ test("Release Secrets: validateReleaseSecrets validates required signing secrets
   });
   assert.equal(partialMac.valid, false);
   assert.ok(partialMac.errors.some((e) => e.includes("APPLE_SIGNING_IDENTITY")));
+
+  const partialAndroid = validateReleaseSecrets({ ANDROID_KEYSTORE_BASE64: "dummy" });
+  assert.equal(partialAndroid.valid, false);
+  assert.ok(partialAndroid.errors.some((e) => e.includes("ANDROID_KEYSTORE_PASSWORD")));
 
   // 3. Full valid environment passes and enables signing
   const validEnv = {
@@ -409,6 +414,10 @@ test("Release Secrets: validateReleaseSecrets validates required signing secrets
     LINUX_GPG_PASSPHRASE: "gpg-passphrase",
     RELEASE_GPG_PRIVATE_KEY: "-----BEGIN PGP PRIVATE KEY BLOCK-----...",
     RELEASE_GPG_PASSPHRASE: "gpg-passphrase",
+    ANDROID_KEYSTORE_BASE64: "base64-dummy-keystore",
+    ANDROID_KEYSTORE_PASSWORD: "android-store-pass",
+    ANDROID_KEY_ALIAS: "key-alias",
+    ANDROID_KEY_PASSWORD: "key-password",
   };
   const validRes = validateReleaseSecrets(validEnv);
   assert.equal(validRes.valid, true);
@@ -417,6 +426,7 @@ test("Release Secrets: validateReleaseSecrets validates required signing secrets
   assert.equal(validRes.sign_macos, true);
   assert.equal(validRes.sign_linux, true);
   assert.equal(validRes.sign_checksums, true);
+  assert.equal(validRes.sign_android, true);
 
   // 4. Apple ID fallback for notarization works
   const appleIdEnv = {

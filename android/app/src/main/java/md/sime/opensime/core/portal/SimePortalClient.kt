@@ -148,6 +148,7 @@ open class SimePortalClient(
     private suspend fun enrichPortalPageInternal(
         page: PortalStudentDashboardPage,
         requestedStudentId: String?,
+        extraCalendar: List<ParsedCalendarEntry> = emptyList(),
     ): ParsedPortalPage {
         if (!requestedStudentId.isNullOrBlank()) {
             val canonRequested = session.canonicalStudentKey(requestedStudentId)
@@ -191,6 +192,7 @@ open class SimePortalClient(
             html = page.html,
             todayIso = todayProvider(),
             extraReports = extraReports,
+            extraCalendar = extraCalendar,
         )
 
         val pageKey = page.studentKey.ifEmpty { SimeStudentParser.studentKey(data.student.id) }
@@ -422,7 +424,11 @@ open class SimePortalClient(
             try {
                 val today = todayProvider()
                 val weekStart = ChisinauTime.weekStart(today)
-                extraCalendar = calendarRangeInternal(canonicalKey, weekStart, ChisinauTime.addDays(weekStart, 6))
+                extraCalendar = calendarRangeInternal(
+                    studentId = canonicalKey,
+                    startIso = ChisinauTime.addDays(weekStart, -7),
+                    endIso = ChisinauTime.addDays(weekStart, 13),
+                )
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (err: SimeSessionExpiredError) {
@@ -434,7 +440,18 @@ open class SimePortalClient(
             }
         }
 
-        val enrichedPage = enrichPortalPageInternal(page, canonicalKey)
+        val enrichedPage = enrichPortalPageInternal(page, canonicalKey, extraCalendar)
+        val allCalendar = if (embeddedCal.isNotEmpty()) embeddedCal else extraCalendar
+        val finalTeachers = if (enrichedPage.teachers.isNotEmpty()) {
+            enrichedPage.teachers
+        } else {
+            SimeCalendarAndTeachersParser.buildTeachers(
+                entries = allCalendar,
+                metadata = enrichedPage.metadata,
+                catalogSubjects = enrichedPage.catalog.subjects,
+            )
+        }
+
         val finalPage = if (extraCalendar.isNotEmpty() && enrichedPage.schedule.days.isEmpty()) {
             val days = SimeCalendarAndTeachersParser.groupByDay(extraCalendar)
             val sched = ParsedSchedule(weekStart = ChisinauTime.weekStart(todayProvider()), days = days)
@@ -442,9 +459,10 @@ open class SimePortalClient(
                 schedule = sched,
                 orar = sched,
                 timetable = days[todayProvider()].orEmpty(),
+                teachers = finalTeachers,
             )
         } else {
-            enrichedPage
+            enrichedPage.copy(teachers = finalTeachers)
         }
 
         val snapshot = SimePortalParser.toStudentAgendaSnapshot(

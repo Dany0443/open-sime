@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import md.sime.opensime.core.designsystem.ChipTone
 import md.sime.opensime.core.designsystem.EmptyStateCard
 import md.sime.opensime.core.designsystem.LocalOpenSimeSemanticColors
+import md.sime.opensime.core.designsystem.OpenSimeIcons
 import md.sime.opensime.core.designsystem.SegmentedOptionRow
 import md.sime.opensime.core.designsystem.StatusChip
 import md.sime.opensime.core.i18n.AppStrings
@@ -107,10 +109,17 @@ fun AbsencesScreen(
             // `#abs-list`
             if (semBlock.records.isEmpty()) {
                 item(key = "abs_empty") {
-                    EmptyStateCard(
-                        title = strings.noAbsencesTitle,
-                        subtitle = strings.noAbsencesSubTemplate.replace("{sem}", selectedSemester.toString()),
-                    )
+                    if (semBlock.totalCount > 0) {
+                        EmptyStateCard(
+                            title = strings.absencesNoDetailsTitle,
+                            subtitle = strings.absencesNoDetailsSubTemplate.replace("{total}", semBlock.totalCount.toString()),
+                        )
+                    } else {
+                        EmptyStateCard(
+                            title = strings.noAbsencesTitle,
+                            subtitle = strings.noAbsencesSubTemplate.replace("{sem}", selectedSemester.toString()),
+                        )
+                    }
                 }
             } else {
                 // Section 1: `Pe discipline` (`.abs-subject-grid`)
@@ -312,24 +321,41 @@ private fun AbsenceSubjectCollapsibleCard(
             .testTag("abs_subject_card_$subjectName"),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            FlowRow(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalArrangement = Arrangement.Center,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = subjectName,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                    ),
-                    color = colorScheme.onSurface,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
+                // Row 1: Subject name (full available width) + expand chevron icon
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = subjectName,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = if (expanded) OpenSimeIcons.ExpandLess else OpenSimeIcons.ExpandMore,
+                        contentDescription = null,
+                        tint = colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .size(20.dp),
+                    )
+                }
+
+                // Row 2: Absence counts and status chips - always consistently aligned below the title
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     StatusChip(
                         text = strings.formatAbsenceCount(records.size),
@@ -440,33 +466,36 @@ private fun AbsenceRecordRow(
             // `.abs-body`
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // Row 1: Subject name - stable full width, never crowded sideways
+                Text(
+                    text = record.subject.ifBlank { strings.discipline },
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                    ),
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // Row 2: Absence status chip and metadata - predictable second row
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalArrangement = Arrangement.Center,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text(
-                        text = record.subject.ifBlank { strings.discipline },
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                        ),
-                        color = colorScheme.onSurface,
-                        modifier = Modifier.padding(end = 8.dp),
-                    )
                     StatusChip(
                         text = if (isExcused) strings.absStatusExcused else strings.absStatusUnexcused,
                         tone = if (isExcused) ChipTone.SUCCESS else ChipTone.ERROR,
                     )
-                }
-
-                if (metaParts.isNotEmpty()) {
-                    Text(
-                        text = metaParts.joinToString(", "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colorScheme.onSurfaceVariant,
-                    )
+                    if (metaParts.isNotEmpty()) {
+                        Text(
+                            text = metaParts.joinToString(" • "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
+                    }
                 }
 
                 if (!record.note.isNullOrBlank()) {

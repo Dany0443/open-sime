@@ -1,0 +1,113 @@
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version override (defaults to authoritative version from package.json)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-android-release:
+    name: Build & Sign Android Release (APK & AAB)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check version consistency
+        working-directory: desktop
+        run: |
+          INPUT_VER="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT_VER" ]; then
+            node scripts/check-versions.mjs --expected "$INPUT_VER"
+          else
+            node scripts/check-versions.mjs
+          fi
+
+      - name: Validate release secrets
+        id: check-secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.SIME_ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || secrets.SIME_ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || secrets.SIME_ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.SIME_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
+            echo "::error::Android release signing secrets are incomplete or missing. Required: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD."
+            exit 1
+          fi
+          echo "Android signing credentials validated successfully."
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit tests & lint before release packaging
+        working-directory: android
+        run: |
+          ./gradlew testDebugUnitTest
+          ./gradlew lintDebug
+
+      - name: Prepare keystore and build release artifacts
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.SIME_ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || secrets.SIME_ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || secrets.SIME_ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.SIME_ANDROID_KEY_PASSWORD }}
+        run: |
+          KEYSTORE_DIR=$(mktemp -d "${RUNNER_TEMP}/android-signing-XXXXXX")
+          KEYSTORE_FILE="${KEYSTORE_DIR}/release.jks"
+
+          # Write keystore with restrictive permissions
+          (umask 077 && echo "${KEYSTORE_BASE64}" | base64 -d > "${KEYSTORE_FILE}")
+          chmod 600 "${KEYSTORE_FILE}"
+
+          # Export path for Gradle
+          export ANDROID_KEYSTORE_PATH="${KEYSTORE_FILE}"
+
+          # Build signed release APK and AAB
+          ./gradlew assembleRelease bundleRelease
+
+          # Securely wipe keystore immediately after build
+          shred -u "${KEYSTORE_FILE}" 2>/dev/null || rm -f "${KEYSTORE_FILE}"
+          rm -rf "${KEYSTORE_DIR}"
+
+      - name: Stage release artifacts & compute checksums
+        run: |
+          mkdir -p release-dist/android
+          cp android/app/build/outputs/apk/release/app-release.apk release-dist/android/Open-SIME-android.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab release-dist/android/Open-SIME-android.aab
+
+          cd release-dist/android
+          sha256sum Open-SIME-android.apk Open-SIME-android.aab > checksums-android.txt
+          cat checksums-android.txt
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-sime-android-release
+          path: release-dist/android/*
+          if-no-files-found: error
+

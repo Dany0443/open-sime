@@ -453,6 +453,95 @@ class SimePortalParserTest {
         assertTrue(gatedSem1Block.records.isEmpty())
     }
 
+    @Test
+    fun `absence reconciliation and integrity gate across portal summary and 17-record embedded json absences`() {
+        val portalHtml = """
+            <input type="hidden" id="P1_ELEVE_ID" name="P1_ELEVE_ID" value="ID_101">
+            <input type="hidden" id="P1_ELEVE" name="P1_ELEVE" value="Popescu Mihai">
+            <input type="hidden" id="P1_CLASS_NAME" name="P1_CLASS_NAME" value="10A">
+            <input type="hidden" id="P1_SEMESTER_NUMBER" name="P1_SEMESTER_NUMBER" value="1">
+            <input type="hidden" name="P1_PRESENCE_PERCENT" id="P1_PRESENCE_PERCENT" value="93">
+            <input type="hidden" name="P1_MOTIVATED" id="P1_MOTIVATED" value="0">
+            <input type="hidden" name="P1_MOTIVATED2" id="P1_MOTIVATED2" value="0">
+            <input type="hidden" name="P1_UNMOTIVATED" id="P1_UNMOTIVATED" value="17">
+            <input type="hidden" name="P1_UNMOTIVATED2" id="P1_UNMOTIVATED2" value="0">
+            <input type="hidden" name="P1_TOTAL_ABSENCES1" id="P1_TOTAL_ABSENCES1" value="17">
+            <input type="hidden" name="P1_TOTAL_ABSENCES2" id="P1_TOTAL_ABSENCES2" value="0">
+            <input type="hidden" name="P1_JSON_ABSENCES" id="P1_JSON_ABSENCES" value="[{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;10.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:1},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;14.09.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:2},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;18.09.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:3},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;18.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Informatica&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:4},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;18.09.2026&quot;,&quot;lessonOrderId&quot;:5,&quot;discipliny&quot;:&quot;Matematică&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:5},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;25.09.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:6},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;25.09.2026&quot;,&quot;lessonOrderId&quot;:3,&quot;discipliny&quot;:&quot;Chimie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:7},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;25.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Informatica&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:8},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;30.09.2026&quot;,&quot;lessonOrderId&quot;:4,&quot;discipliny&quot;:&quot;Educație pentru societate&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:9},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;30.09.2026&quot;,&quot;lessonOrderId&quot;:5,&quot;discipliny&quot;:&quot;Limba și literatura română&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:10},{&quot;monthYear&quot;:&quot;September 2026&quot;,&quot;lessonDate&quot;:&quot;30.09.2026&quot;,&quot;lessonOrderId&quot;:6,&quot;discipliny&quot;:&quot;Limba și literatura română&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:11},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;01.10.2026&quot;,&quot;lessonOrderId&quot;:6,&quot;discipliny&quot;:&quot;Limba și literatura română&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:12},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;02.10.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:13},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:1,&quot;discipliny&quot;:&quot;Biologie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:14},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:2,&quot;discipliny&quot;:&quot;Geografie&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:15},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:3,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:16},{&quot;monthYear&quot;:&quot;October   2026&quot;,&quot;lessonDate&quot;:&quot;13.10.2026&quot;,&quot;lessonOrderId&quot;:7,&quot;discipliny&quot;:&quot;Fizica. Astronomia&quot;,&quot;absenceName&quot;:&quot;nemotivat&quot;,&quot;cumulativeAbsences&quot;:17}]">
+            <div id="t_TreeNav"><ul class="a-TreeView-node"><li class="a-TreeView-node"><a href="f?p=100:1:SESSION::::P1_ELEVE_ID:ID_101"><span>Popescu Mihai</span></a></li></ul></div>
+        """.trimIndent()
+
+        val doc = org.jsoup.Jsoup.parse(portalHtml)
+        val summary = SimePortalParser.parseAbsenceSummary(doc)
+        assertEquals(93, summary.presencePercent)
+        assertEquals(0, summary.sem1Excused)
+        assertEquals(17, summary.sem1Unexcused)
+        assertEquals(17, summary.sem1Total)
+        assertEquals(17, summary.total)
+
+        val rawRecords = SimePortalParser.extractEmbeddedAbsenceRecords(doc, todayIso = "2026-10-25", studentKey = "ID_101")
+        assertEquals(17, rawRecords.size)
+
+        // Multiple lessons on the same day in the same subject are preserved
+        val romLessons = rawRecords.filter { it.date == "2026-09-30" && it.subject.contains("română") }
+        assertEquals(2, romLessons.size)
+        assertEquals(5, romLessons[0].lessonNumber)
+        assertEquals(6, romLessons[1].lessonNumber)
+
+        val fizLessons = rawRecords.filter { it.date == "2026-10-13" && it.subject.contains("Fizica") }
+        assertEquals(2, fizLessons.size)
+        assertEquals(3, fizLessons[0].lessonNumber)
+        assertEquals(7, fizLessons[1].lessonNumber)
+
+        // Full semester build passes integrity gate (17 == 17) and populates sem1.records
+        val absencesResult = SimePortalParser.buildSemesterAbsences(summary, rawRecords, studentKey = "ID_101")
+        assertEquals(17, absencesResult.sem1.total)
+        assertEquals(0, absencesResult.sem1.motivate)
+        assertEquals(17, absencesResult.sem1.nemotivate)
+        assertEquals(17, absencesResult.sem1.records.size)
+        assertEquals(17, absencesResult.records.size)
+
+        // Snapshot domain mapping and per-subject grouping
+        val parsedPage = SimePortalParser.parseFullPortal(portalHtml, todayIso = "2026-10-25")
+        val snapshot = SimePortalParser.toStudentAgendaSnapshot(parsedPage, referenceIsoDate = "2026-10-25")
+        val semBlock = snapshot.absencesForSemester(1)
+
+        assertEquals(17, semBlock.totalCount)
+        assertEquals(0, semBlock.excusedCount)
+        assertEquals(17, semBlock.unexcusedCount)
+        assertEquals(17, semBlock.records.size)
+
+        val bySubject = semBlock.records
+            .groupBy { it.subject }
+            .entries
+            .sortedByDescending { it.value.size }
+
+        // There are 8 distinct subjects with absences
+        assertEquals(8, bySubject.size)
+
+        // Subject breakdown
+        val subjectCounts = bySubject.associate { it.key to it.value.size }
+        assertEquals(4, subjectCounts["Geografie"])
+        assertEquals(4, subjectCounts["Fizica. Astronomia"])
+        assertEquals(3, subjectCounts["Limba și literatura română"])
+        assertEquals(2, subjectCounts["Informatica"])
+        assertEquals(1, subjectCounts["Biologie"])
+        assertEquals(1, subjectCounts["Educație pentru societate"])
+        assertEquals(1, subjectCounts["Chimie"])
+        assertEquals(1, subjectCounts["Matematică"])
+
+        // The first 7 visible subjects sum to 16
+        val top7Sum = bySubject.take(7).sumOf { it.value.size }
+        assertEquals(16, top7Sum)
+
+        // The 8th subject (Matematică) has 1 absence, completing the total of 17
+        val eighthSubject = bySubject[7]
+        assertEquals("Matematică", eighthSubject.key)
+        assertEquals(1, eighthSubject.value.size)
+        assertEquals(17, top7Sum + eighthSubject.value.size)
+        assertEquals(semBlock.totalCount, bySubject.sumOf { it.value.size })
+    }
+
     // =========================================================================
     // 5. Calendar Events, Naive Chişinău Timestamps & Homework False-Positive Protection
     // =========================================================================
@@ -622,5 +711,98 @@ class SimePortalParserTest {
         assertFalse("Parser health must never include student names", serializedHealth.contains("Elev 1"))
         assertFalse("Parser health must never include teacher names", serializedHealth.contains("Profesor 1"))
         assertFalse("Parser health must never include school names", serializedHealth.contains("Liceul Teoretic Sanitize"))
+    }
+
+    @Test
+    fun `buildTeachers synthesizes class master, catalog teachers, and calendar entries without duplicates`() {
+        val metadata = ParsedStudentMetadata(
+            id = "s_101",
+            fullName = "Elev Exemplar",
+            className = "10A",
+            schoolName = "Liceul Sanitize",
+            classMaster = "Popescu Ion",
+            currentSemester = 1,
+            studyYear = "2024-2025",
+        )
+        val catalogSubjects = listOf(
+            ParsedCatalogSubject(
+                subject = "Matematica",
+                discipline = "Matematica",
+                teacher = "Popescu I.",
+                scale = "1-10",
+                semesters = emptyList(),
+                markDetails = emptyList(),
+                markCount = 0,
+                sem1Average = null,
+                sem2Average = null,
+                annualAverage = null,
+                average = null,
+            ),
+            ParsedCatalogSubject(
+                subject = "Fizica",
+                discipline = "Fizica",
+                teacher = "Ionescu Maria",
+                scale = "1-10",
+                semesters = emptyList(),
+                markDetails = emptyList(),
+                markCount = 0,
+                sem1Average = null,
+                sem2Average = null,
+                annualAverage = null,
+                average = null,
+            ),
+        )
+        val calendarEntries = listOf(
+            ParsedCalendarEntry(
+                start = 1729900800000L,
+                end = 1729903500000L,
+                subject = "Fizica",
+                classroom = "101",
+                teacher = "Ionescu Maria",
+                topic = null,
+                isAbsence = false,
+                isExcused = false,
+                isUnexcused = false,
+                semester = 1,
+                note = null,
+                lessonNumber = 1,
+            ),
+            ParsedCalendarEntry(
+                start = 1729904400000L,
+                end = 1729907100000L,
+                subject = "Informatica",
+                classroom = "202",
+                teacher = "Vasilescu Dan",
+                topic = null,
+                isAbsence = false,
+                isExcused = false,
+                isUnexcused = false,
+                semester = 1,
+                note = null,
+                lessonNumber = 2,
+            ),
+        )
+
+        val teachers = SimePortalParser.buildTeachers(
+            entries = calendarEntries,
+            metadata = metadata,
+            catalogSubjects = catalogSubjects,
+        )
+
+        // 3 unique teachers: Popescu Ion (Diriginte), Ionescu Maria, Vasilescu Dan
+        assertEquals(3, teachers.size)
+
+        val diriginte = teachers[0]
+        assertEquals("Popescu Ion", diriginte.name)
+        assertEquals("Diriginte", diriginte.note)
+        assertTrue(diriginte.subjects.contains("Matematica"))
+
+        val fizicaTeacher = teachers.first { it.name == "Ionescu Maria" }
+        assertTrue(fizicaTeacher.subjects.contains("Fizica"))
+        assertEquals(1, fizicaTeacher.lessons)
+
+        val infoTeacher = teachers.first { it.name == "Vasilescu Dan" }
+        assertTrue(infoTeacher.subjects.contains("Informatica"))
+        assertEquals(1, infoTeacher.lessons)
     }
 }

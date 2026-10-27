@@ -18,6 +18,7 @@ export function validateReleaseSecrets(env = process.env) {
     macos: { sign: false, configured: false },
     linux: { sign: false, configured: false },
     checksums: { sign: false, configured: false },
+    android: { sign: false, configured: false },
   };
 
   // 1. Windows Authenticode
@@ -115,6 +116,36 @@ export function validateReleaseSecrets(env = process.env) {
     }
   }
 
+  // 5. Android APK/AAB signing
+  const hasAndroidKeystore = Boolean(
+    env.ANDROID_KEYSTORE_BASE64?.trim() ||
+    env.SIME_ANDROID_KEYSTORE_BASE64?.trim() ||
+    env.ANDROID_KEYSTORE_PATH?.trim() ||
+    env.SIME_ANDROID_KEYSTORE_PATH?.trim()
+  );
+  const hasAndroidStorePass = Boolean(env.ANDROID_KEYSTORE_PASSWORD?.trim() || env.SIME_ANDROID_KEYSTORE_PASSWORD?.trim());
+  const hasAndroidKeyAlias = Boolean(env.ANDROID_KEY_ALIAS?.trim() || env.SIME_ANDROID_KEY_ALIAS?.trim());
+  const hasAndroidKeyPass = Boolean(env.ANDROID_KEY_PASSWORD?.trim() || env.SIME_ANDROID_KEY_PASSWORD?.trim());
+
+  if (hasAndroidKeystore || hasAndroidStorePass || hasAndroidKeyAlias || hasAndroidKeyPass) {
+    platforms.android.configured = true;
+    if (!hasAndroidKeystore) {
+      errors.push("Android signing is partially configured: missing ANDROID_KEYSTORE_BASE64 (or ANDROID_KEYSTORE_PATH).");
+    }
+    if (!hasAndroidStorePass) {
+      errors.push("Android signing is partially configured: missing ANDROID_KEYSTORE_PASSWORD.");
+    }
+    if (!hasAndroidKeyAlias) {
+      errors.push("Android signing is partially configured: missing ANDROID_KEY_ALIAS.");
+    }
+    if (!hasAndroidKeyPass) {
+      errors.push("Android signing is partially configured: missing ANDROID_KEY_PASSWORD.");
+    }
+    if (hasAndroidKeystore && hasAndroidStorePass && hasAndroidKeyAlias && hasAndroidKeyPass) {
+      platforms.android.sign = true;
+    }
+  }
+
   const valid = errors.length === 0;
 
   return {
@@ -124,6 +155,7 @@ export function validateReleaseSecrets(env = process.env) {
     sign_macos: platforms.macos.sign,
     sign_linux: platforms.linux.sign,
     sign_checksums: platforms.checksums.sign,
+    sign_android: platforms.android.sign,
     platforms,
   };
 }
@@ -135,6 +167,7 @@ export function writeGitHubOutputs(result, outputPath = process.env.GITHUB_OUTPU
     `sign_macos=${result.sign_macos}`,
     `sign_linux=${result.sign_linux}`,
     `sign_checksums=${result.sign_checksums}`,
+    `sign_android=${result.sign_android}`,
   ].join("\n") + "\n";
   fs.appendFileSync(outputPath, lines, "utf8");
 }
@@ -161,6 +194,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "
   console.log(`  Windows (Authenticode):  ${result.sign_windows ? "ENABLED (signed installer)" : "DISABLED (unsigned installer)"}`);
   console.log(`  macOS (Developer ID):    ${result.sign_macos ? "ENABLED (signed & notarized)" : "DISABLED (unsigned DMG)"}`);
   console.log(`  Linux (AppImage GPG):    ${result.sign_linux ? "ENABLED (signed AppImage)" : "DISABLED (unsigned AppImage)"}`);
+  console.log(`  Android (APK/AAB):       ${result.sign_android ? "ENABLED (signed release)" : "DISABLED (unsigned build)"}`);
   console.log(`  Checksums (GPG):         ${result.sign_checksums ? "ENABLED (checksums.txt.sig)" : "DISABLED (unsigned checksums.txt)"}`);
   console.log("==============================");
   process.exit(0);

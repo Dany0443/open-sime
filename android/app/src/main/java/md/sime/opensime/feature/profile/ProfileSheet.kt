@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +36,8 @@ import md.sime.opensime.core.designsystem.EmptyStateCard
 import md.sime.opensime.core.designsystem.LocalOpenSimeSemanticColors
 import md.sime.opensime.core.designsystem.OpenSimeIcons
 import md.sime.opensime.core.designsystem.StatusChip
+import md.sime.opensime.core.i18n.AppLanguage
+import md.sime.opensime.core.i18n.AppStrings
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.core.model.TeacherItem
@@ -46,6 +52,10 @@ fun ProfileScreen(
     snapshot: StudentAgendaSnapshot,
     studentToneIndex: Int = 0,
     modifier: Modifier = Modifier,
+    hasSavedCredentials: Boolean = false,
+    onSignInClick: (() -> Unit)? = null,
+    onSignOutClick: (() -> Unit)? = null,
+    onForgetCredentialsClick: (() -> Unit)? = null,
 ) {
     val strings = LocalAppStrings.current
     val colorScheme = MaterialTheme.colorScheme
@@ -118,6 +128,29 @@ fun ProfileScreen(
                                     )
                                 }
                             }
+                            val formattedBirthDate = formatBirthDate(student.birthDate, strings)
+                            if (formattedBirthDate != null) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.testTag("profile_birth_date"),
+                                ) {
+                                    Text(
+                                        text = "${strings.birthDateLabel}:",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                        ),
+                                        color = colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                                    )
+                                    Text(
+                                        text = formattedBirthDate,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                        ),
+                                        color = colorScheme.onPrimaryContainer,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -152,6 +185,73 @@ fun ProfileScreen(
                                         ),
                                         color = colorScheme.onSurface,
                                     )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Saved credentials management
+            if (hasSavedCredentials && onForgetCredentialsClick != null) {
+                item(key = "profile_saved_credentials_card") {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = colorScheme.surfaceContainerLow,
+                        border = if (highContrast) BorderStroke(1.5.dp, colorScheme.onSurface) else null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("profile_saved_credentials_card"),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(
+                                    imageVector = OpenSimeIcons.Lock,
+                                    contentDescription = null,
+                                    tint = colorScheme.primary,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                                Column {
+                                    Text(
+                                        text = strings.rememberMeLabel,
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = strings.rememberMeDesc,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = onForgetCredentialsClick,
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .sizeIn(minHeight = 48.dp)
+                                    .testTag("profile_action_forget_credentials"),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = OpenSimeIcons.Delete,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(strings.forgetSavedLogin)
                                 }
                             }
                         }
@@ -279,4 +379,31 @@ private fun TeacherCard(
             }
         }
     }
+}
+
+internal fun formatBirthDate(rawDate: String?, strings: AppStrings): String? {
+    if (rawDate == null) return null
+    val trimmed = rawDate.trim()
+    if (trimmed.isEmpty() || trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) {
+        return null
+    }
+    // Expected portal format: DD.MM.YYYY (e.g., "15.05.2012" or "01.01.2010")
+    val parts = trimmed.split('.')
+    if (parts.size == 3) {
+        val day = parts[0].toIntOrNull()
+        val month = parts[1].toIntOrNull()
+        val year = parts[2].toIntOrNull()
+        if (day != null && month != null && year != null && day in 1..31 && month in 1..12 && year in 1900..2100) {
+            val monthName = strings.monthsLong.getOrNull(month - 1)
+            if (monthName != null) {
+                return when (strings.language) {
+                    AppLanguage.RO -> "$day $monthName $year"
+                    AppLanguage.RU -> "$day $monthName $year г."
+                    AppLanguage.EN -> "$monthName $day, $year"
+                }
+            }
+        }
+    }
+    // Safe fallback if clean non-empty string without raw placeholder
+    return if (trimmed.length in 4..30 && !trimmed.contains("?")) trimmed else null
 }
