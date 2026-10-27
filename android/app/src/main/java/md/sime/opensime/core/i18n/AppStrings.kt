@@ -1,0 +1,781 @@
+package md.sime.opensime.core.i18n
+
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
+import md.sime.opensime.core.model.GradeBand
+import md.sime.opensime.core.model.QualifierCode
+import md.sime.opensime.core.model.SubjectScale
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
+import java.util.Locale
+import kotlin.math.abs
+
+/**
+ * Supported languages in Open SIME.
+ * Romanian ([RO]) is the default and the source of truth.
+ */
+enum class AppLanguage(val code: String, val nativeLabel: String, val localeTag: String) {
+    RO("ro", "Română", "ro-RO"),
+    RU("ru", "Русский", "ru-RU"),
+    EN("en", "English", "en-US"),
+}
+
+@Immutable
+data class AppStrings(
+    val language: AppLanguage,
+    val appTitle: String,
+    val samplePreviewBadge: String,
+    // Primary & secondary navigation
+    val tabHome: String,
+    val tabMarks: String,
+    val tabMarksSimple: String,
+    val tabTimetable: String,
+    val tabTimetableSimple: String,
+    val tabAbsences: String,
+    val tabAbsencesSimple: String,
+    val tabHomework: String,
+    val tabHomeworkSimple: String,
+    val tabProfile: String,
+    val tabProfileShort: String,
+    val tabProfileSimple: String,
+    val actionSettings: String,
+    val actionClose: String,
+    val actionRetry: String,
+    val themeToLight: String,
+    val themeToDark: String,
+    // Home / Overview
+    val todaysLessons: String,
+    val liveBadge: String,
+    val nextBadge: String,
+    val pastBadge: String,
+    val endedBadge: String,
+    val breakBadge: String,
+    val weekendBadge: String,
+    val freeDayBadge: String,
+    val lessonFallback: String,
+    val timeLeftTemplate: String,
+    val startsAtInTemplate: String,
+    val nextLessonStartsInTemplate: String,
+    val firstLessonStartsInTemplate: String,
+    val lessonsFinishedToday: String,
+    val lastLessonInfoTemplate: String,
+    val noLessonsTodayTitle: String,
+    val noLessonsTodaySub: String,
+    val allMarks: String,
+    val allHomework: String,
+    val recentGrades: String,
+    val homeworkPreview: String,
+    val generalAverageEstimated: String,
+    val sem1ShortTemplate: String,
+    val sem2ShortTemplate: String,
+    val noAbsencesThisYear: String,
+    val inThisSchoolYear: String,
+    val lastGrade: String,
+    val noGradesYetShort: String,
+    val bandTop: String,
+    val bandGood: String,
+    val bandOk: String,
+    val bandLow: String,
+    val bandNone: String,
+    // Empty & Error states
+    val dataLoadErrorTitle: String,
+    val noGradesTitle: String,
+    val noGradesSub: String,
+    val noDisciplinesTitle: String,
+    val noDisciplinesSub: String,
+    val noHomeworkTitle: String,
+    val noHomeworkSub: String,
+    val noHomeworkListSub: String,
+    val noDueDate: String,
+    val noLessonsTitle: String,
+    val noLessonsSub: String,
+    val noAbsencesTitle: String,
+    val noAbsencesSubTemplate: String,
+    val noTeachersTitle: String,
+    val noTeachersSub: String,
+    // Reușita / Marks
+    val discipline: String,
+    val marksLabelText: String,
+    val semester1Marks: String,
+    val semester2Marks: String,
+    val semester1: String,
+    val semester2: String,
+    val thesisBadge: String,
+    val scaleQualifiers: String,
+    val scaleDescriptors: String,
+    val noQualifiersYet: String,
+    val noDescriptorsYet: String,
+    val noMarksYet: String,
+    val qualFb: String,
+    val qualB: String,
+    val qualS: String,
+    val qualI: String,
+    val gradePrefix: String,
+    val thesisPrefix: String,
+    // Absences
+    val absTotal: String,
+    val absExcused: String,
+    val absUnexcused: String,
+    val absExcusedCountTemplate: String,
+    val absUnexcusedCountTemplate: String,
+    val absBySubject: String,
+    val absChronological: String,
+    val absStatusExcused: String,
+    val absStatusUnexcused: String,
+    val absCountOneTemplate: String,
+    val absCountFewTemplate: String,
+    val absCountManyTemplate: String,
+    val absExcusedBadgeTemplate: String,
+    val absUnexcusedBadgeTemplate: String,
+    val roomPrefixTemplate: String,
+    // Timetable
+    val today: String,
+    val tomorrow: String,
+    val yesterday: String,
+    val inDaysOneTemplate: String,
+    val inDaysFewTemplate: String,
+    val inDaysManyTemplate: String,
+    val daysAgoOneTemplate: String,
+    val daysAgoFewTemplate: String,
+    val daysAgoManyTemplate: String,
+    val prevDay: String,
+    val nextDay: String,
+    val breakTextTemplate: String,
+    val lessonPeriodTemplate: String,
+    val lessonCountOneTemplate: String,
+    val lessonCountFewTemplate: String,
+    val lessonCountManyTemplate: String,
+    val unitMinTemplate: String,
+    val unitHTemplate: String,
+    val unitHMinTemplate: String,
+    // Profile
+    val studentLabel: String,
+    val schoolLabel: String,
+    val classMasterLabel: String,
+    val studyYearLabel: String,
+    val classPrefix: String,
+    val teachersSection: String,
+    val classMasterBadge: String,
+    // Settings
+    val settingsTitle: String,
+    val settingsLangTitle: String,
+    val settingsTextSizeTitle: String,
+    val textSizeS: String,
+    val textSizeM: String,
+    val textSizeL: String,
+    val textSizeXl: String,
+    val settingsThemeTitle: String,
+    val settingsThemeSystem: String,
+    val settingsThemeLight: String,
+    val settingsThemeDark: String,
+    val settingsA11yTitle: String,
+    val simpleModeTitle: String,
+    val simpleModeDesc: String,
+    val contrastTitle: String,
+    val contrastDesc: String,
+    val reduceMotionTitle: String,
+    val reduceMotionDesc: String,
+    // Calendar names
+    val monthsLong: List<String>,
+    val monthsShort: List<String>,
+    val weekdaysLong: List<String>,
+    val weekdaysShort: List<String>,
+) {
+    fun marksLabel(simpleMode: Boolean): String = if (simpleMode) tabMarksSimple else tabMarks
+    fun timetableLabel(simpleMode: Boolean): String = if (simpleMode) tabTimetableSimple else tabTimetable
+    fun absencesLabel(simpleMode: Boolean): String = if (simpleMode) tabAbsencesSimple else tabAbsences
+    fun homeworkLabel(simpleMode: Boolean): String = if (simpleMode) tabHomeworkSimple else tabHomework
+    fun profileLabel(simpleMode: Boolean): String = if (simpleMode) tabProfileSimple else tabProfileShort
+    fun profilePageTitle(simpleMode: Boolean): String = if (simpleMode) tabProfileSimple else tabProfile
+
+    fun qualifierFullWord(code: QualifierCode): String = when (code) {
+        QualifierCode.FB -> qualFb
+        QualifierCode.B -> qualB
+        QualifierCode.S -> qualS
+        QualifierCode.I -> qualI
+    }
+
+    fun bandLabel(band: GradeBand): String = when (band) {
+        GradeBand.TOP -> bandTop
+        GradeBand.GOOD -> bandGood
+        GradeBand.OK -> bandOk
+        GradeBand.LOW -> bandLow
+        GradeBand.NONE -> bandNone
+    }
+
+    fun emptyMarkText(scale: SubjectScale): String = when (scale) {
+        SubjectScale.QUALIFIER -> noQualifiersYet
+        SubjectScale.DESCRIPTOR -> noDescriptorsYet
+        SubjectScale.NUMERIC -> noMarksYet
+    }
+
+    fun formatAverage(value: Double?): String {
+        if (value == null || value.isNaN()) return "-"
+        val locale = Locale.forLanguageTag(language.localeTag)
+        return String.format(locale, "%.2f", value)
+    }
+
+    fun formatShortDate(isoDate: String): String {
+        val date = runCatching { LocalDate.parse(isoDate) }.getOrNull() ?: return isoDate
+        val monthIdx = date.monthValue - 1
+        val monthName = monthsShort.getOrElse(monthIdx) { "" }
+        return "${date.dayOfMonth} $monthName".trim()
+    }
+
+    fun formatDayNumber(isoDate: String): String {
+        val date = runCatching { LocalDate.parse(isoDate) }.getOrNull() ?: return "-"
+        return date.dayOfMonth.toString()
+    }
+
+    fun formatShortMonth(isoDate: String): String {
+        val date = runCatching { LocalDate.parse(isoDate) }.getOrNull() ?: return ""
+        return monthsShort.getOrElse(date.monthValue - 1) { "" }
+    }
+
+    fun formatLongDate(isoDate: String): String {
+        val date = runCatching { LocalDate.parse(isoDate) }.getOrNull() ?: return isoDate
+        val weekdayIdx = date.dayOfWeek.value - 1 // 0 = Monday .. 6 = Sunday
+        val weekdayName = weekdaysLong.getOrElse(weekdayIdx) { "" }
+        val monthName = monthsLong.getOrElse(date.monthValue - 1) { "" }
+        return "$weekdayName, ${date.dayOfMonth} $monthName".trim()
+    }
+
+    fun formatRelativeDay(isoDate: String, referenceIsoDate: String): String {
+        val target = runCatching { LocalDate.parse(isoDate) }.getOrNull() ?: return isoDate
+        val ref = runCatching { LocalDate.parse(referenceIsoDate) }.getOrNull() ?: return formatShortDate(isoDate)
+        val diff = ChronoUnit.DAYS.between(ref, target).toInt()
+        return when {
+            diff == 0 -> today
+            diff == 1 -> tomorrow
+            diff == -1 -> yesterday
+            diff > 1 -> formatPlural(diff, inDaysOneTemplate, inDaysFewTemplate, inDaysManyTemplate)
+            else -> formatPlural(abs(diff), daysAgoOneTemplate, daysAgoFewTemplate, daysAgoManyTemplate)
+        }
+    }
+
+    fun formatMinutes(mins: Int): String {
+        if (mins < 60) return unitMinTemplate.replace("{mins}", mins.toString())
+        val hours = mins / 60
+        val rest = mins % 60
+        return if (rest > 0) {
+            unitHMinTemplate
+                .replace("{hours}", hours.toString())
+                .replace("{rest}", rest.toString())
+        } else {
+            unitHTemplate.replace("{hours}", hours.toString())
+        }
+    }
+
+    fun formatLessonCount(count: Int): String =
+        formatPlural(count, lessonCountOneTemplate, lessonCountFewTemplate, lessonCountManyTemplate)
+
+    fun formatAbsenceCount(count: Int): String =
+        formatPlural(count, absCountOneTemplate, absCountFewTemplate, absCountManyTemplate)
+
+    fun formatLessonPeriod(period: Int): String =
+        lessonPeriodTemplate.replace("{period}", period.toString())
+
+    fun formatBreak(minutes: Int): String =
+        breakTextTemplate.replace("{time}", formatMinutes(minutes))
+
+    private fun formatPlural(count: Int, one: String, few: String, many: String): String {
+        val n = abs(count)
+        val template = if (language == AppLanguage.RU) {
+            val mod10 = n % 10
+            val mod100 = n % 100
+            when {
+                mod10 == 1 && mod100 != 11 -> one
+                mod10 in 2..4 && (mod100 < 10 || mod100 >= 20) -> few
+                else -> many
+            }
+        } else {
+            if (n == 1) one else many
+        }
+        return template.replace("{count}", count.toString())
+    }
+}
+
+object AppStringCatalog {
+
+    val ro = AppStrings(
+        language = AppLanguage.RO,
+        appTitle = "Open SIME",
+        samplePreviewBadge = "Demo",
+        tabHome = "Acasă",
+        tabMarks = "Reușita",
+        tabMarksSimple = "Notele mele",
+        tabTimetable = "Orar",
+        tabTimetableSimple = "Orarul meu",
+        tabAbsences = "Absențe",
+        tabAbsencesSimple = "Cât am lipsit",
+        tabHomework = "Teme",
+        tabHomeworkSimple = "Ce am de învățat",
+        tabProfile = "Profil și profesori",
+        tabProfileShort = "Profil",
+        tabProfileSimple = "Despre mine",
+        actionSettings = "Setări",
+        actionClose = "Închide",
+        actionRetry = "Încearcă din nou",
+        themeToLight = "Treci la tema luminoasă",
+        themeToDark = "Treci la tema întunecată",
+        todaysLessons = "Orele de azi",
+        liveBadge = "În desfășurare",
+        nextBadge = "Urmează",
+        pastBadge = "Încheiat",
+        endedBadge = "Încheiat",
+        breakBadge = "Pauză",
+        weekendBadge = "Weekend",
+        freeDayBadge = "Liber",
+        lessonFallback = "Lecție",
+        timeLeftTemplate = "Mai sunt {time}",
+        startsAtInTemplate = "{start}, peste {time}",
+        nextLessonStartsInTemplate = "Următoarea oră începe peste {time}",
+        firstLessonStartsInTemplate = "Prima oră începe peste {time}",
+        lessonsFinishedToday = "Orele de azi s-au încheiat",
+        lastLessonInfoTemplate = "Ultima oră: {subject}, până la {end}",
+        noLessonsTodayTitle = "Astăzi nu sunt ore în orar",
+        noLessonsTodaySub = "Nu sunt lecții programate pentru azi.",
+        allMarks = "Toate notele",
+        allHomework = "Toate temele",
+        recentGrades = "Note recente",
+        homeworkPreview = "Teme și termene",
+        generalAverageEstimated = "Media generală (estimată)",
+        sem1ShortTemplate = "Sem. 1: {avg}",
+        sem2ShortTemplate = "Sem. 2: {avg}",
+        noAbsencesThisYear = "Nicio absență în acest an",
+        inThisSchoolYear = "în acest an școlar",
+        lastGrade = "Ultima notă",
+        noGradesYetShort = "Încă nu sunt note.",
+        bandTop = "Excelent",
+        bandGood = "Bine",
+        bandOk = "Suficient",
+        bandLow = "Insuficient",
+        bandNone = "Fără medie",
+        dataLoadErrorTitle = "Nu am putut încărca datele",
+        noGradesTitle = "Încă nu sunt note",
+        noGradesSub = "Notele noi vor apărea aici după sincronizare.",
+        noDisciplinesTitle = "Încă nu sunt discipline",
+        noDisciplinesSub = "Notele apar aici după sincronizarea cu portalul.",
+        noHomeworkTitle = "Nicio temă",
+        noHomeworkSub = "Nu ai teme în acest moment.",
+        noHomeworkListSub = "Temele noi vor apărea aici după sincronizare.",
+        noDueDate = "Fără termen",
+        noLessonsTitle = "Nicio oră în orar",
+        noLessonsSub = "Nu sunt lecții programate pentru această zi.",
+        noAbsencesTitle = "Nicio absență",
+        noAbsencesSubTemplate = "Nu sunt absențe înregistrate în Semestrul {sem}.",
+        noTeachersTitle = "Lista profesorilor nu este disponibilă",
+        noTeachersSub = "Profesorii vor apărea după încărcarea orarului și a notelor.",
+        discipline = "Disciplina",
+        marksLabelText = "Note",
+        semester1Marks = "Semestrul 1: Note",
+        semester2Marks = "Semestrul 2: Note",
+        semester1 = "Semestrul 1",
+        semester2 = "Semestrul 2",
+        thesisBadge = "Teză",
+        scaleQualifiers = "Calificative",
+        scaleDescriptors = "Descriptori",
+        noQualifiersYet = "Încă nu sunt calificative",
+        noDescriptorsYet = "Încă nu sunt descriptori",
+        noMarksYet = "Încă nu sunt note",
+        qualFb = "Foarte bine",
+        qualB = "Bine",
+        qualS = "Suficient",
+        qualI = "Insuficient",
+        gradePrefix = "Nota ",
+        thesisPrefix = "Teza: ",
+        absTotal = "Total",
+        absExcused = "Motivate",
+        absUnexcused = "Nemotivate",
+        absExcusedCountTemplate = "Motivate {count}",
+        absUnexcusedCountTemplate = "Nemotivate {count}",
+        absBySubject = "Pe discipline",
+        absChronological = "Cronologic",
+        absStatusExcused = "Motivată",
+        absStatusUnexcused = "Nemotivată",
+        absCountOneTemplate = "{count} absență",
+        absCountFewTemplate = "{count} absențe",
+        absCountManyTemplate = "{count} absențe",
+        absExcusedBadgeTemplate = "{count} motivate",
+        absUnexcusedBadgeTemplate = "{count} nemotivate",
+        roomPrefixTemplate = "Sala {room}",
+        today = "Astăzi",
+        tomorrow = "Mâine",
+        yesterday = "Ieri",
+        inDaysOneTemplate = "Peste {count} zi",
+        inDaysFewTemplate = "Peste {count} zile",
+        inDaysManyTemplate = "Peste {count} zile",
+        daysAgoOneTemplate = "Acum {count} zi",
+        daysAgoFewTemplate = "Acum {count} zile",
+        daysAgoManyTemplate = "Acum {count} zile",
+        prevDay = "Ziua precedentă",
+        nextDay = "Ziua următoare",
+        breakTextTemplate = "Pauză {time}",
+        lessonPeriodTemplate = "Ora {period}",
+        lessonCountOneTemplate = "{count} oră",
+        lessonCountFewTemplate = "{count} ore",
+        lessonCountManyTemplate = "{count} ore",
+        unitMinTemplate = "{mins} min",
+        unitHTemplate = "{hours} h",
+        unitHMinTemplate = "{hours} h {rest} min",
+        studentLabel = "Elev",
+        schoolLabel = "Școala",
+        classMasterLabel = "Diriginte",
+        studyYearLabel = "Anul de studiu",
+        classPrefix = "Clasa ",
+        teachersSection = "Profesori",
+        classMasterBadge = "Diriginte",
+        settingsTitle = "Setări",
+        settingsLangTitle = "Limbă",
+        settingsTextSizeTitle = "Mărime text",
+        textSizeS = "Mic (S)",
+        textSizeM = "Mediu (M)",
+        textSizeL = "Mare (L)",
+        textSizeXl = "Foarte mare (XL)",
+        settingsThemeTitle = "Temă",
+        settingsThemeSystem = "Sistem",
+        settingsThemeLight = "Luminoasă",
+        settingsThemeDark = "Întunecată",
+        settingsA11yTitle = "Opțiuni accesibilitate",
+        simpleModeTitle = "Mod simplificat",
+        simpleModeDesc = "Etichete prietenoase și butoane mai mari pentru elevii mici",
+        contrastTitle = "Contrast sporit",
+        contrastDesc = "Contururi mai clare și contrast mărit pentru text",
+        reduceMotionTitle = "Reducere animații",
+        reduceMotionDesc = "Dezactivează efectele decorative de tranziție",
+        monthsLong = listOf(
+            "ianuarie", "februarie", "martie", "aprilie", "mai", "iunie",
+            "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie",
+        ),
+        monthsShort = listOf(
+            "ian", "feb", "mar", "apr", "mai", "iun",
+            "iul", "aug", "sep", "oct", "nov", "dec",
+        ),
+        weekdaysLong = listOf("Luni", "Marți", "Miercuri", "Joi", "Vineri", "Sâmbătă", "Duminică"),
+        weekdaysShort = listOf("Lu", "Ma", "Mi", "Jo", "Vi"),
+    )
+
+    val ru = AppStrings(
+        language = AppLanguage.RU,
+        appTitle = "Open SIME",
+        samplePreviewBadge = "Демо",
+        tabHome = "Главная",
+        tabMarks = "Успеваемость",
+        tabMarksSimple = "Мои оценки",
+        tabTimetable = "Расписание",
+        tabTimetableSimple = "Моё расписание",
+        tabAbsences = "Пропуски",
+        tabAbsencesSimple = "Мои пропуски",
+        tabHomework = "Домашние задания",
+        tabHomeworkSimple = "Что задали",
+        tabProfile = "Профиль и учителя",
+        tabProfileShort = "Профиль",
+        tabProfileSimple = "Обо мне",
+        actionSettings = "Настройки",
+        actionClose = "Закрыть",
+        actionRetry = "Повторить",
+        themeToLight = "Переключить на светлую тему",
+        themeToDark = "Переключить на тёмную тему",
+        todaysLessons = "Уроки сегодня",
+        liveBadge = "Идёт урок",
+        nextBadge = "Далее",
+        pastBadge = "Завершён",
+        endedBadge = "Завершено",
+        breakBadge = "Перемена",
+        weekendBadge = "Выходной",
+        freeDayBadge = "Свободно",
+        lessonFallback = "Урок",
+        timeLeftTemplate = "Осталось {time}",
+        startsAtInTemplate = "{start}, через {time}",
+        nextLessonStartsInTemplate = "Следующий урок через {time}",
+        firstLessonStartsInTemplate = "Первый урок через {time}",
+        lessonsFinishedToday = "Уроки на сегодня закончились",
+        lastLessonInfoTemplate = "Последний урок: {subject}, до {end}",
+        noLessonsTodayTitle = "Сегодня уроков по расписанию нет",
+        noLessonsTodaySub = "На сегодня уроки не запланированы.",
+        allMarks = "Все оценки",
+        allHomework = "Все задания",
+        recentGrades = "Последние оценки",
+        homeworkPreview = "Задания и сроки",
+        generalAverageEstimated = "Общий средний балл (расчётный)",
+        sem1ShortTemplate = "Сем. 1: {avg}",
+        sem2ShortTemplate = "Сем. 2: {avg}",
+        noAbsencesThisYear = "Нет пропусков в этом году",
+        inThisSchoolYear = "в этом учебном году",
+        lastGrade = "Последняя оценка",
+        noGradesYetShort = "Оценок пока нет.",
+        bandTop = "Отлично",
+        bandGood = "Хорошо",
+        bandOk = "Удовлетворительно",
+        bandLow = "Неудовлетворительно",
+        bandNone = "Без среднего",
+        dataLoadErrorTitle = "Не удалось загрузить данные",
+        noGradesTitle = "Оценок пока нет",
+        noGradesSub = "Новые оценки появятся здесь после синхронизации.",
+        noDisciplinesTitle = "Предметов пока нет",
+        noDisciplinesSub = "Оценки появятся здесь после синхронизации с порталом.",
+        noHomeworkTitle = "Нет заданий",
+        noHomeworkSub = "На данный момент домашних заданий нет.",
+        noHomeworkListSub = "Новые задания появятся здесь после синхронизации.",
+        noDueDate = "Без срока",
+        noLessonsTitle = "Нет уроков в расписании",
+        noLessonsSub = "На этот день уроки не запланированы.",
+        noAbsencesTitle = "Нет пропусков",
+        noAbsencesSubTemplate = "В Семестре {sem} пропусков не зарегистрировано.",
+        noTeachersTitle = "Список учителей недоступен",
+        noTeachersSub = "Учителя появятся после загрузки расписания и оценок.",
+        discipline = "Предмет",
+        marksLabelText = "Оценки",
+        semester1Marks = "Семестр 1: Оценки",
+        semester2Marks = "Семестр 2: Оценки",
+        semester1 = "Семестр 1",
+        semester2 = "Семестр 2",
+        thesisBadge = "Тезис",
+        scaleQualifiers = "Квалификативы",
+        scaleDescriptors = "Дескрипторы",
+        noQualifiersYet = "Квалификативов пока нет",
+        noDescriptorsYet = "Дескрипторов пока нет",
+        noMarksYet = "Оценок пока нет",
+        qualFb = "Очень хорошо",
+        qualB = "Хорошо",
+        qualS = "Удовлетворительно",
+        qualI = "Неудовлетворительно",
+        gradePrefix = "Оценка ",
+        thesisPrefix = "Тезис: ",
+        absTotal = "Всего",
+        absExcused = "Уважительные",
+        absUnexcused = "Неуважительные",
+        absExcusedCountTemplate = "Уважительных {count}",
+        absUnexcusedCountTemplate = "Неуважительных {count}",
+        absBySubject = "По предметам",
+        absChronological = "Хронологически",
+        absStatusExcused = "Уважительный",
+        absStatusUnexcused = "Неуважительный",
+        absCountOneTemplate = "{count} пропуск",
+        absCountFewTemplate = "{count} пропуска",
+        absCountManyTemplate = "{count} пропусков",
+        absExcusedBadgeTemplate = "{count} уваж.",
+        absUnexcusedBadgeTemplate = "{count} неуваж.",
+        roomPrefixTemplate = "Каб. {room}",
+        today = "Сегодня",
+        tomorrow = "Завтра",
+        yesterday = "Вчера",
+        inDaysOneTemplate = "Через {count} день",
+        inDaysFewTemplate = "Через {count} дня",
+        inDaysManyTemplate = "Через {count} дней",
+        daysAgoOneTemplate = "{count} день назад",
+        daysAgoFewTemplate = "{count} дня назад",
+        daysAgoManyTemplate = "{count} дней назад",
+        prevDay = "Предыдущий день",
+        nextDay = "Следующий день",
+        breakTextTemplate = "Перемена {time}",
+        lessonPeriodTemplate = "Урок {period}",
+        lessonCountOneTemplate = "{count} урок",
+        lessonCountFewTemplate = "{count} урока",
+        lessonCountManyTemplate = "{count} уроков",
+        unitMinTemplate = "{mins} мин",
+        unitHTemplate = "{hours} ч",
+        unitHMinTemplate = "{hours} ч {rest} мин",
+        studentLabel = "Ученик",
+        schoolLabel = "Школа",
+        classMasterLabel = "Классный руководитель",
+        studyYearLabel = "Учебный год",
+        classPrefix = "Класс ",
+        teachersSection = "Учителя",
+        classMasterBadge = "Кл. руководитель",
+        settingsTitle = "Настройки",
+        settingsLangTitle = "Язык",
+        settingsTextSizeTitle = "Размер текста",
+        textSizeS = "Маленький (S)",
+        textSizeM = "Средний (M)",
+        textSizeL = "Крупный (L)",
+        textSizeXl = "Очень крупный (XL)",
+        settingsThemeTitle = "Тема",
+        settingsThemeSystem = "Системная",
+        settingsThemeLight = "Светлая",
+        settingsThemeDark = "Тёмная",
+        settingsA11yTitle = "Специальные возможности",
+        simpleModeTitle = "Упрощённый режим",
+        simpleModeDesc = "Понятные подписи и крупные кнопки для младших школьников",
+        contrastTitle = "Повышенный контраст",
+        contrastDesc = "Более чёткие границы и усиленный контраст текста",
+        reduceMotionTitle = "Уменьшение анимации",
+        reduceMotionDesc = "Отключить декоративные анимации и эффекты переходов",
+        monthsLong = listOf(
+            "января", "февраля", "марта", "апреля", "мая", "июня",
+            "июля", "августа", "сентября", "октября", "ноября", "декабря",
+        ),
+        monthsShort = listOf(
+            "янв", "фев", "мар", "апр", "май", "июн",
+            "июл", "авг", "сен", "окт", "ноя", "дек",
+        ),
+        weekdaysLong = listOf("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"),
+        weekdaysShort = listOf("Пн", "Вт", "Ср", "Чт", "Пт"),
+    )
+
+    val en = AppStrings(
+        language = AppLanguage.EN,
+        appTitle = "Open SIME",
+        samplePreviewBadge = "Demo",
+        tabHome = "Home",
+        tabMarks = "Grades",
+        tabMarksSimple = "My Grades",
+        tabTimetable = "Timetable",
+        tabTimetableSimple = "My Schedule",
+        tabAbsences = "Absences",
+        tabAbsencesSimple = "My Attendance",
+        tabHomework = "Homework",
+        tabHomeworkSimple = "My Homework",
+        tabProfile = "Profile & Teachers",
+        tabProfileShort = "Profile",
+        tabProfileSimple = "About Me",
+        actionSettings = "Settings",
+        actionClose = "Close",
+        actionRetry = "Try again",
+        themeToLight = "Switch to light theme",
+        themeToDark = "Switch to dark theme",
+        todaysLessons = "Today's lessons",
+        liveBadge = "In progress",
+        nextBadge = "Next",
+        pastBadge = "Finished",
+        endedBadge = "Ended",
+        breakBadge = "Break",
+        weekendBadge = "Weekend",
+        freeDayBadge = "Day off",
+        lessonFallback = "Lesson",
+        timeLeftTemplate = "{time} left",
+        startsAtInTemplate = "{start}, in {time}",
+        nextLessonStartsInTemplate = "Next lesson starts in {time}",
+        firstLessonStartsInTemplate = "First lesson starts in {time}",
+        lessonsFinishedToday = "Today's lessons have ended",
+        lastLessonInfoTemplate = "Last lesson: {subject}, until {end}",
+        noLessonsTodayTitle = "No lessons scheduled today",
+        noLessonsTodaySub = "There are no lessons scheduled for today.",
+        allMarks = "All grades",
+        allHomework = "All homework",
+        recentGrades = "Recent grades",
+        homeworkPreview = "Homework & Deadlines",
+        generalAverageEstimated = "General GPA (estimated)",
+        sem1ShortTemplate = "Sem. 1: {avg}",
+        sem2ShortTemplate = "Sem. 2: {avg}",
+        noAbsencesThisYear = "No absences this year",
+        inThisSchoolYear = "this school year",
+        lastGrade = "Latest grade",
+        noGradesYetShort = "No grades yet.",
+        bandTop = "Excellent",
+        bandGood = "Good",
+        bandOk = "Sufficient",
+        bandLow = "Insufficient",
+        bandNone = "No average",
+        dataLoadErrorTitle = "Could not load data",
+        noGradesTitle = "No grades yet",
+        noGradesSub = "New grades will appear here after sync.",
+        noDisciplinesTitle = "No subjects yet",
+        noDisciplinesSub = "Grades appear here after syncing with the portal.",
+        noHomeworkTitle = "No homework",
+        noHomeworkSub = "You have no homework right now.",
+        noHomeworkListSub = "New homework assignments will appear here after sync.",
+        noDueDate = "No due date",
+        noLessonsTitle = "No lessons scheduled",
+        noLessonsSub = "There are no lessons scheduled for this day.",
+        noAbsencesTitle = "No absences",
+        noAbsencesSubTemplate = "No absences recorded in Semester {sem}.",
+        noTeachersTitle = "Teacher list unavailable",
+        noTeachersSub = "Teachers will appear after schedule and grades are loaded.",
+        discipline = "Subject",
+        marksLabelText = "Grades",
+        semester1Marks = "Semester 1: Grades",
+        semester2Marks = "Semester 2: Grades",
+        semester1 = "Semester 1",
+        semester2 = "Semester 2",
+        thesisBadge = "Thesis",
+        scaleQualifiers = "Qualifiers",
+        scaleDescriptors = "Descriptors",
+        noQualifiersYet = "No qualifiers yet",
+        noDescriptorsYet = "No descriptors yet",
+        noMarksYet = "No marks yet",
+        qualFb = "Very Good",
+        qualB = "Good",
+        qualS = "Sufficient",
+        qualI = "Insufficient",
+        gradePrefix = "Grade ",
+        thesisPrefix = "Thesis: ",
+        absTotal = "Total",
+        absExcused = "Excused",
+        absUnexcused = "Unexcused",
+        absExcusedCountTemplate = "Excused {count}",
+        absUnexcusedCountTemplate = "Unexcused {count}",
+        absBySubject = "By subject",
+        absChronological = "Chronological",
+        absStatusExcused = "Excused",
+        absStatusUnexcused = "Unexcused",
+        absCountOneTemplate = "{count} absence",
+        absCountFewTemplate = "{count} absences",
+        absCountManyTemplate = "{count} absences",
+        absExcusedBadgeTemplate = "{count} excused",
+        absUnexcusedBadgeTemplate = "{count} unexcused",
+        roomPrefixTemplate = "Room {room}",
+        today = "Today",
+        tomorrow = "Tomorrow",
+        yesterday = "Yesterday",
+        inDaysOneTemplate = "In {count} day",
+        inDaysFewTemplate = "In {count} days",
+        inDaysManyTemplate = "In {count} days",
+        daysAgoOneTemplate = "{count} day ago",
+        daysAgoFewTemplate = "{count} days ago",
+        daysAgoManyTemplate = "{count} days ago",
+        prevDay = "Previous day",
+        nextDay = "Next day",
+        breakTextTemplate = "Break {time}",
+        lessonPeriodTemplate = "Period {period}",
+        lessonCountOneTemplate = "{count} lesson",
+        lessonCountFewTemplate = "{count} lessons",
+        lessonCountManyTemplate = "{count} lessons",
+        unitMinTemplate = "{mins} min",
+        unitHTemplate = "{hours} h",
+        unitHMinTemplate = "{hours} h {rest} min",
+        studentLabel = "Student",
+        schoolLabel = "School",
+        classMasterLabel = "Class master",
+        studyYearLabel = "Study year",
+        classPrefix = "Class ",
+        teachersSection = "Teachers",
+        classMasterBadge = "Class master",
+        settingsTitle = "Settings",
+        settingsLangTitle = "Language",
+        settingsTextSizeTitle = "Text size",
+        textSizeS = "Small (S)",
+        textSizeM = "Medium (M)",
+        textSizeL = "Large (L)",
+        textSizeXl = "Extra large (XL)",
+        settingsThemeTitle = "Theme",
+        settingsThemeSystem = "System",
+        settingsThemeLight = "Light",
+        settingsThemeDark = "Dark",
+        settingsA11yTitle = "Accessibility options",
+        simpleModeTitle = "Simple mode",
+        simpleModeDesc = "Friendly labels and larger buttons for younger students",
+        contrastTitle = "High contrast",
+        contrastDesc = "Stronger borders and increased text contrast",
+        reduceMotionTitle = "Reduce motion",
+        reduceMotionDesc = "Disable decorative animations and transition effects",
+        monthsLong = listOf(
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ),
+        monthsShort = listOf(
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ),
+        weekdaysLong = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+        weekdaysShort = listOf("Mon", "Tue", "Wed", "Thu", "Fri"),
+    )
+
+    fun forLanguage(language: AppLanguage): AppStrings = when (language) {
+        AppLanguage.RO -> ro
+        AppLanguage.RU -> ru
+        AppLanguage.EN -> en
+    }
+}
+
+val LocalAppStrings = staticCompositionLocalOf { AppStringCatalog.ro }
