@@ -42,6 +42,10 @@ test("Sidecar Build Script: target triple resolution and binary naming across al
     "x86_64-pc-windows-msvc"
   );
   assert.equal(
+    resolveTargetTriple(["node", "build-sidecar.mjs", "--target=universal-apple-darwin"], {}),
+    "universal-apple-darwin"
+  );
+  assert.equal(
     resolveTargetTriple(["node", "build-sidecar.mjs", "--target=aarch64-apple-darwin"], {}),
     "aarch64-apple-darwin"
   );
@@ -62,6 +66,11 @@ test("Sidecar Build Script: target triple resolution and binary naming across al
   assert.ok(
     getSidecarOutputPath("x86_64-apple-darwin").endsWith(
       path.join("src-tauri", "binaries", "open-sime-server-x86_64-apple-darwin")
+    )
+  );
+  assert.ok(
+    getSidecarOutputPath("universal-apple-darwin").endsWith(
+      path.join("src-tauri", "binaries", "open-sime-server-universal-apple-darwin")
     )
   );
   assert.ok(
@@ -453,6 +462,7 @@ test("Artifact Naming and Staging: exact output filenames, version interpolation
   assert.equal(getStandardArtifactName("darwin", "1.2.3"), "Open-SIME-v1.2.3.dmg");
   assert.equal(getStandardArtifactName("aarch64-apple-darwin", "1.2.3"), "Open-SIME-v1.2.3.dmg");
   assert.equal(getStandardArtifactName("x86_64-apple-darwin", "1.2.3"), "Open-SIME-v1.2.3.dmg");
+  assert.equal(getStandardArtifactName("universal-apple-darwin", "1.2.3"), "Open-SIME-v1.2.3.dmg");
 
   assert.equal(getStandardArtifactName("linux", "1.2.3"), "Open-SIME-v1.2.3.AppImage");
   assert.equal(getStandardArtifactName("x86_64-unknown-linux-gnu", "1.2.3"), "Open-SIME-v1.2.3.AppImage");

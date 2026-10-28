@@ -95,7 +95,9 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
 
   // Target matrix in release builds
   assert.ok(content.includes("x86_64-pc-windows-msvc"), "Release must build Windows x64");
-  assert.ok(content.includes("aarch64-apple-darwin"), "Release must build macOS");
+  assert.ok(content.includes("universal-apple-darwin"), "Release must build universal macOS DMG");
+  assert.ok(content.includes("x86_64-apple-darwin"), "Release must include Intel macOS target");
+  assert.ok(content.includes("aarch64-apple-darwin"), "Release must include Apple Silicon macOS target");
   assert.ok(content.includes("x86_64-unknown-linux-gnu"), "Release must build Linux x64");
 
   // Standardized dynamic artifact staging

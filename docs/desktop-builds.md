@@ -36,6 +36,7 @@ Tauri 2 resolves `bundle.externalBin` (`["binaries/open-sime-server"]`) by appen
 | Windows x64 | `x86_64-pc-windows-msvc` | `open-sime-server-x86_64-pc-windows-msvc.exe` |
 | macOS Intel (x64) | `x86_64-apple-darwin` | `open-sime-server-x86_64-apple-darwin` |
 | macOS Apple Silicon (ARM64) | `aarch64-apple-darwin` | `open-sime-server-aarch64-apple-darwin` |
+| macOS Universal (Intel + Apple Silicon) | `universal-apple-darwin` | `open-sime-server-universal-apple-darwin` |
 | Linux x64 | `x86_64-unknown-linux-gnu` | `open-sime-server-x86_64-unknown-linux-gnu` |
 
 To build the sidecar for the current host or a specific cross-compilation target:
@@ -171,7 +172,7 @@ Every official release produces exactly 3 platform installers plus the checksum 
 | Platform / Target | Rust Triple | Distribution Format | Final Release Filename |
 | --- | --- | --- | --- |
 | **Windows x64** | `x86_64-pc-windows-msvc` | NSIS Installer (`.exe`) | `Open-SIME-installer-v<version>.exe` |
-| **macOS (Apple Silicon)** | `aarch64-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-v<version>.dmg` |
+| **macOS (Universal: Intel & Apple Silicon)** | `universal-apple-darwin` | Drag-to-Applications (`.dmg`) | `Open-SIME-v<version>.dmg` |
 | **Linux x64** | `x86_64-unknown-linux-gnu` | Portable AppImage (`.AppImage`) | `Open-SIME-v<version>.AppImage` |
 | **Checksum Manifest** | N/A | SHA-256 Text File | `checksums.txt` |
 | **Manifest Signature** | N/A | Detached ASCII-Armored GPG Signature | `checksums.txt.sig` |

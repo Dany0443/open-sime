@@ -275,7 +275,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          targets: aarch64-apple-darwin
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
 
       - name: Rust build cache
         uses: swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2.7.5
@@ -324,7 +324,7 @@ jobs:
 
       - name: Build Node.js sidecar executable
         working-directory: desktop
-        run: node scripts/build-sidecar.mjs --target aarch64-apple-darwin
+        run: node scripts/build-sidecar.mjs --target universal-apple-darwin
 
       - name: Sign sidecar executable
         if: env.SIGN_MACOS == 'true'
@@ -332,9 +332,13 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          codesign --force --options runtime --timestamp \
-            --sign "$APPLE_SIGNING_IDENTITY" \
-            "src-tauri/binaries/open-sime-server-aarch64-apple-darwin"
+          for f in src-tauri/binaries/open-sime-server-*; do
+            if [ -f "$f" ]; then
+              codesign --force --options runtime --timestamp \
+                --sign "$APPLE_SIGNING_IDENTITY" \
+                "$f"
+            fi
+          done
 
       - name: Build signed and notarized DMG
         if: env.SIGN_MACOS == 'true'
@@ -348,17 +352,17 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        run: npx tauri build --target aarch64-apple-darwin --bundles dmg
+        run: npx tauri build --target universal-apple-darwin --bundles dmg
 
       - name: Build unsigned DMG
         if: env.SIGN_MACOS != 'true'
         working-directory: desktop
-        run: npx tauri build --target aarch64-apple-darwin --bundles dmg
+        run: npx tauri build --target universal-apple-darwin --bundles dmg
 
       - name: Rename and verify DMG
         working-directory: desktop
         run: |
-          node scripts/stage-release-artifact.mjs --target aarch64-apple-darwin
+          node scripts/stage-release-artifact.mjs --target universal-apple-darwin
           MAC_ARTIFACT=$(node scripts/stage-release-artifact.mjs --name-only --platform macos)
 
           if [ "$SIGN_MACOS" = "true" ]; then

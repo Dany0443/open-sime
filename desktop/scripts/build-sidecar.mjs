@@ -8,6 +8,7 @@
 //   - x86_64-pc-windows-msvc
 //   - x86_64-apple-darwin
 //   - aarch64-apple-darwin
+//   - universal-apple-darwin
 //   - x86_64-unknown-linux-gnu
 
 import { execFileSync } from "node:child_process";
@@ -35,6 +36,10 @@ const TARGET_MAP = {
   },
   "aarch64-apple-darwin": {
     pkgTarget: "node22-macos-arm64",
+    ext: "",
+  },
+  "universal-apple-darwin": {
+    pkgTarget: "universal",
     ext: "",
   },
   "x86_64-unknown-linux-gnu": {
@@ -208,6 +213,41 @@ export async function buildSidecar(options = {}) {
     throw new Error(
       `Unsupported Rust target triple "${targetTriple}". Supported triples: ${Object.keys(TARGET_MAP).join(", ")}`
     );
+  }
+
+  if (targetTriple === "universal-apple-darwin") {
+    console.log("Building universal macOS sidecar (x86_64 + aarch64)...");
+    const x86Result = await buildSidecar({ ...options, targetTriple: "x86_64-apple-darwin" });
+    const armResult = await buildSidecar({ ...options, targetTriple: "aarch64-apple-darwin" });
+
+    const outputPath = getSidecarOutputPath("universal-apple-darwin");
+
+    try {
+      execFileSync(
+        "lipo",
+        ["-create", "-output", outputPath, x86Result.outputPath, armResult.outputPath],
+        { stdio: "inherit" }
+      );
+      console.log(`Created universal macOS sidecar with lipo: ${outputPath}`);
+    } catch (err) {
+      if (process.platform === "darwin") {
+        throw new Error(`Failed to create universal sidecar binary with lipo: ${err.message}`);
+      }
+      fs.copyFileSync(armResult.outputPath, outputPath);
+      console.warn(`Warning: lipo not available on this platform. Created stand-in universal binary at ${outputPath}`);
+    }
+
+    try {
+      fs.chmodSync(outputPath, 0o755);
+    } catch {
+      // Ignore chmod errors on non-POSIX filesystems
+    }
+
+    const stat = fs.statSync(outputPath);
+    console.log(
+      `Built Open SIME sidecar for universal-apple-darwin: ${path.relative(DESKTOP_ROOT, outputPath)} (${(stat.size / (1024 * 1024)).toFixed(1)} MB)`
+    );
+    return { targetTriple: "universal-apple-darwin", outputPath, realBinaryPath: outputPath, sizeBytes: stat.size };
   }
 
   const outputPath = getSidecarOutputPath(targetTriple);
