@@ -67,7 +67,7 @@ export function generateReleaseNotes({
     );
     lines.push("");
     lines.push(
-      "Initial official beta release for Windows (x64 NSIS), macOS (Apple Silicon DMG), and Linux (x64 AppImage)."
+      "Initial official beta release for Windows (x64 NSIS), macOS (Universal DMG), and Linux (x64 AppImage)."
     );
   } else {
     lines.push(`## Open SIME ${tag}`);

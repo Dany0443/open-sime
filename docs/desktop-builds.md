@@ -34,8 +34,6 @@ Tauri 2 resolves `bundle.externalBin` (`["binaries/open-sime-server"]`) by appen
 | Platform / Architecture | Rust Target Triple | Sidecar Binary Path (`src-tauri/binaries/`) |
 | --- | --- | --- |
 | Windows x64 | `x86_64-pc-windows-msvc` | `open-sime-server-x86_64-pc-windows-msvc.exe` |
-| macOS Intel (x64) | `x86_64-apple-darwin` | `open-sime-server-x86_64-apple-darwin` |
-| macOS Apple Silicon (ARM64) | `aarch64-apple-darwin` | `open-sime-server-aarch64-apple-darwin` |
 | macOS Universal (Intel + Apple Silicon) | `universal-apple-darwin` | `open-sime-server-universal-apple-darwin` |
 | Linux x64 | `x86_64-unknown-linux-gnu` | `open-sime-server-x86_64-unknown-linux-gnu` |
 
@@ -49,7 +47,7 @@ npm run sidecar:build
 
 # Explicit target triple override (for cross-compiling)
 node scripts/build-sidecar.mjs --target x86_64-pc-windows-msvc
-node scripts/build-sidecar.mjs --target aarch64-apple-darwin
+node scripts/build-sidecar.mjs --target universal-apple-darwin
 ```
 
 Compiled binaries under `src-tauri/binaries/` are gitignored and must not be committed to Git.

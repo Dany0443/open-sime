@@ -96,8 +96,10 @@ test("Release Workflow: .github/workflows/release.yml validation and publishing"
   // Target matrix in release builds
   assert.ok(content.includes("x86_64-pc-windows-msvc"), "Release must build Windows x64");
   assert.ok(content.includes("universal-apple-darwin"), "Release must build universal macOS DMG");
-  assert.ok(content.includes("x86_64-apple-darwin"), "Release must include Intel macOS target");
-  assert.ok(content.includes("aarch64-apple-darwin"), "Release must include Apple Silicon macOS target");
+  assert.ok(
+    content.includes("targets: x86_64-apple-darwin, aarch64-apple-darwin"),
+    "Release must configure both Intel and Apple Silicon targets for universal macOS build"
+  );
   assert.ok(content.includes("x86_64-unknown-linux-gnu"), "Release must build Linux x64");
 
   // Standardized dynamic artifact staging
@@ -248,7 +250,7 @@ test("Cross-Workflow Release Coordination: Desktop and Android merge safely into
 
   // Verify asset filename disjointness:
   // Android assets: Open-SIME-android.apk, Open-SIME-android.aab, checksums-android.txt
-  // Desktop assets: Open-SIME-installer-*-windows-x64.exe, Open-SIME-*-macos-apple-silicon.dmg, Open-SIME-*-linux-x64.AppImage, checksums.txt, checksums.txt.sig
+  // Desktop assets: Open-SIME-installer-v*.exe, Open-SIME-v*.dmg, Open-SIME-v*.AppImage, checksums.txt, checksums.txt.sig
   assert.ok(androidYaml.includes("checksums-android.txt"), "Android must use checksums-android.txt to prevent collision with checksums.txt");
   assert.ok(desktopYaml.includes("checksums.txt"), "Desktop must use checksums.txt");
   assert.ok(!desktopYaml.includes("checksums-android.txt"), "Desktop must not touch checksums-android.txt");
