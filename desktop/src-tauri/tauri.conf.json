@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Open SIME",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "md.sime.opensime",
   "build": {
     "beforeDevCommand": "npm run start --prefix ../web",

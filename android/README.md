@@ -14,7 +14,7 @@ For the web client and server, see [`../web/`](../web/). For the desktop applica
   - Cleartext network traffic is disabled (`cleartextTrafficPermitted="false"`), cloud backups and device-transfer extraction are disabled (`allowBackup="false"`, `data_extraction_rules.xml`, `backup_rules.xml`), and no analytics, telemetry, or third-party endpoints are permitted.
 - **Shared Brand Icon & Versioning:**
   - Launcher icons (`mipmap-mdpi` through `mipmap-xxxhdpi` and adaptive `drawable/ic_launcher_*.xml`) are generated reproducibly from the canonical [`../web/public/assets/favicon.svg`](../web/public/assets/favicon.svg) via `cd ../desktop && npm run icons:sync` ([`../desktop/scripts/sync-brand-icons.mjs`](../desktop/scripts/sync-brand-icons.mjs)).
-  - `app/build.gradle.kts` tracks `versionName` (aligned with the repository release version, currently `"1.0.0"`) and an integer `versionCode` (currently `2`). Web and desktop versions are validated by `desktop/scripts/check-versions.mjs`.
+  - `app/build.gradle.kts` tracks `versionName` (aligned with the repository release version, currently `"1.0.1"`) and an integer `versionCode` (currently `2`). Web and desktop versions are validated by `desktop/scripts/check-versions.mjs`.
 
 ## Toolchain & Dependency Baseline
 
