@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Canonical Open SIME brand blue matching web/public/assets/favicon.svg and ic_launcher_background.xml -->
+    <color name="brand_blue">#3A5BA9</color>
+    <color name="splash_background">@color/brand_blue</color>
+</resources>
+

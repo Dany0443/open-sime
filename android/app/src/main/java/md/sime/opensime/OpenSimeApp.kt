@@ -400,8 +400,12 @@ fun OpenSimeApp(
     }
 
     OpenSimeTheme(settings = settings) {
-        val strings = LocalAppStrings.current
-        val snapshot = currentSnapshot
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            val strings = LocalAppStrings.current
+            val snapshot = currentSnapshot
 
         val showOnboarding = !settings.onboardingCompleted && repository == null
 
@@ -629,6 +633,7 @@ fun OpenSimeApp(
                     handleSignOut()
                 },
             )
+        }
         }
     }
 }
