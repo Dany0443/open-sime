@@ -3,8 +3,12 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Shared GitHub Release tag (e.g. v1.0.0, defaults to v<desktop_version>)"
+        required: false
+        default: ""
       version:
-        description: "Release version override (defaults to authoritative version from package.json)"
+        description: "Web/desktop release version override (defaults to package.json version)"
         required: false
         default: ""
 
@@ -21,6 +25,8 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.version-info.outputs.version }}
+      android_version: ${{ steps.version-info.outputs.android_version }}
+      android_code: ${{ steps.version-info.outputs.android_code }}
       tag: ${{ steps.version-info.outputs.tag }}
       sign_windows: ${{ steps.check-secrets.outputs.sign_windows }}
       sign_macos: ${{ steps.check-secrets.outputs.sign_macos }}
@@ -62,22 +68,32 @@ jobs:
           else
             node scripts/check-versions.mjs
           fi
-          VER=$(node scripts/check-versions.mjs --print)
-          echo "Authoritative version: $VER"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          DESKTOP_VER=$(node scripts/check-versions.mjs --print)
+          echo "Authoritative web/desktop version: $DESKTOP_VER"
+          echo "version=$DESKTOP_VER" >> "$GITHUB_OUTPUT"
 
-          # Verify Android app versionName matches authoritative release version
-          if ! grep -q "versionName = \"$VER\"" ../android/app/build.gradle.kts; then
-            echo "::error::Android app versionName in android/app/build.gradle.kts does not match authoritative version $VER"
-            exit 1
+          # Read independent Android app versionName and versionCode for reporting
+          ANDROID_VER=$(grep -o 'versionName = "[^"]*"' ../android/app/build.gradle.kts | cut -d '"' -f 2 || echo "")
+          ANDROID_CODE=$(grep -o 'versionCode = [0-9]*' ../android/app/build.gradle.kts | awk '{print $3}' || echo "")
+          echo "Android application version: ${ANDROID_VER:-unknown} (versionCode: ${ANDROID_CODE:-unknown})"
+          echo "android_version=$ANDROID_VER" >> "$GITHUB_OUTPUT"
+          echo "android_code=$ANDROID_CODE" >> "$GITHUB_OUTPUT"
+
+          # Determine shared release tag (explicit input or default to v<desktop_version>)
+          INPUT_TAG="${{ github.event.inputs.release_tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TARGET_TAG=$([[ "$INPUT_TAG" =~ ^v ]] && echo "$INPUT_TAG" || echo "v$INPUT_TAG")
+          else
+            TARGET_TAG="v$DESKTOP_VER"
           fi
+          echo "Target release tag: $TARGET_TAG"
+          echo "tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
 
-          # Prevent tag collision with a different commit
-          TARGET_TAG="v$VER"
+          # Prevent tag collision if Git tag already exists on a different commit
           TAG_COMMIT=$(git rev-parse -q --verify "refs/tags/${TARGET_TAG}^{commit}" 2>/dev/null || echo "")
           if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "${{ github.sha }}" ]; then
-            echo "::error::Git tag ${TARGET_TAG} already exists and points to commit ${TAG_COMMIT}, but current build commit is ${{ github.sha }}."
+            echo "::error::Git tag ${TARGET_TAG} already exists on commit ${TAG_COMMIT}, but this workflow is running on commit ${{ github.sha }}."
+            echo "::error::Cannot retarget an existing Git tag. Run from commit ${TAG_COMMIT} or specify a different release_tag."
             exit 1
           fi
 
@@ -564,6 +580,7 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
           VERSION: ${{ needs.validate-release.outputs.version }}
+          ANDROID_VERSION: ${{ needs.validate-release.outputs.android_version }}
           TARGET_TAG: ${{ needs.validate-release.outputs.tag }}
           SIGN_WIN: ${{ needs.validate-release.outputs.sign_windows }}
           SIGN_MAC: ${{ needs.validate-release.outputs.sign_macos }}
@@ -597,6 +614,9 @@ jobs:
             "--sign-linux" "$SIGN_LNX"
             "--sign-checksums" "$SIGN_SIG"
           )
+          if [ -n "$ANDROID_VERSION" ]; then
+            NOTES_ARGS+=("--android-version" "$ANDROID_VERSION")
+          fi
           if [ -n "$PREV_TAG" ]; then
             NOTES_ARGS+=("--prev-tag" "$PREV_TAG")
           fi
@@ -626,7 +646,7 @@ jobs:
           # 5. Check existing Git tag: prevent tag hijacking or commit mismatch
           TAG_COMMIT=$(git rev-parse -q --verify "refs/tags/${TARGET_TAG}^{commit}" 2>/dev/null || echo "")
           if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
-            echo "::error::Git tag ${TARGET_TAG} already exists and points to commit ${TAG_COMMIT}, but current build commit is ${GITHUB_SHA}. Incompatible tag state."
+            echo "::error::Git tag ${TARGET_TAG} already exists on commit ${TAG_COMMIT}, but current build commit is ${GITHUB_SHA}."
             exit 1
           fi
 
@@ -640,11 +660,10 @@ jobs:
               exit 1
             fi
 
-            # Draft release exists. Verify target commit compatibility if specific commit is set
+            # Draft release exists. If target commit differs, warn but preserve draft target commit
             EXISTING_TARGET=$(gh release view "$TARGET_TAG" --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")
             if [ -n "$EXISTING_TARGET" ] && [ "${#EXISTING_TARGET}" -eq 40 ] && [ "$EXISTING_TARGET" != "$GITHUB_SHA" ]; then
-              echo "::error::Existing draft release ${TARGET_TAG} targets commit ${EXISTING_TARGET}, but current build commit is ${GITHUB_SHA}. Incompatible commit target."
-              exit 1
+              echo "::warning::Draft release ${TARGET_TAG} was initialized targeting commit ${EXISTING_TARGET}, while current run is on commit ${GITHUB_SHA}. Target commit is preserved."
             fi
 
             echo "Draft release $TARGET_TAG already exists; updating notes and assets..."
@@ -680,6 +699,7 @@ jobs:
         env:
           TARGET_TAG: ${{ needs.validate-release.outputs.tag }}
           VERSION: ${{ needs.validate-release.outputs.version }}
+          ANDROID_VERSION: ${{ needs.validate-release.outputs.android_version }}
           RELEASE_URL: ${{ steps.create-draft-release.outputs.release_url }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
@@ -694,8 +714,9 @@ jobs:
             echo ""
             echo "| Property | Value |"
             echo "| :--- | :--- |"
-            echo "| **Version** | \`${VERSION}\` |"
-            echo "| **Tag** | \`${TARGET_TAG}\` |"
+            echo "| **Release Tag** | \`${TARGET_TAG}\` |"
+            echo "| **Web & Desktop Version** | \`${VERSION}\` |"
+            echo "| **Android Version (in repo)** | \`${ANDROID_VERSION:-none}\` |"
             echo "| **Commit** | \`${COMMIT_SHA}\` |"
             echo "| **Draft Release URL** | [View Draft Release on GitHub](${RELEASE_URL}) |"
             echo ""

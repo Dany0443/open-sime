@@ -51,6 +51,19 @@ test("Release Notes: subsequent-release notes logic with previous release tag", 
   assert.ok(notes.includes("gpg --verify checksums.txt.sig checksums.txt"), "Signed checksums must include GPG verify block");
 });
 
+test("Release Notes: includes independent Android application version when provided", () => {
+  const notes = generateReleaseNotes({
+    version: "1.0.0",
+    androidVersion: "1.1.0",
+    prevTag: "v0.9.0",
+    commits: ["feat: add features"],
+  });
+
+  assert.ok(notes.includes("### Included Application Versions"), "Must list Included Application Versions");
+  assert.ok(notes.includes("- **Web & Desktop (Windows, macOS, Linux)**: `v1.0.0`"), "Must list web & desktop version");
+  assert.ok(notes.includes("- **Android**: `v1.1.0`"), "Must list Android version");
+});
+
 test("Release Notes CLI: generates and writes release notes to file", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sime-notes-"));
   const outFile = path.join(tmpDir, "test-notes.md");

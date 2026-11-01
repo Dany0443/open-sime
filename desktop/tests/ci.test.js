@@ -186,8 +186,8 @@ test("Android Release Workflow: .github/workflows/android-release.yml validation
   assert.ok(content.includes("assembleRelease bundleRelease"), "Android release must build assembleRelease and bundleRelease");
 
   // Staged release artifacts and checksum manifest
-  assert.ok(content.includes("Open-SIME-android.apk"), "Android release must stage Open-SIME-android.apk");
-  assert.ok(content.includes("Open-SIME-android.aab"), "Android release must stage Open-SIME-android.aab");
+  assert.ok(content.includes("Open-SIME-v${ANDROID_VER}.apk"), "Android release must stage versioned Open-SIME-v${ANDROID_VER}.apk");
+  assert.ok(content.includes("Open-SIME-v${ANDROID_VER}.aab"), "Android release must stage versioned Open-SIME-v${ANDROID_VER}.aab");
   assert.ok(content.includes("checksums-android.txt"), "Android release must generate checksums-android.txt");
 
   // Actions artifact upload
@@ -216,13 +216,17 @@ test("Cross-Workflow Release Coordination: Desktop and Android merge safely into
   const desktopYaml = fs.readFileSync(RELEASE_WORKFLOW, "utf8").replace(/\r\n/g, "\n");
   const androidYaml = fs.readFileSync(ANDROID_RELEASE_WORKFLOW, "utf8").replace(/\r\n/g, "\n");
 
-  // Both workflows must enforce tag format tag=v$VER
-  assert.ok(desktopYaml.includes('tag=v$VER'), "Desktop release must use v$VER tag format");
-  assert.ok(androidYaml.includes('tag=v$VER'), "Android release must use v$VER tag format");
+  // Both workflows must support release_tag input and target release tag format
+  assert.ok(desktopYaml.includes('release_tag:'), "Desktop release must accept release_tag input");
+  assert.ok(androidYaml.includes('release_tag:'), "Android release must accept release_tag input");
+  assert.ok(desktopYaml.includes('tag=$TARGET_TAG'), "Desktop release must output tag=$TARGET_TAG");
+  assert.ok(androidYaml.includes('tag=$TARGET_TAG'), "Android release must output tag=$TARGET_TAG");
 
-  // Both workflows must verify Android versionName matches authoritative version
-  assert.ok(desktopYaml.includes('versionName = \\"$VER\\"'), "Desktop release must verify android versionName");
-  assert.ok(androidYaml.includes('versionName = \\"$VER\\"'), "Android release must verify android versionName");
+  // Both workflows must independently read Android app versionName without enforcing lockstep version equality
+  assert.ok(desktopYaml.includes('versionName'), "Desktop release must read android versionName");
+  assert.ok(androidYaml.includes('versionName'), "Android release must read android versionName");
+  assert.ok(!desktopYaml.includes('versionName = \\"$VER\\"'), "Desktop release must NOT require lockstep Android versionName");
+  assert.ok(!androidYaml.includes('versionName = \\"$VER\\"'), "Android release must NOT require lockstep Android versionName");
 
   // Both workflows must use --draft=true and NEVER --draft=false
   assert.ok(desktopYaml.includes("--draft=true") && !desktopYaml.includes("--draft=false"), "Desktop must only draft");
@@ -233,12 +237,14 @@ test("Cross-Workflow Release Coordination: Desktop and Android merge safely into
   assert.ok(androidYaml.includes('Release ${TARGET_TAG} is already published'), "Android must guard published release");
 
   // Both workflows must guard against Git tag commit mismatch
-  assert.ok(desktopYaml.includes('Git tag ${TARGET_TAG} already exists and points to commit'), "Desktop must guard tag commit mismatch");
-  assert.ok(androidYaml.includes('Git tag ${TARGET_TAG} already exists and points to commit'), "Android must guard tag commit mismatch");
+  assert.ok(desktopYaml.includes('Git tag ${TARGET_TAG} already exists on commit'), "Desktop must guard tag commit mismatch");
+  assert.ok(androidYaml.includes('Git tag ${TARGET_TAG} already exists on commit'), "Android must guard tag commit mismatch");
 
-  // Both workflows must guard against draft targetCommitish mismatch
-  assert.ok(desktopYaml.includes('targets commit ${EXISTING_TARGET}'), "Desktop must guard targetCommitish mismatch");
-  assert.ok(androidYaml.includes('targets commit ${EXISTING_TARGET}'), "Android must guard targetCommitish mismatch");
+  // Both workflows must inspect draft targetCommitish and warn instead of failing
+  assert.ok(desktopYaml.includes('targetCommitish'), "Desktop must inspect targetCommitish");
+  assert.ok(androidYaml.includes('targetCommitish'), "Android must inspect targetCommitish");
+  assert.ok(desktopYaml.includes('::warning::Draft release ${TARGET_TAG} was initialized targeting commit'), "Desktop must warn on different draft targetCommitish");
+  assert.ok(androidYaml.includes('::warning::Draft release ${TARGET_TAG} was initialized targeting commit'), "Android must warn on different draft targetCommitish");
 
   // Both workflows must specify --target "$GITHUB_SHA" when creating new releases
   assert.ok(desktopYaml.includes('--target "$GITHUB_SHA"'), "Desktop must create release with target commit");

@@ -3,8 +3,12 @@ name: Android Release
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Shared GitHub Release tag (e.g. v1.0.0, defaults to v<desktop_version>)"
+        required: false
+        default: ""
       version:
-        description: "Release version override (defaults to authoritative version from package.json)"
+        description: "Legacy alias for release_tag"
         required: false
         default: ""
 
@@ -37,28 +41,38 @@ jobs:
         id: version-info
         working-directory: desktop
         run: |
-          INPUT_VER="${{ github.event.inputs.version }}"
-          if [ -n "$INPUT_VER" ]; then
-            node scripts/check-versions.mjs --expected "$INPUT_VER"
-          else
-            node scripts/check-versions.mjs
-          fi
-          VER=$(node scripts/check-versions.mjs --print)
-          echo "Authoritative version: $VER"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          node scripts/check-versions.mjs
+          DESKTOP_VER=$(node scripts/check-versions.mjs --print)
+          echo "Authoritative web/desktop version: $DESKTOP_VER"
+          echo "desktop_version=$DESKTOP_VER" >> "$GITHUB_OUTPUT"
 
-          # Verify Android app versionName matches authoritative release version
-          if ! grep -q "versionName = \"$VER\"" ../android/app/build.gradle.kts; then
-            echo "::error::Android app versionName in android/app/build.gradle.kts does not match authoritative version $VER"
+          # Read independent Android app versionName and versionCode
+          ANDROID_VER=$(grep -o 'versionName = "[^"]*"' ../android/app/build.gradle.kts | cut -d '"' -f 2)
+          ANDROID_CODE=$(grep -o 'versionCode = [0-9]*' ../android/app/build.gradle.kts | awk '{print $3}')
+          if [ -z "$ANDROID_VER" ] || [ -z "$ANDROID_CODE" ]; then
+            echo "::error::Failed to read versionName or versionCode from android/app/build.gradle.kts"
             exit 1
           fi
+          echo "Android application version: $ANDROID_VER (versionCode: $ANDROID_CODE)"
+          echo "android_version=$ANDROID_VER" >> "$GITHUB_OUTPUT"
+          echo "android_code=$ANDROID_CODE" >> "$GITHUB_OUTPUT"
+          echo "version=$ANDROID_VER" >> "$GITHUB_OUTPUT"
 
-          # Prevent tag collision with a different commit
-          TARGET_TAG="v$VER"
+          # Determine shared release tag (explicit input or default to v<desktop_version>)
+          INPUT_TAG="${{ github.event.inputs.release_tag || github.event.inputs.version }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TARGET_TAG=$([[ "$INPUT_TAG" =~ ^v ]] && echo "$INPUT_TAG" || echo "v$INPUT_TAG")
+          else
+            TARGET_TAG="v$DESKTOP_VER"
+          fi
+          echo "Target release tag: $TARGET_TAG"
+          echo "tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
+
+          # Prevent tag collision if Git tag already exists on a different commit
           TAG_COMMIT=$(git rev-parse -q --verify "refs/tags/${TARGET_TAG}^{commit}" 2>/dev/null || echo "")
           if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "${{ github.sha }}" ]; then
-            echo "::error::Git tag ${TARGET_TAG} already exists and points to commit ${TAG_COMMIT}, but current build commit is ${{ github.sha }}."
+            echo "::error::Git tag ${TARGET_TAG} already exists on commit ${TAG_COMMIT}, but this workflow is running on commit ${{ github.sha }}."
+            echo "::error::Cannot retarget an existing Git tag. Run from commit ${TAG_COMMIT} or specify a different release_tag."
             exit 1
           fi
 
@@ -117,13 +131,18 @@ jobs:
           rm -rf "${KEYSTORE_DIR}"
 
       - name: Stage release artifacts & compute checksums
+        env:
+          ANDROID_VER: ${{ steps.version-info.outputs.android_version }}
         run: |
           mkdir -p release-dist/android
-          cp android/app/build/outputs/apk/release/app-release.apk release-dist/android/Open-SIME-android.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab release-dist/android/Open-SIME-android.aab
+          APK_NAME="Open-SIME-v${ANDROID_VER}.apk"
+          AAB_NAME="Open-SIME-v${ANDROID_VER}.aab"
+
+          cp android/app/build/outputs/apk/release/app-release.apk "release-dist/android/${APK_NAME}"
+          cp android/app/build/outputs/bundle/release/app-release.aab "release-dist/android/${AAB_NAME}"
 
           cd release-dist/android
-          sha256sum Open-SIME-android.apk Open-SIME-android.aab > checksums-android.txt
+          sha256sum "${APK_NAME}" "${AAB_NAME}" > checksums-android.txt
           cat checksums-android.txt
 
       - name: Upload release artifacts
@@ -140,12 +159,13 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
           TARGET_TAG: ${{ steps.version-info.outputs.tag }}
-          VERSION: ${{ steps.version-info.outputs.version }}
+          ANDROID_VER: ${{ steps.version-info.outputs.android_version }}
+          DESKTOP_VER: ${{ steps.version-info.outputs.desktop_version }}
         run: |
           set -euo pipefail
 
-          APK_FILE="release-dist/android/Open-SIME-android.apk"
-          AAB_FILE="release-dist/android/Open-SIME-android.aab"
+          APK_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.apk"
+          AAB_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.aab"
           SUMS_FILE="release-dist/android/checksums-android.txt"
 
           # 1. Verify that all 3 required release assets exist and are non-empty
@@ -169,7 +189,7 @@ jobs:
           # 2. Check existing Git tag: prevent tag hijacking or commit mismatch
           TAG_COMMIT=$(git rev-parse -q --verify "refs/tags/${TARGET_TAG}^{commit}" 2>/dev/null || echo "")
           if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
-            echo "::error::Git tag ${TARGET_TAG} already exists and points to commit ${TAG_COMMIT}, but current build commit is ${GITHUB_SHA}. Incompatible tag state."
+            echo "::error::Git tag ${TARGET_TAG} already exists on commit ${TAG_COMMIT}, but current build commit is ${GITHUB_SHA}."
             exit 1
           fi
 
@@ -183,14 +203,13 @@ jobs:
               exit 1
             fi
 
-            # Draft release exists. Verify target commit compatibility if specific commit is set
+            # Draft release exists. If target commit differs, warn but preserve draft target commit
             EXISTING_TARGET=$(gh release view "$TARGET_TAG" --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")
             if [ -n "$EXISTING_TARGET" ] && [ "${#EXISTING_TARGET}" -eq 40 ] && [ "$EXISTING_TARGET" != "$GITHUB_SHA" ]; then
-              echo "::error::Existing draft release ${TARGET_TAG} targets commit ${EXISTING_TARGET}, but current build commit is ${GITHUB_SHA}. Incompatible commit target."
-              exit 1
+              echo "::warning::Draft release ${TARGET_TAG} was initialized targeting commit ${EXISTING_TARGET}, while current run is on commit ${GITHUB_SHA}. Target commit is preserved."
             fi
 
-            echo "Existing draft release ${TARGET_TAG} found. Uploading Android release assets while preserving draft state..."
+            echo "Existing draft release ${TARGET_TAG} found. Uploading Android release assets while preserving draft state and notes..."
             gh release edit "$TARGET_TAG" --draft=true
             gh release upload "$TARGET_TAG" "${RELEASE_ASSETS[@]}" --clobber
             echo "✓ Android assets uploaded to draft release ${TARGET_TAG}."
@@ -200,7 +219,7 @@ jobs:
             gh release create "$TARGET_TAG" \
               "${RELEASE_ASSETS[@]}" \
               --title "Open SIME ${TARGET_TAG}" \
-              --notes "Open SIME ${TARGET_TAG} (Android release)." \
+              --notes "Open SIME ${TARGET_TAG} (Android v${ANDROID_VER}, Web/Desktop v${DESKTOP_VER})." \
               --draft=true \
               --prerelease=false \
               --target "$GITHUB_SHA"
@@ -218,12 +237,14 @@ jobs:
         if: success()
         env:
           TARGET_TAG: ${{ steps.version-info.outputs.tag }}
-          VERSION: ${{ steps.version-info.outputs.version }}
+          ANDROID_VER: ${{ steps.version-info.outputs.android_version }}
+          ANDROID_CODE: ${{ steps.version-info.outputs.android_code }}
+          DESKTOP_VER: ${{ steps.version-info.outputs.desktop_version }}
           RELEASE_URL: ${{ steps.create-draft-release.outputs.release_url }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          APK_FILE="release-dist/android/Open-SIME-android.apk"
-          AAB_FILE="release-dist/android/Open-SIME-android.aab"
+          APK_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.apk"
+          AAB_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.aab"
           SUMS_FILE="release-dist/android/checksums-android.txt"
 
           APK_SIZE=$(wc -c < "$APK_FILE" | tr -d ' ')
@@ -242,14 +263,15 @@ jobs:
             echo ""
             echo "| Property | Value |"
             echo "| :--- | :--- |"
-            echo "| **Version** | \`${VERSION}\` |"
-            echo "| **Tag** | \`${TARGET_TAG}\` |"
+            echo "| **Android Version** | \`v${ANDROID_VER}\` (versionCode \`${ANDROID_CODE}\`) |"
+            echo "| **Desktop / Web Version** | \`v${DESKTOP_VER}\` |"
+            echo "| **Release Tag** | \`${TARGET_TAG}\` |"
             echo "| **Commit** | \`${COMMIT_SHA}\` |"
             echo "| **Draft Release URL** | [View Draft Release on GitHub](${RELEASE_URL}) |"
             echo ""
             echo "### Attached Release Assets"
-            echo "- **\`Open-SIME-android.apk\`** — ${APK_SIZE} bytes (direct sideload package)"
-            echo "- **\`Open-SIME-android.aab\`** — ${AAB_SIZE} bytes (Android App Bundle)"
+            echo "- **\`Open-SIME-v${ANDROID_VER}.apk\`** — ${APK_SIZE} bytes (direct sideload package)"
+            echo "- **\`Open-SIME-v${ANDROID_VER}.aab\`** — ${AAB_SIZE} bytes (Android App Bundle)"
             echo "- **\`checksums-android.txt\`** — ${SUMS_SIZE} bytes (SHA-256 checksums)"
             echo ""
             echo "#### SHA-256 Checksums"

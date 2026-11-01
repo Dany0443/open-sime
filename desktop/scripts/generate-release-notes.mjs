@@ -47,6 +47,7 @@ export function getGitCommitsSince(prevTag, repoRoot = REPO_ROOT) {
 
 export function generateReleaseNotes({
   version,
+  androidVersion = null,
   prevTag = null,
   commits = null,
   customNotes = null,
@@ -67,13 +68,21 @@ export function generateReleaseNotes({
     );
     lines.push("");
     lines.push(
-      "Initial official beta release for Windows (x64 NSIS), macOS (Universal DMG), and Linux (x64 AppImage)."
+      "Initial official beta release for Windows (x64 NSIS), macOS (Universal DMG), Linux (x64 AppImage), and Android (APK & AAB)."
     );
   } else {
     lines.push(`## Open SIME ${tag}`);
     lines.push("");
-    lines.push(`Release ${tag} of Open SIME for Windows, macOS, and Linux.`);
+    lines.push(`Release ${tag} of Open SIME.`);
     lines.push(`Changes since ${prevTag}:`);
+  }
+
+  if (androidVersion) {
+    const cleanAndroid = String(androidVersion).trim().replace(/^v/, "");
+    lines.push("");
+    lines.push("### Included Application Versions");
+    lines.push(`- **Web & Desktop (Windows, macOS, Linux)**: \`v${cleanVersion}\``);
+    lines.push(`- **Android**: \`v${cleanAndroid}\``);
   }
 
   lines.push("");
@@ -165,6 +174,11 @@ export function parseCliArgs(argv = process.argv) {
       i += 1;
     } else if (arg.startsWith("--version=")) {
       options.version = arg.slice("--version=".length);
+    } else if (arg === "--android-version" && argv[i + 1]) {
+      options.androidVersion = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith("--android-version=")) {
+      options.androidVersion = arg.slice("--android-version=".length);
     } else if (arg === "--prev-tag" && argv[i + 1]) {
       options.prevTag = argv[i + 1];
       i += 1;
