@@ -1,70 +1,35 @@
 # Open SIME
 
-Open SIME este un client gratuit și neoficial pentru agenda.sime.md, agenda electronică școlară națională din Republica Moldova. Aplicația oferă elevilor din clasele 5-12 și părinților o interfață mai prietenoasă, rapidă și orientată spre confidențialitate.
+Open SIME is a free, independent client for `agenda.sime.md`, the national electronic school agenda in the Republic of Moldova. It provides a clearer, faster, and privacy-first interface for viewing marks, attendance, schedules, and homework.
 
----
+## Who It Is For
 
-Open SIME is a free, unofficial client for agenda.sime.md, the national electronic school agenda of the Republic of Moldova. It provides middle and high school students (grades 5 to 12) and their parents with a clearer, faster, and privacy-respecting interface for tracking marks, attendance, timetable, and homework.
+Open SIME is designed for:
+
+- **Students**: Middle and high school students (grades 5 to 12) who want a fast, readable way to check daily schedules, upcoming homework, and recent marks without navigating heavy web forms.
+- **Parents**: Parents who want a calm, clear overview of their children's school progress, with seamless switching and strict separation between siblings under the same parent account.
+
+The interface adheres to Material 3 design guidelines and is built to be accessible to all age groups, supporting light and dark themes, text scaling, high-contrast modes, and Romanian, Russian, and English languages.
+
+## How It Works Under the Hood
+
+The national school agenda portal is an Oracle APEX application. Open SIME acts as a modern front-end for this service:
+
+- **Direct Authentication**: Users sign in directly using their existing `agenda.sime.md` credentials. The app does not maintain a central account database or custom cloud backend.
+- **Native Android Client**: The Android application is written in Kotlin and Jetpack Compose. It connects directly to the school portal from the device, handling session management, HTTP handshakes, and page parsing locally.
+- **Desktop and Web Clients**: The desktop applications (Windows, macOS, Linux) are built with Tauri and run an embedded, loopback-only local engine that communicates with the portal, manages session security, and serves the user interface.
+- **Student Data Isolation**: For parents with multiple children, every request, cache entry, and data snapshot is strictly keyed by student identifier to ensure records from different children never cross.
+- **Privacy by Design**: All student records, grades, and credentials stay entirely on the user's device. There is no telemetry, no analytics, no third-party network requests, and no intermediate proxy server.
+
+## Platforms
+
+- **Android**: Native application for phones and tablets.
+- **Desktop**: Installable desktop applications for Windows (x64), macOS (Universal for Intel and Apple Silicon), and Linux (x64 AppImage).
+- **Web**: Lightweight client that can be run locally or self-hosted on a private network.
 
 ## Disclaimer
 
-This is an independent, unofficial open-source project. It is not affiliated with, endorsed by, or sponsored by CTICE (Centrul Tehnologii Informaționale și Comunicaționale în Educație) or the Ministry of Education and Research of the Republic of Moldova.
-
-## Repository Layout
-
-| Directory | Description |
-| --- | --- |
-| `web/` | Web client and Express server (`server.js`, `index.html`, `public/`, unit tests) |
-| `desktop/` | Tauri 2 desktop application packaging (`src-tauri/`, `dist-tauri/`, scripts, tests) |
-| `android/` | Native Kotlin + Jetpack Compose Android client (`app/`, Material 3 Expressive UI, unit tests) |
-| `docs/` | Project architecture, Android architecture, and desktop build documentation |
-
-## Running Locally
-
-### Web
-
-To run the web application locally with Node.js 20+:
-
-```bash
-cd web
-npm ci
-npm start
-```
-
-Open `http://localhost:3000` in your web browser.
-
-### Android
-
-The Android client (`android/`) is a native Kotlin and Jetpack Compose application (not a WebView wrapper). It is designed to communicate directly with `https://agenda.sime.md` on the user's device without requiring an Open SIME backend server.
-
-> **Current status:** The Android UI foundation (`Acasă`, `Reușita`, `Orar`, `Absențe`, `Teme`, `Profil și profesori`, `Setări`, adaptive compact/medium/expanded navigation, student isolation, and trilingual `ro`/`ru`/`en` theming) currently runs with clearly labeled synthetic sample data (`DataSourceMode.SAMPLE_PREVIEW`). Direct `agenda.sime.md` portal integration is planned for the next phase.
-
-To build, test, lint, and install the debug app on a connected Android device or emulator (requires JDK 21 and the Android SDK):
-
-```bash
-cd android
-./gradlew assembleDebug
-./gradlew testDebugUnitTest
-./gradlew lintDebug
-./gradlew installDebug
-```
-
-See [`android/README.md`](android/README.md) and [`docs/android-architecture.md`](docs/android-architecture.md) for package structure, toolchain versions, and release signing configuration.
-
-## Releases
-
-Official desktop releases for Windows, macOS, and Linux are available on [GitHub Releases](../../releases).
-
-If running an unsigned build:
-- **Windows**: Microsoft Defender SmartScreen may display "Windows protected your PC". Click **More info**, then **Run anyway**.
-- **macOS**: Gatekeeper may block opening unidentified apps. In Finder, right-click (or Control-click) Open SIME in Applications and choose **Open**.
-
-Verify download integrity with `sha256sum -c checksums.txt`.
-
-## Contributing & Agent Guidelines
-
-- Contributors: see [`CONTRIBUTING.md`](CONTRIBUTING.md) for workflow, style rules, and commit standards.
-- AI Agents: see [`AGENTS.md`](AGENTS.md) before inspecting or editing any code.
+This is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by CTICE (Centrul Tehnologii Informaționale și Comunicaționale în Educație) or the Ministry of Education and Research of the Republic of Moldova.
 
 ## License
 
