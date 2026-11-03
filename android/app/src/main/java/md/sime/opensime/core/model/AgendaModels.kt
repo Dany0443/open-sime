@@ -347,6 +347,9 @@ data class StudentAgendaSnapshot(
         "2026-10-29",
         "2026-10-30",
     ),
+    val lessonsByDate: Map<String, List<LessonItem>> = emptyMap(),
+    val successfulSyncMillis: Map<String, Long> = emptyMap(),
+    val stale: Boolean = false,
     val sem1AbsenceSummary: AbsenceSummary? = null,
     val sem2AbsenceSummary: AbsenceSummary? = null,
 ) {

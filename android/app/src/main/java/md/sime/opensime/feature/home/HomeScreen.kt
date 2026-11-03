@@ -57,6 +57,10 @@ import md.sime.opensime.core.model.LessonStatus
 import md.sime.opensime.core.model.MarkItem
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.core.model.parseHmToMinutes
+import java.time.Clock
+import java.time.ZoneId
+import md.sime.opensime.core.model.TimetableState
+import md.sime.opensime.core.model.TimetablePhase
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlin.math.max
@@ -70,11 +74,16 @@ fun HomeScreen(
     onNavigateToHomework: () -> Unit,
     simpleMode: Boolean,
     modifier: Modifier = Modifier,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
+    refreshError: String? = null,
+    reduceMotion: Boolean = false,
 ) {
     val strings = LocalAppStrings.current
     val density = LocalDensity.current
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    HomeRefreshBox(isRefreshing, onRefresh, reduceMotion, modifier) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWideGrid = maxWidth >= 960.dp && density.fontScale < 1.35f
 
         LazyColumn(
@@ -84,6 +93,15 @@ fun HomeScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (refreshError != null) {
+                item(key = "refresh_error") {
+                    Text(
+                        text = refreshError,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             if (isWideGrid) {
                 item(key = "home_metrics_wide") {
                     HomeMetricsSection(
@@ -169,6 +187,8 @@ fun HomeScreen(
     }
 }
 
+}
+
 /**
  * Port of `renderLive()` (`#home-live` / `.card.live-card`) from `web/public/app.js`.
  */
@@ -182,12 +202,15 @@ private fun HomeLiveLessonsCard(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
-    val lessons = snapshot.todayLessons
-    val activeLesson = lessons.firstOrNull { it.status == LessonStatus.LIVE_NOW }
-    val nextLesson = lessons.firstOrNull { it.status == LessonStatus.NEXT_UP }
-        ?: lessons.firstOrNull { it.status == LessonStatus.UPCOMING }
-    val anyPast = lessons.any { it.status == LessonStatus.COMPLETED }
-    val refMinutes = parseHmToMinutes(snapshot.referenceTimeHm) ?: (9 * 60 + 15)
+    val instant = rememberHomeInstant()
+    val zone = ZoneId.of("Europe/Chisinau")
+    val state = TimetableState.derive(snapshot, Clock.fixed(instant, zone), zone)
+    val lessons = state.today
+    val activeLesson = state.active
+    val nextLesson = state.next
+    val anyPast = state.phase == TimetablePhase.BETWEEN_LESSONS
+    val localTime = instant.atZone(zone).toLocalTime()
+    val refMinutes = localTime.hour * 60 + localTime.minute
 
     Surface(
         shape = MaterialTheme.shapes.extraLarge,
@@ -213,19 +236,25 @@ private fun HomeLiveLessonsCard(
                     color = colorScheme.onSurface,
                 )
                 Text(
-                    text = strings.formatLongDate(snapshot.referenceIsoDate),
+                    text = strings.formatLongDate(state.date.toString()),
                     style = MaterialTheme.typography.bodySmall,
                     color = colorScheme.onSurfaceVariant,
                 )
             }
 
+            if (state.isStale) Text(strings.timetableStale, style = MaterialTheme.typography.bodySmall,
+                color = colorScheme.onSurfaceVariant)
+
             // `.live-hero`
             when {
+                state.phase == TimetablePhase.UNAVAILABLE -> {
+                    EmptyStateCard(title = strings.timetableUnknown, subtitle = strings.timetableStale)
+                }
                 activeLesson != null -> {
                     val startMin = activeLesson.startMinutesOfDay ?: refMinutes
                     val endMin = activeLesson.endMinutesOfDay ?: (refMinutes + 30)
                     val totalMin = max(1, endMin - startMin)
-                    val leftMin = max(1, endMin - refMinutes)
+                    val leftMin = state.remainingMinutes ?: 0
                     val progress = ((refMinutes - startMin).toFloat() / totalMin.toFloat()).coerceIn(0f, 1f)
 
                     Surface(
@@ -335,7 +364,7 @@ private fun HomeLiveLessonsCard(
                 }
 
                 nextLesson != null -> {
-                    val untilMin = max(1, (nextLesson.startMinutesOfDay ?: (refMinutes + 15)) - refMinutes)
+                    val untilMin = state.remainingMinutes ?: 0
                     Surface(
                         onClick = onNavigateToTimetable,
                         shape = MaterialTheme.shapes.extraLarge,
@@ -353,7 +382,7 @@ private fun HomeLiveLessonsCard(
                                 verticalArrangement = Arrangement.Center,
                             ) {
                                 StatusChip(
-                                    text = if (anyPast) strings.breakBadge else strings.nextBadge,
+                                    text = if (anyPast) strings.betweenLessons else strings.nextBadge,
                                     tone = ChipTone.NEXT,
                                 )
                                 Text(
@@ -437,6 +466,24 @@ private fun HomeLiveLessonsCard(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colorScheme.onSurfaceVariant,
                             )
+                        }
+                    }
+                }
+            }
+
+            if (state.phase == TimetablePhase.AFTER_LAST || state.phase == TimetablePhase.NO_LESSONS) {
+                Surface(shape = MaterialTheme.shapes.large, color = colorScheme.secondaryContainer,
+                    modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(strings.tomorrow, style = MaterialTheme.typography.titleMedium)
+                        val tomorrow = state.tomorrow
+                        when {
+                            tomorrow == null -> Text(strings.tomorrowUnknown)
+                            tomorrow.isEmpty() -> Text(strings.tomorrowFree)
+                            else -> tomorrow.forEach { lesson ->
+                                Text("${lesson.startTime} – ${lesson.endTime}  ${lesson.subject}",
+                                    style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }

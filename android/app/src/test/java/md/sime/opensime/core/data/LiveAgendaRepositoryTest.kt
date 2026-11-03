@@ -1,5 +1,10 @@
 package md.sime.opensime.core.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import md.sime.opensime.core.model.AccountRole
 import md.sime.opensime.core.model.StudentAgendaSnapshot
@@ -16,6 +21,7 @@ import md.sime.opensime.core.portal.SimePortalFixtures
 import md.sime.opensime.core.portal.SimePortalSession
 import md.sime.opensime.core.portal.SimeRateLimitError
 import md.sime.opensime.core.portal.SimeStudentMismatchError
+import md.sime.opensime.core.portal.StandardAesGcmVaultCipher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -23,6 +29,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
@@ -317,6 +324,202 @@ class LiveAgendaRepositoryTest {
     // Test Setup Helpers
     // -------------------------------------------------------------------------
 
+    @Test
+    fun `manual reconciliation bypasses both snapshot TTL and portal cache`() = runBlocking {
+        val forces = mutableListOf<Boolean>()
+        val client = createMockClient(onForceRefresh = { forces.add(it) }) {
+            createMockSnapshot(it.value, "10A")
+        }
+        val repo = LiveAgendaRepository(client, nowMillis = { 10_000L })
+        val id = StudentId("id_101")
+        repo.getStudentSnapshot(id)
+        repo.getStudentSnapshot(id)
+        val before = forces.size
+        repo.reconcileStudent(id)
+        assertEquals(before + 1, forces.size)
+        assertTrue(forces.last())
+    }
+
+    @Test
+    fun `authoritative snapshot is restored after repository recreation without a duplicate fetch`() = runBlocking {
+        val directory = Files.createTempDirectory("open-sime-snapshots").toFile()
+        try {
+            val cipher = StandardAesGcmVaultCipher()
+            val store = AgendaSnapshotStore(directory, cipher, "synthetic-account")
+            val upstreamFetches = AtomicInteger(0)
+            val (_, client) = createRepositoryFixture(
+                onFetch = { upstreamFetches.incrementAndGet() },
+            )
+            val persistedRepository = LiveAgendaRepository(
+                client = client,
+                nowMillis = { 10_000L },
+                snapshotStore = store,
+            )
+            val studentId = StudentId("id_101")
+            val first = persistedRepository.reconcileStudent(studentId)
+            val fetchesAfterAuthoritativeSync = upstreamFetches.get()
+
+            val restartedRepository = LiveAgendaRepository(
+                client = client,
+                nowMillis = { 10_000L },
+                snapshotStore = AgendaSnapshotStore(directory, cipher, "synthetic-account"),
+            )
+            assertEquals(first, restartedRepository.cachedSnapshotFor(studentId))
+            assertEquals(first, restartedRepository.getStudentSnapshot(studentId))
+            assertEquals(fetchesAfterAuthoritativeSync, upstreamFetches.get())
+            assertEquals(null, AgendaSnapshotStore(directory, cipher, "other-account").read(studentId))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `overlapping reconciliations for one student share one authoritative fetch`() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var calls = 0
+        val client = createMockClient {
+            calls++
+            entered.complete(Unit)
+            release.await()
+            createMockSnapshot(it.value, "10A")
+        }
+        val repo = LiveAgendaRepository(client)
+        val id = StudentId("id_101")
+        val first = async(start = CoroutineStart.UNDISPATCHED) { repo.reconcileStudent(id) }
+        entered.await()
+        val second = async(start = CoroutineStart.UNDISPATCHED) { repo.reconcileStudent(id) }
+        release.complete(Unit)
+        assertEquals(first.await(), second.await())
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun `complete reconciliation replaces changed removed and new grades and absences atomically`() = runBlocking {
+        val oldMark = md.sime.opensime.core.model.MarkItem("old", "Subject", md.sime.opensime.core.model.MarkValue.Numeric(7), "2026-10-24", 1)
+        val changedMark = oldMark.copy(value = md.sime.opensime.core.model.MarkValue.Numeric(9))
+        val deletedMark = oldMark.copy(id = "deleted")
+        val addedMark = oldMark.copy(id = "added")
+        val oldAbsence = md.sime.opensime.core.model.AbsenceItem("old", "Subject", "2026-10-24", 1, md.sime.opensime.core.model.AbsenceStatus.UNEXCUSED)
+        val changedAbsence = oldAbsence.copy(status = md.sime.opensime.core.model.AbsenceStatus.EXCUSED)
+        var authoritative = createMockSnapshot("id_101", "10A").copy(
+            recentMarks = listOf(oldMark, deletedMark), absences = listOf(oldAbsence, oldAbsence.copy(id = "deleted")),
+        )
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var hold = false
+        val now = AtomicLong(10_000L)
+        val client = createMockClient {
+            if (hold) { entered.complete(Unit); release.await() }
+            authoritative
+        }
+        val repo = LiveAgendaRepository(client, nowMillis = now::get)
+        val id = StudentId("id_101")
+        val old = repo.getStudentSnapshot(id)
+        authoritative = authoritative.copy(recentMarks = listOf(changedMark, addedMark),
+            absences = listOf(changedAbsence, oldAbsence.copy(id = "added")))
+        hold = true
+        now.set(20_000L)
+        val request = async(start = CoroutineStart.UNDISPATCHED) { repo.reconcileStudent(id) }
+        entered.await()
+        assertEquals(old, repo.cachedSnapshotFor(id))
+        release.complete(Unit)
+        val fresh = request.await()
+        assertEquals(listOf(changedMark, addedMark), fresh.recentMarks)
+        assertEquals(authoritative.absences, fresh.absences)
+        assertEquals(fresh, repo.cachedSnapshotFor(id))
+        for (dataset in listOf("grades", "absences", "timetable", "homework", "teachers")) {
+            assertEquals(20_000L, fresh.successfulSyncMillis[dataset])
+        }
+    }
+
+    @Test
+    fun `failed reconciliation surfaces failure while retaining cached data and last success`() = runBlocking {
+        var offline = false
+        val now = AtomicLong(10_000L)
+        val client = createMockClient {
+            if (offline) throw SimeNetworkError("Synthetic outage")
+            createMockSnapshot(it.value, "10A")
+        }
+        val repo = LiveAgendaRepository(client, nowMillis = now::get)
+        val id = StudentId("id_101")
+        val old = repo.reconcileStudent(id)
+        offline = true
+        now.set(80_000L)
+        try {
+            repo.reconcileStudent(id)
+            fail("Manual refresh must surface the error")
+        } catch (_: SimeNetworkError) { }
+        val retained = repo.cachedSnapshotFor(id)!!
+        assertEquals(old.recentMarks, retained.recentMarks)
+        assertEquals(old.successfulSyncMillis, retained.successfulSyncMillis)
+        val fallback = repo.getStudentSnapshot(id)
+        assertTrue(fallback.stale)
+        assertEquals(old.successfulSyncMillis, fallback.successfulSyncMillis)
+    }
+
+    @Test
+    fun `cancelled reconciliation cannot publish a partial snapshot and retry can succeed`() = runBlocking {
+        var block = false
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val client = createMockClient {
+            if (block) { entered.complete(Unit); release.await() }
+            createMockSnapshot(it.value, if (block) "new" else "old")
+        }
+        val repo = LiveAgendaRepository(client)
+        val id = StudentId("id_101")
+        val old = repo.getStudentSnapshot(id)
+        block = true
+        val request = async(start = CoroutineStart.UNDISPATCHED) { repo.reconcileStudent(id) }
+        entered.await()
+        request.cancelAndJoin()
+        assertEquals(old, repo.cachedSnapshotFor(id))
+        block = false
+        assertEquals(id, repo.reconcileStudent(id).studentId)
+    }
+
+    @Test
+    fun `late old session response cannot enter cache after generation changes`() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val client = createMockClient {
+            entered.complete(Unit)
+            release.await()
+            createMockSnapshot(it.value, "old account")
+        }
+        val repo = LiveAgendaRepository(client)
+        val id = StudentId("id_101")
+        val pending = async(start = CoroutineStart.UNDISPATCHED) {
+            try { repo.reconcileStudent(id) } catch (_: CancellationException) { null }
+        }
+        entered.await()
+        client.session.clear()
+        client.session.seedStudents(listOf(ParsedStudentProfile(id = "id_101", fullName = "Synthetic")))
+        release.complete(Unit)
+        pending.await()
+        assertNull(repo.cachedSnapshotFor(id))
+    }
+
+    @Test
+    fun `late student A reconciliation never replaces student B cached data`() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val client = createMockClient {
+            if (it.value == "id_101") { entered.complete(Unit); release.await() }
+            createMockSnapshot(it.value, if (it.value == "id_101") "10A" else "7B")
+        }
+        val repo = LiveAgendaRepository(client)
+        val a = async(start = CoroutineStart.UNDISPATCHED) { repo.reconcileStudent(StudentId("id_101")) }
+        entered.await()
+        val b = async(start = CoroutineStart.UNDISPATCHED) { repo.reconcileStudent(StudentId("id_201")) }
+        release.complete(Unit)
+        assertEquals("7B", b.await().student.className)
+        assertEquals("10A", a.await().student.className)
+        assertEquals("7B", repo.cachedSnapshotFor(StudentId("id_201"))?.student?.className)
+        assertEquals("10A", repo.cachedSnapshotFor(StudentId("id_101"))?.student?.className)
+    }
+
     private fun createRepositoryFixture(
         nowMillis: () -> Long = { 10_000L },
         onFetch: () -> Unit = {},
@@ -396,6 +599,7 @@ class LiveAgendaRepositoryTest {
     }
 
     private fun createMockClient(
+        onForceRefresh: (Boolean) -> Unit = {},
         onFetchSnapshot: suspend (StudentId) -> StudentAgendaSnapshot,
     ): SimePortalClient {
         val session = SimePortalSession()
@@ -417,7 +621,10 @@ class LiveAgendaRepositoryTest {
             override suspend fun fetchStudentSnapshot(
                 studentId: StudentId,
                 forceRefresh: Boolean,
-            ): StudentAgendaSnapshot = onFetchSnapshot(studentId)
+            ): StudentAgendaSnapshot {
+                onForceRefresh(forceRefresh)
+                return onFetchSnapshot(studentId)
+            }
 
             override fun toString(): String = "MockClient"
         }

@@ -27,9 +27,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import md.sime.opensime.core.data.AgendaRepository
+import md.sime.opensime.core.data.AgendaSnapshotStore
 import md.sime.opensime.core.data.LiveAgendaRepository
 import md.sime.opensime.core.data.SampleAgendaRepository
 import md.sime.opensime.core.designsystem.CookieAvatar
@@ -46,6 +53,7 @@ import md.sime.opensime.core.model.StudentId
 import md.sime.opensime.core.model.StudentMismatchException
 import md.sime.opensime.core.model.StudentProfile
 import md.sime.opensime.core.portal.SimeAuthCoordinator
+import md.sime.opensime.core.portal.AndroidKeyStoreVaultCipher
 import md.sime.opensime.core.portal.SimeCredentialVault
 import md.sime.opensime.core.portal.SimeLoginRejectedError
 import md.sime.opensime.core.portal.SimeNetworkError
@@ -150,11 +158,14 @@ class OpenSimeSessionCoordinator(
         }
 
         // Clear any previous student's snapshot before loading the new student.
-        activeSnapshot = null
+        activeSnapshot = cacheByStudent[studentId]?.verifyStudentOwnership(studentId)
 
         return try {
             repositoryLoadCalls += 1
-            val loaded = repository.getStudentSnapshot(studentId).verifyStudentOwnership(studentId)
+            val loaded = (if (forceRefresh && repository is LiveAgendaRepository) {
+                (repository as LiveAgendaRepository).reconcileStudent(studentId)
+            } else repository.getStudentSnapshot(studentId)).verifyStudentOwnership(studentId)
+            currentCoroutineContext().ensureActive()
             if (myGeneration == repositoryGeneration) {
                 cacheByStudent[studentId] = loaded
                 if (myTicket == latestRequestTicket && activeStudentId == studentId) {
@@ -174,9 +185,11 @@ class OpenSimeSessionCoordinator(
                 lastError = mismatch
             }
             throw mismatch
+        } catch (cancel: CancellationException) {
+            throw cancel
         } catch (err: Throwable) {
             if (myGeneration == repositoryGeneration && myTicket == latestRequestTicket && activeStudentId == studentId) {
-                activeSnapshot = null
+                activeSnapshot = cacheByStudent[studentId]?.copy(stale = true)
                 lastError = err
             }
             throw err
@@ -190,20 +203,33 @@ class OpenSimeSessionCoordinator(
     suspend fun loadStudentSafely(
         studentId: StudentId,
         forceRefresh: Boolean = false,
-    ): Result<StudentAgendaSnapshot?> = runCatching {
-        selectStudent(studentId = studentId, forceRefresh = forceRefresh)
+    ): Result<StudentAgendaSnapshot?> = try {
+        Result.success(selectStudent(studentId = studentId, forceRefresh = forceRefresh))
+    } catch (cancel: CancellationException) {
+        throw cancel
+    } catch (err: Throwable) {
+        Result.failure(err)
     }
+}
+
+class OpenSimeRetainedSession : ViewModel() {
+    val auth = SimeAuthCoordinator()
+    var repository by mutableStateOf<AgendaRepository?>(null)
+    var snapshotStore by mutableStateOf<AgendaSnapshotStore?>(null)
 }
 
 @Composable
 fun OpenSimeApp(
     repository: AgendaRepository? = null,
-    authCoordinator: SimeAuthCoordinator = remember { SimeAuthCoordinator() },
+    authCoordinator: SimeAuthCoordinator = viewModel<OpenSimeRetainedSession>().auth,
     credentialVault: SimeCredentialVault? = null,
 ) {
     val context = LocalContext.current
     val effectiveVault = remember(credentialVault) { credentialVault ?: SimeCredentialVault(context) }
-    var activeRepository by remember(repository) { mutableStateOf(repository) }
+    val retained = viewModel<OpenSimeRetainedSession>()
+    var activeRepository by retained::repository
+    var activeSnapshotStore by retained::snapshotStore
+    if (repository != null && activeRepository !== repository) activeRepository = repository
     var isLiveAuthenticated by rememberSaveable { mutableStateOf(repository != null && repository !is SampleAgendaRepository) }
     var hasSavedCredentialsState by remember { mutableStateOf(effectiveVault.hasSavedCredentials()) }
     var savedUsername by remember { mutableStateOf<String?>(null) }
@@ -247,7 +273,8 @@ fun OpenSimeApp(
     var isLoading by remember(activeRepository) {
         mutableStateOf(activeRepository != null)
     }
-    var reloadTrigger by rememberSaveable { mutableIntStateOf(0) }
+    var reloadTrigger by remember { mutableIntStateOf(0) }
+    var handledReloadTrigger by remember { mutableIntStateOf(0) }
 
     var currentDestination by rememberSaveable { mutableStateOf(TopLevelDestination.HOME) }
     var isProfileSelected by rememberSaveable { mutableStateOf(false) }
@@ -274,18 +301,24 @@ fun OpenSimeApp(
                     hasSavedCredentialsState = effectiveVault.hasSavedCredentials()
                     savedUsername = if (rememberMe) username.trim() else null
                     val liveClient = SimePortalClient(session = authCoordinator.session)
+                    val store = AgendaSnapshotStore(
+                        rootDirectory = File(context.filesDir, "agenda-snapshots"),
+                        cipher = AndroidKeyStoreVaultCipher(),
+                        accountKey = username.trim(),
+                    )
                     val liveRepo = LiveAgendaRepository(
                         client = liveClient,
                         authCoordinator = authCoordinator,
+                        snapshotStore = store,
                     )
                     coordinator?.clear()
+                    activeSnapshotStore = store
                     activeRepository = liveRepo
                     isLiveAuthenticated = true
                     showLoginScreen = false
                     isAuthenticating = false
                     authError = null
                     selectedStudentIdValue = session.initialStudent.id.value
-                    reloadTrigger += 1
                 },
                 onFailure = { err ->
                     isAuthenticating = false
@@ -299,9 +332,11 @@ fun OpenSimeApp(
         coroutineScope.launch {
             OpenSimeSettingsState.setExplicitlyLoggedOut(context, true)
             authCoordinator.logout()
+            activeSnapshotStore?.clear()
             coordinator?.clear()
             isLiveAuthenticated = false
             activeRepository = null
+            activeSnapshotStore = null
             currentSnapshot = null
             loadError = null
             selectedStudentIdValue = ""
@@ -330,15 +365,21 @@ fun OpenSimeApp(
                 if (result != null && result.isSuccess) {
                     val session = result.getOrThrow()
                     val liveClient = SimePortalClient(session = authCoordinator.session)
+                    val store = AgendaSnapshotStore(
+                        rootDirectory = File(context.filesDir, "agenda-snapshots"),
+                        cipher = AndroidKeyStoreVaultCipher(),
+                        accountKey = saved.username.trim(),
+                    )
                     val liveRepo = LiveAgendaRepository(
                         client = liveClient,
                         authCoordinator = authCoordinator,
+                        snapshotStore = store,
                     )
                     coordinator?.clear()
+                    activeSnapshotStore = store
                     activeRepository = liveRepo
                     isLiveAuthenticated = true
                     selectedStudentIdValue = session.initialStudent.id.value
-                    reloadTrigger += 1
                 } else {
                     val err = result?.exceptionOrNull() ?: SimeNetworkError("Timeout connecting to SIME portal")
                     if (err is SimeLoginRejectedError) {
@@ -366,14 +407,21 @@ fun OpenSimeApp(
             return@LaunchedEffect
         }
         val targetId = StudentId(selectedStudentIdValue)
-        currentSnapshot = null
+        currentSnapshot = currentCoord.cachedSnapshotFor(targetId)
+            ?: (activeRepository as? LiveAgendaRepository)?.cachedSnapshotFor(targetId)
+            ?: authCoordinator.cachedSnapshotFor(targetId)
         loadError = null
         isLoading = true
+        val manual = reloadTrigger != handledReloadTrigger
+        handledReloadTrigger = reloadTrigger
+        val restoredFromDisk = activeRepository is LiveAgendaRepository &&
+            currentSnapshot != null && currentCoord.cachedSnapshotFor(targetId) == null
 
         val result = currentCoord.loadStudentSafely(
             studentId = targetId,
-            forceRefresh = reloadTrigger > 0,
+            forceRefresh = manual || restoredFromDisk,
         )
+        currentCoroutineContext().ensureActive()
         result.fold(
             onSuccess = { loaded ->
                 if (loaded != null && loaded.studentId == targetId) {
@@ -384,7 +432,7 @@ fun OpenSimeApp(
             },
             onFailure = { err ->
                 if (currentCoord.activeStudentId == targetId) {
-                    currentSnapshot = null
+                    currentSnapshot = currentSnapshot?.takeIf { it.studentId == targetId }?.copy(stale = true)
                     loadError = err
                     isLoading = false
                 }
@@ -506,7 +554,7 @@ fun OpenSimeApp(
                 ) {
                     val err = loadError
                     when {
-                        err != null -> {
+                        err != null && snapshot == null -> {
                             val isSessionExpired = err is SimeSessionExpiredError
                             val isMismatch = err is SimeStudentMismatchError || err is StudentMismatchException
                             val errorTitle = when {
@@ -549,7 +597,7 @@ fun OpenSimeApp(
                             }
                         }
 
-                        snapshot == null || isLoading -> {
+                        snapshot == null -> {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center,
@@ -576,6 +624,10 @@ fun OpenSimeApp(
                             when (destination) {
                                 TopLevelDestination.HOME -> HomeScreen(
                                     snapshot = snapshot,
+                                    isRefreshing = isLoading,
+                                    onRefresh = { if (!isLoading) reloadTrigger += 1 },
+                                    refreshError = loadError?.let { strings.errorMessageFor(it) },
+                                    reduceMotion = settings.reduceMotion,
                                     onNavigateToMarks = {
                                         isProfileSelected = false
                                         currentDestination = TopLevelDestination.MARKS

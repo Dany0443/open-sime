@@ -149,6 +149,7 @@ open class SimePortalClient(
         page: PortalStudentDashboardPage,
         requestedStudentId: String?,
         extraCalendar: List<ParsedCalendarEntry> = emptyList(),
+        requireComplete: Boolean = false,
     ): ParsedPortalPage {
         if (!requestedStudentId.isNullOrBlank()) {
             val canonRequested = session.canonicalStudentKey(requestedStudentId)
@@ -183,7 +184,8 @@ open class SimePortalClient(
                 throw err
             } catch (err: SimeStudentMismatchError) {
                 throw err
-            } catch (_: Exception) {
+            } catch (err: Exception) {
+                if (requireComplete) throw err
                 // fallback to inline report data
             }
         }
@@ -419,8 +421,10 @@ open class SimePortalClient(
 
         val doc = SimeDomHelpers.parseHtml(page.html)
         var extraCalendar: List<ParsedCalendarEntry> = emptyList()
+        var verifiedCalendarStart: String? = null
+        var verifiedCalendarEnd: String? = null
         val embeddedCal = SimeCalendarAndTeachersParser.extractEmbeddedCalendarEntries(doc)
-        if (embeddedCal.isEmpty() && SimeCalendarAndTeachersParser.findCalendarAjaxId(page.html) != null) {
+        if (SimeCalendarAndTeachersParser.findCalendarAjaxId(page.html) != null) {
             try {
                 val today = todayProvider()
                 val weekStart = ChisinauTime.weekStart(today)
@@ -429,19 +433,22 @@ open class SimePortalClient(
                     startIso = ChisinauTime.addDays(weekStart, -7),
                     endIso = ChisinauTime.addDays(weekStart, 13),
                 )
+                verifiedCalendarStart = ChisinauTime.addDays(weekStart, -7)
+                verifiedCalendarEnd = ChisinauTime.addDays(weekStart, 13)
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (err: SimeSessionExpiredError) {
                 throw err
             } catch (err: SimeStudentMismatchError) {
                 throw err
-            } catch (_: Exception) {
+            } catch (err: Exception) {
+                if (forceRefresh) throw err
                 // Graceful fallback
             }
         }
 
-        val enrichedPage = enrichPortalPageInternal(page, canonicalKey, extraCalendar)
-        val allCalendar = if (embeddedCal.isNotEmpty()) embeddedCal else extraCalendar
+        val enrichedPage = enrichPortalPageInternal(page, canonicalKey, extraCalendar, requireComplete = forceRefresh)
+        val allCalendar = if (verifiedCalendarStart != null) extraCalendar else embeddedCal
         val finalTeachers = if (enrichedPage.teachers.isNotEmpty()) {
             enrichedPage.teachers
         } else {
@@ -452,8 +459,13 @@ open class SimePortalClient(
             )
         }
 
-        val finalPage = if (extraCalendar.isNotEmpty() && enrichedPage.schedule.days.isEmpty()) {
-            val days = SimeCalendarAndTeachersParser.groupByDay(extraCalendar)
+        val finalPage = if (verifiedCalendarStart != null) {
+            val days = SimeCalendarAndTeachersParser.groupByDay(extraCalendar).toMutableMap()
+            var date = verifiedCalendarStart
+            while (date != null && date <= verifiedCalendarEnd!!) {
+                days.putIfAbsent(date, emptyList())
+                date = ChisinauTime.addDays(date, 1)
+            }
             val sched = ParsedSchedule(weekStart = ChisinauTime.weekStart(todayProvider()), days = days)
             enrichedPage.copy(
                 schedule = sched,
@@ -468,6 +480,7 @@ open class SimePortalClient(
         val snapshot = SimePortalParser.toStudentAgendaSnapshot(
             portalPage = finalPage,
             referenceIsoDate = todayProvider(),
+            referenceTimeHm = ChisinauTime.chisinauHm(nowMillis()),
             expectedStudentId = targetStudentId,
         )
         return snapshot.verifyStudentOwnership(targetStudentId)

@@ -336,7 +336,7 @@ object SimePortalParser {
     fun toStudentAgendaSnapshot(
         portalPage: ParsedPortalPage,
         referenceIsoDate: String = ChisinauTime.todayChisinau(),
-        referenceTimeHm: String = "09:15",
+        referenceTimeHm: String = ChisinauTime.chisinauHm(System.currentTimeMillis()),
         expectedStudentId: StudentId? = null,
     ): StudentAgendaSnapshot =
         SimePortalSnapshotMapper.toStudentAgendaSnapshot(portalPage, referenceIsoDate, referenceTimeHm, expectedStudentId)

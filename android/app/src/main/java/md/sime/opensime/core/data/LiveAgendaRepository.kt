@@ -1,5 +1,9 @@
 package md.sime.opensime.core.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.core.model.StudentId
 import md.sime.opensime.core.model.StudentMismatchException
@@ -34,6 +38,7 @@ class LiveAgendaRepository(
     val authCoordinator: SimeAuthCoordinator? = null,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     val overviewTtlMillis: Long = DEFAULT_OVERVIEW_TTL_MS,
+    private val snapshotStore: AgendaSnapshotStore? = null,
 ) : AgendaRepository {
 
     private data class CachedSnapshot(
@@ -44,6 +49,7 @@ class LiveAgendaRepository(
 
     private val cacheLock = Any()
     private val snapshotCache = linkedMapOf<StudentId, CachedSnapshot>()
+    private val inFlight = mutableMapOf<Pair<Long, StudentId>, CompletableDeferred<StudentAgendaSnapshot>>()
 
     override fun listStudents(): List<StudentProfile> {
         val coordinatorStudents = authCoordinator?.availableStudents()
@@ -72,39 +78,63 @@ class LiveAgendaRepository(
         val cached = synchronized(cacheLock) {
             val entry = snapshotCache[canonicalId]
             if (entry != null && entry.sessionGeneration == currentGen) entry else null
-        }
+        } ?: restorePersisted(canonicalId, currentGen)
         if (cached != null && (now - cached.cachedAtEpochMillis) < overviewTtlMillis) {
             return cached.snapshot.verifyStudentOwnership(canonicalId)
         }
 
         // 2. Check circuit breakers: serve stale cached data if circuit breaker is tripped (same session only)
         if (cached != null && isBreakerOpen()) {
-            return cached.snapshot.verifyStudentOwnership(canonicalId)
+            return cached.snapshot.verifyStudentOwnership(canonicalId).copy(stale = true)
         }
 
-        // 3. Fetch fresh snapshot from the direct portal client
         return try {
-            val fresh = client.fetchStudentSnapshot(canonicalId, forceRefresh = false)
-            val verified = fresh.verifyStudentOwnership(canonicalId)
-            synchronized(cacheLock) {
-                snapshotCache[canonicalId] = CachedSnapshot(verified, nowMillis(), client.session.sessionGeneration)
-            }
-            verified
+            reconcileStudent(canonicalId)
         } catch (err: Throwable) {
-            // Serve stale cache on transient upstream network or rate limit failure (same session only)
-            if (cached != null && isUpstreamTransientFailure(err)) {
-                return cached.snapshot.verifyStudentOwnership(canonicalId)
-            }
-            if (err is SimeStudentMismatchError) {
-                throw StudentMismatchException(
-                    requestedStudentId = err.requestedStudentId ?: canonicalId,
-                    actualStudentId = err.actualStudentId ?: StudentId("unknown"),
-                )
-            }
-            if (err is SimeStudentNotFoundError) {
-                throw StudentNotFoundException(err.studentId ?: canonicalId)
+            if (cached != null && currentGen == client.session.sessionGeneration && isUpstreamTransientFailure(err)) {
+                return cached.snapshot.verifyStudentOwnership(canonicalId).copy(stale = true)
             }
             throw err
+        }
+    }
+
+    /** One authoritative transaction per student/session; failures never publish partial data. */
+    suspend fun reconcileStudent(studentId: StudentId): StudentAgendaSnapshot {
+        val key = client.session.canonicalStudentKey(studentId.value.trim())
+        if (key.isEmpty()) throw StudentNotFoundException(studentId)
+        val id = StudentId(key)
+        val generation = client.session.sessionGeneration
+        val requestKey = generation to id
+        val mine = CompletableDeferred<StudentAgendaSnapshot>()
+        val request = synchronized(cacheLock) { inFlight.getOrPut(requestKey) { mine } }
+        if (request !== mine) return request.await().verifyStudentOwnership(id)
+        try {
+            val fresh = client.fetchStudentSnapshot(id, forceRefresh = true).verifyStudentOwnership(id)
+            currentCoroutineContext().ensureActive()
+            val completedAt = nowMillis()
+            val verified = fresh.copy(
+                stale = false,
+                successfulSyncMillis = listOf("grades", "absences", "timetable", "homework", "teachers")
+                    .associateWith { completedAt },
+            )
+            synchronized(cacheLock) {
+                if (generation != client.session.sessionGeneration) throw CancellationException("Session changed")
+                snapshotCache[id] = CachedSnapshot(verified, completedAt, generation)
+            }
+            runCatching { snapshotStore?.write(verified) }
+            mine.complete(verified)
+            return verified
+        } catch (err: Throwable) {
+            val failure = when (err) {
+                is SimeStudentMismatchError -> StudentMismatchException(err.requestedStudentId ?: id,
+                    err.actualStudentId ?: StudentId("unknown"))
+                is SimeStudentNotFoundError -> StudentNotFoundException(err.studentId ?: id)
+                else -> err
+            }
+            mine.completeExceptionally(failure)
+            throw failure
+        } finally {
+            synchronized(cacheLock) { if (inFlight[requestKey] === mine) inFlight.remove(requestKey) }
         }
     }
 
@@ -120,7 +150,7 @@ class LiveAgendaRepository(
             } else {
                 null
             }
-        }
+        } ?: restorePersisted(canonicalId, currentGen)?.snapshot
     }
 
     fun isBreakerOpen(): Boolean = client.isBreakerOpen()
@@ -128,6 +158,24 @@ class LiveAgendaRepository(
     fun clearCache() {
         synchronized(cacheLock) {
             snapshotCache.clear()
+        }
+    }
+
+    fun clearPersistentCache() {
+        snapshotStore?.clear()
+    }
+
+    private fun restorePersisted(studentId: StudentId, sessionGeneration: Long): CachedSnapshot? {
+        val restored = snapshotStore?.read(studentId) ?: return null
+        val cachedAt = restored.successfulSyncMillis.values.maxOrNull() ?: 0L
+        val entry = CachedSnapshot(restored, cachedAt, sessionGeneration)
+        synchronized(cacheLock) {
+            val existing = snapshotCache[studentId]
+            if (existing == null || existing.sessionGeneration != sessionGeneration) {
+                snapshotCache[studentId] = entry
+                return entry
+            }
+            return existing
         }
     }
 

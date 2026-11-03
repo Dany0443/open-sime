@@ -28,7 +28,7 @@ internal object SimePortalSnapshotMapper {
     fun toStudentAgendaSnapshot(
         portalPage: ParsedPortalPage,
         referenceIsoDate: String = ChisinauTime.todayChisinau(),
-        referenceTimeHm: String = "09:15",
+        referenceTimeHm: String = ChisinauTime.chisinauHm(System.currentTimeMillis()),
         expectedStudentId: StudentId? = null,
     ): StudentAgendaSnapshot {
         val rawId = portalPage.student.id.trim().ifEmpty { portalPage.metadata.id.trim() }
@@ -129,7 +129,7 @@ internal object SimePortalSnapshotMapper {
                     topic = l.topic,
                     homeworkSummary = l.topic,
                     status = status,
-                    dayOfWeekIndex = dayIndex.coerceIn(0, 4),
+                    dayOfWeekIndex = dayIndex.coerceIn(0, 6),
                 )
             }
         }
@@ -216,6 +216,9 @@ internal object SimePortalSnapshotMapper {
             homeworkItems = domainHomework,
             teachers = domainTeachers,
             weekDayIsoDates = weekDayIsoDates,
+            lessonsByDate = portalPage.schedule.days.mapValues { (date, lessons) ->
+                mapDayLessons(date, java.time.LocalDate.parse(date).dayOfWeek.value - 1, lessons)
+            },
             sem1AbsenceSummary = sem1Summary,
             sem2AbsenceSummary = sem2Summary,
         )
