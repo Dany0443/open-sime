@@ -52,10 +52,8 @@ fun ProfileScreen(
     snapshot: StudentAgendaSnapshot,
     studentToneIndex: Int = 0,
     modifier: Modifier = Modifier,
-    hasSavedCredentials: Boolean = false,
     onSignInClick: (() -> Unit)? = null,
     onSignOutClick: (() -> Unit)? = null,
-    onForgetCredentialsClick: (() -> Unit)? = null,
 ) {
     val strings = LocalAppStrings.current
     val colorScheme = MaterialTheme.colorScheme
@@ -192,69 +190,16 @@ fun ProfileScreen(
                 }
             }
 
-            // Saved credentials management
-            if (hasSavedCredentials && onForgetCredentialsClick != null) {
-                item(key = "profile_saved_credentials_card") {
-                    Surface(
-                        shape = MaterialTheme.shapes.large,
-                        color = colorScheme.surfaceContainerLow,
-                        border = if (highContrast) BorderStroke(1.5.dp, colorScheme.onSurface) else null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("profile_saved_credentials_card"),
+            if (onSignOutClick != null) {
+                item(key = "profile_logout") {
+                    OutlinedButton(
+                        onClick = onSignOutClick,
+                        modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 48.dp)
+                            .testTag("profile_action_logout"),
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(
-                                    imageVector = OpenSimeIcons.Lock,
-                                    contentDescription = null,
-                                    tint = colorScheme.primary,
-                                    modifier = Modifier.size(24.dp),
-                                )
-                                Column {
-                                    Text(
-                                        text = strings.rememberMeLabel,
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = colorScheme.onSurface,
-                                    )
-                                    Text(
-                                        text = strings.rememberMeDesc,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-
-                            OutlinedButton(
-                                onClick = onForgetCredentialsClick,
-                                modifier = Modifier
-                                    .padding(start = 8.dp)
-                                    .sizeIn(minHeight = 48.dp)
-                                    .testTag("profile_action_forget_credentials"),
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = OpenSimeIcons.Delete,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Text(strings.forgetSavedLogin)
-                                }
-                            }
-                        }
+                        Icon(OpenSimeIcons.Logout, contentDescription = null,
+                            modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                        Text(strings.logoutAction)
                     }
                 }
             }

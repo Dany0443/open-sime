@@ -5,9 +5,16 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.content.res.Resources
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Files
+import md.sime.opensime.core.data.AgendaSnapshotStore
 import md.sime.opensime.core.data.AgendaRepository
 import md.sime.opensime.core.data.SampleAgendaRepository
 import md.sime.opensime.core.designsystem.OpenSimeSettingsState
@@ -41,6 +48,42 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OpenSimeUiIntegrationTest {
+
+    @Test
+    fun `upstream cancellation with an active caller is a recoverable load result`() = runBlocking {
+        val samples = SampleAgendaRepository()
+        val repository = object : AgendaRepository {
+            override fun listStudents() = samples.listStudents()
+            override suspend fun getStudentSnapshot(studentId: StudentId): StudentAgendaSnapshot =
+                throw kotlinx.coroutines.CancellationException("Obsolete upstream request")
+        }
+        val coordinator = OpenSimeSessionCoordinator(repository)
+        val result = coordinator.loadStudentSafely(SampleAgendaRepository.STUDENT_SEVENTH_GRADE)
+        assertTrue(result.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+        assertNull(coordinator.activeSnapshot)
+    }
+
+    @Test
+    fun `caller cancellation is never converted to a load result`() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val samples = SampleAgendaRepository()
+        val coordinator = OpenSimeSessionCoordinator(object : AgendaRepository {
+            override fun listStudents() = samples.listStudents()
+            override suspend fun getStudentSnapshot(studentId: StudentId): StudentAgendaSnapshot {
+                release.await()
+                return samples.getStudentSnapshot(studentId)
+            }
+        })
+        var returned = false
+        val caller = launch(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.loadStudentSafely(SampleAgendaRepository.STUDENT_SEVENTH_GRADE)
+            returned = true
+        }
+        caller.cancel()
+        caller.join()
+        assertFalse(returned)
+        assertNull(coordinator.activeSnapshot)
+    }
 
     @Test
     fun `session coordinator switchRepository clears caches and invalidates active snapshot`() = runBlocking {
@@ -185,6 +228,12 @@ class OpenSimeUiIntegrationTest {
             assertFalse("loginChecking blank in $lang", strings.loginChecking.isBlank())
             assertFalse("loginRequired blank in $lang", strings.loginRequired.isBlank())
             assertFalse("logoutAction blank in $lang", strings.logoutAction.isBlank())
+            assertFalse("credentialRestoreFailed blank in $lang", strings.credentialRestoreFailed.isBlank())
+            assertFalse("cachedSessionNotice blank in $lang", strings.cachedSessionNotice.isBlank())
+            assertFalse("cachedSessionRestoring blank in $lang", strings.cachedSessionRestoring.isBlank())
+            assertFalse("logoutInProgress blank in $lang", strings.logoutInProgress.isBlank())
+            assertFalse("logoutCleanupFailed blank in $lang", strings.logoutCleanupFailed.isBlank())
+            assertFalse("logoutCleanupFailedDesc blank in $lang", strings.logoutCleanupFailedDesc.isBlank())
             assertFalse("connectToSime blank in $lang", strings.connectToSime.isBlank())
             assertFalse("liveConnectedBadge blank in $lang", strings.liveConnectedBadge.isBlank())
             assertFalse("switchToDemo blank in $lang", strings.switchToDemo.isBlank())
@@ -201,8 +250,6 @@ class OpenSimeUiIntegrationTest {
             assertFalse("onboardingPointSecurity blank in $lang", strings.onboardingPointSecurity.isBlank())
             assertFalse("rememberMeLabel blank in $lang", strings.rememberMeLabel.isBlank())
             assertFalse("rememberMeDesc blank in $lang", strings.rememberMeDesc.isBlank())
-            assertFalse("forgetSavedLogin blank in $lang", strings.forgetSavedLogin.isBlank())
-            assertFalse("forgetSavedLoginConfirm blank in $lang", strings.forgetSavedLoginConfirm.isBlank())
             assertFalse("sessionRestoring blank in $lang", strings.sessionRestoring.isBlank())
             assertFalse("sessionRestoreFailed blank in $lang", strings.sessionRestoreFailed.isBlank())
         }
@@ -436,7 +483,7 @@ class OpenSimeUiIntegrationTest {
     }
 
     @Test
-    fun `credential vault preserves saved credentials on logout when remember me was checked`() {
+    fun `explicit logout deletes saved credentials and keeps general preferences`() = runBlocking {
         val testPrefs = InMemorySharedPreferences()
         val cipher = StandardAesGcmVaultCipher()
         val vault = SimeCredentialVault(preferences = testPrefs, cipher = cipher)
@@ -451,19 +498,167 @@ class OpenSimeUiIntegrationTest {
         assertEquals(username, vault.loadCredentials()?.username)
         assertEquals(role, vault.loadCredentials()?.role)
 
-        // 2. User logs out: session coordinator clears, but vault credentials are preserved
-        val coordinator = OpenSimeSessionCoordinator(SampleAgendaRepository())
-        coordinator.clear()
-        assertNull(coordinator.activeSnapshot)
-
-        // Saved credentials still exist in the vault
-        assertTrue(vault.hasSavedCredentials())
-        assertEquals(username, vault.loadCredentials()?.username)
-
-        // 3. User unchecks Remember me on subsequent login (or clicks "Forget saved login")
-        vault.clearCredentials()
+        val context = object : ContextWrapper(null) {
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = testPrefs
+        }
+        testPrefs.edit().putString("language", "RU").putBoolean("high_contrast", true).commit()
+        val session = OpenSimeRetainedSession()
+        session.repository = SampleAgendaRepository()
+        session.logout(context, session.auth, vault)
+        session.logout(context, session.auth, vault)
         assertFalse(vault.hasSavedCredentials())
         assertNull(vault.loadCredentials())
+        assertNull(session.repository)
+        assertFalse(session.auth.isAuthenticated)
+        assertTrue(OpenSimeSettingsState.isExplicitlyLoggedOut(context))
+        assertEquals("RU", testPrefs.getString("language", null))
+        assertTrue(testPrefs.getBoolean("high_contrast", false))
+        assertNull(session.logoutError)
+    }
+
+    @Test
+    fun `session-only logout removes both siblings snapshots but preserves other accounts`() = runBlocking {
+        val directory = Files.createTempDirectory("logout-test").toFile()
+        try {
+            val cipher = StandardAesGcmVaultCipher()
+            val account = AgendaSnapshotStore(directory, cipher, "synthetic-parent")
+            val other = AgendaSnapshotStore(directory, cipher, "synthetic-other")
+            val samples = SampleAgendaRepository()
+            val snapshots = samples.listStudents().map { samples.getStudentSnapshot(it.id) }
+            snapshots.forEach(account::write)
+            val unrelated = snapshots.first()
+            other.write(unrelated)
+            val prefs = InMemorySharedPreferences()
+            val context = object : ContextWrapper(null) {
+                override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
+            }
+            val vault = SimeCredentialVault(InMemorySharedPreferences(), cipher)
+            val session = OpenSimeRetainedSession()
+            session.repository = SampleAgendaRepository()
+            session.snapshotStore = account
+            session.logout(context, session.auth, vault)
+            assertTrue(account.list().isEmpty())
+            assertEquals(listOf(unrelated), other.list())
+            assertNull(session.snapshotStore)
+            assertNull(session.repository)
+            assertNull(session.logoutError)
+            assertFalse(vault.hasSavedCredentials())
+            assertTrue(OpenSimeSettingsState.isExplicitlyLoggedOut(context))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `logout waits for cancelled restoration before final session wipe`() = runBlocking {
+        val prefs = InMemorySharedPreferences()
+        val context = object : ContextWrapper(null) {
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
+        }
+        val vault = SimeCredentialVault(InMemorySharedPreferences(), StandardAesGcmVaultCipher())
+        val session = OpenSimeRetainedSession()
+        val release = CompletableDeferred<Unit>()
+        val restoration = launch(start = CoroutineStart.UNDISPATCHED) {
+            session.auth.operationMutex.withLock {
+                // A transport callback can finish even after its caller is cancelled.
+                withContext(NonCancellable) {
+                    release.await()
+                    session.auth.session.seedStudents(listOf(
+                        md.sime.opensime.core.portal.ParsedStudentProfile("synthetic-child", "Synthetic child"),
+                    ))
+                }
+            }
+        }
+        session.trackSessionJob(restoration)
+        val logout = async(start = CoroutineStart.UNDISPATCHED) { session.logout(context, session.auth, vault) }
+        assertTrue(session.logoutInProgress)
+        assertTrue(restoration.isCancelled)
+        assertNull(session.repository)
+        release.complete(Unit)
+        logout.await()
+        assertTrue(restoration.isCompleted)
+        assertTrue(session.auth.session.listStudents().isEmpty())
+        assertFalse(session.auth.isAuthenticated)
+        assertNull(session.logoutError)
+    }
+
+    @Test
+    fun `failed credential deletion blocks successful logout and retry completes cleanup`() = runBlocking {
+        val settings = InMemorySharedPreferences()
+        val credentials = InMemorySharedPreferences()
+        val context = object : ContextWrapper(null) {
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = settings
+        }
+        val vault = SimeCredentialVault(credentials, StandardAesGcmVaultCipher())
+        vault.saveCredentials("synthetic-user", "synthetic-password", AccountRole.PARENT)
+        credentials.commitSucceeds = false
+        val session = OpenSimeRetainedSession()
+        session.logout(context, session.auth, vault)
+        assertNotNull(session.logoutError)
+        assertFalse(session.logoutInProgress)
+        assertTrue(vault.hasSavedCredentials())
+        assertTrue(OpenSimeSettingsState.isExplicitlyLoggedOut(context))
+        // A fresh app instance still sees the durable automatic-login guard.
+        assertTrue(OpenSimeSettingsState.isExplicitlyLoggedOut(object : ContextWrapper(null) {
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = settings
+        }))
+        credentials.commitSucceeds = true
+        session.logout(context, session.auth, vault)
+        assertNull(session.logoutError)
+        assertFalse(vault.hasSavedCredentials())
+    }
+
+    @Test
+    fun `failed logout guard is reported even when credential deletion succeeds`() = runBlocking {
+        val settings = InMemorySharedPreferences().apply { commitSucceeds = false }
+        val directory = Files.createTempDirectory("logout-guard-test").toFile()
+        val context = object : ContextWrapper(null) {
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = settings
+            override fun getFilesDir(): java.io.File = directory
+        }
+        val vault = SimeCredentialVault(InMemorySharedPreferences(), StandardAesGcmVaultCipher())
+        vault.saveCredentials("synthetic-user", "synthetic-password", AccountRole.PARENT)
+        val session = OpenSimeRetainedSession()
+        session.logout(context, session.auth, vault)
+        assertNotNull(session.logoutError)
+        assertFalse(vault.hasSavedCredentials())
+        settings.commitSucceeds = true
+        session.logout(context, session.auth, vault)
+        assertNull(session.logoutError)
+        assertFalse(vault.hasSavedCredentials())
+        assertTrue(OpenSimeSettingsState.isExplicitlyLoggedOut(context))
+    }
+
+    @Test
+    fun `failed snapshot deletion retains account cleanup for retry`() = runBlocking {
+        val directory = Files.createTempDirectory("logout-delete-test").toFile()
+        try {
+            val store = AgendaSnapshotStore(java.io.File(directory, "agenda-snapshots"), StandardAesGcmVaultCipher(), "synthetic-account",
+                deleteAccountDirectory = { false })
+            val snapshot = SampleAgendaRepository.buildDefaultSampleSnapshots().values.first()
+            store.write(snapshot)
+            val prefs = InMemorySharedPreferences()
+            val context = object : ContextWrapper(null) {
+                override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
+                override fun getFilesDir(): java.io.File = directory
+            }
+            val vault = SimeCredentialVault(InMemorySharedPreferences(), StandardAesGcmVaultCipher())
+            vault.saveCredentials("synthetic-user", "synthetic-password", AccountRole.PARENT)
+            val session = OpenSimeRetainedSession()
+            session.snapshotStore = store
+            session.logout(context, session.auth, vault)
+            assertNotNull(session.logoutError)
+            assertNull(session.snapshotStore)
+            assertEquals(snapshot, store.read(snapshot.studentId))
+            assertFalse(vault.hasSavedCredentials())
+            // Simulate process loss: no retained store or coroutine state survives.
+            val restarted = OpenSimeRetainedSession()
+            restarted.logout(context, restarted.auth, vault)
+            assertNull(restarted.logoutError)
+            assertTrue(store.list().isEmpty())
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 
     @Test
@@ -514,6 +709,7 @@ class OpenSimeUiIntegrationTest {
 
     private class InMemorySharedPreferences : SharedPreferences {
         val data = mutableMapOf<String, Any?>()
+        var commitSucceeds = true
 
         override fun getAll(): MutableMap<String, *> = data.toMutableMap()
         override fun getString(key: String?, defValue: String?): String? = (data[key] as? String) ?: defValue
@@ -566,6 +762,7 @@ class OpenSimeUiIntegrationTest {
                 return this
             }
             override fun commit(): Boolean {
+                if (!prefs.commitSucceeds) return false
                 apply()
                 return true
             }

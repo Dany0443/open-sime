@@ -46,8 +46,8 @@ android {
         applicationId = "md.sime.opensime"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -98,6 +98,9 @@ android {
             isReturnDefaultValues = true
         }
     }
+
+    // Reuse sanitized portal fixtures in on-device login regression tests.
+    sourceSets.getByName("androidTest").assets.directories.add("src/test/resources")
 
     packaging {
         resources {

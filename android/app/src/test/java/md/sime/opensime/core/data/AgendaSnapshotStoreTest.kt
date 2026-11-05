@@ -2,6 +2,9 @@ package md.sime.opensime.core.data
 
 import md.sime.opensime.core.model.MarkValue
 import md.sime.opensime.core.model.StudentId
+import md.sime.opensime.core.model.SchoolLevel
+import md.sime.opensime.core.model.SemesterGradeEvidence
+import md.sime.opensime.core.model.ThesisRequirement
 import md.sime.opensime.core.portal.StandardAesGcmVaultCipher
 import md.sime.opensime.core.portal.VaultCipher
 import org.junit.Assert.assertEquals
@@ -26,6 +29,62 @@ class AgendaSnapshotStoreTest {
         successfulSyncMillis = mapOf("grades" to 1000L, "absences" to 2000L, "timetable" to 3000L),
         stale = true,
     )
+
+    @Test
+    fun `legacy snapshots retain grades but do not gain academic evidence`() {
+        val encoded = SnapshotCodec.encode(snapshot).toString(Charsets.UTF_8)
+        val legacy = encoded.replace(",\"semesterEvidence\":{}", "")
+            .replace(",\"portalSemesterAverageCandidates\":{}", "")
+            .replace(",\"portalAnnualAverageCandidate\":null", "")
+            .replace(",\"gradesCoverageComplete\":false", "")
+        assertFalse(legacy.contains("semesterEvidence"))
+        val decoded = SnapshotCodec.decode(legacy.toByteArray(Charsets.UTF_8))
+        assertEquals(snapshot, decoded)
+        assertFalse(decoded.gradesCoverageComplete)
+        assertNull(decoded.resolveGeneralAverage())
+    }
+
+    @Test
+    fun `academic evidence and separate period candidates roundtrip per student`() {
+        val summary = snapshot.subjectSummaries.first().copy(
+            semesterEvidence = mapOf(1 to SemesterGradeEvidence(SchoolLevel.LYCEUM,
+                ThesisRequirement.REQUIRED, true, true, true)),
+            portalSemesterAverageCandidates = mapOf(1 to 7.75, 2 to 8.5),
+            portalAnnualAverageCandidate = 8.12,
+        )
+        val one = snapshot.copy(subjectSummaries = listOf(summary), gradesCoverageComplete = true)
+        val sibling = samples.getValue(SampleAgendaRepository.STUDENT_ELEVENTH_GRADE)
+        val store = AgendaSnapshotStore(temporary.newFolder(), cipher, "synthetic-account-a")
+        store.write(one)
+        store.write(sibling)
+        assertEquals(one, store.read(one.studentId))
+        assertEquals(sibling, store.read(sibling.studentId))
+        assertFalse(store.read(sibling.studentId)!!.gradesCoverageComplete)
+    }
+
+    @Test
+    fun `copied ciphertext cannot become another accounts offline cache`() {
+        val dir = temporary.newFolder()
+        val a = AgendaSnapshotStore(dir, cipher, "synthetic-account-a")
+        val b = AgendaSnapshotStore(dir, cipher, "synthetic-account-b")
+        a.write(snapshot)
+        val original = dir.walkTopDown().first { it.extension == "snapshot" }
+        val otherDirectory = java.io.File(dir, b.accountStorageId).apply { mkdirs() }
+        original.copyTo(java.io.File(otherDirectory, original.name))
+        assertNull(b.read(snapshot.studentId))
+        assertTrue(b.list().isEmpty())
+        assertEquals(snapshot, a.read(snapshot.studentId))
+    }
+
+    @Test
+    fun `renamed snapshot cannot advertise another student during offline enumeration`() {
+        val dir = temporary.newFolder()
+        val store = AgendaSnapshotStore(dir, cipher, "synthetic-account-a")
+        store.write(snapshot)
+        val original = dir.walkTopDown().first { it.extension == "snapshot" }
+        original.renameTo(java.io.File(original.parentFile, "wrong-student.snapshot"))
+        assertTrue(store.list().isEmpty())
+    }
 
     @Test
     fun `encrypted snapshot roundtrips all fields across a fresh store instance`() {
@@ -96,6 +155,36 @@ class AgendaSnapshotStoreTest {
         assertNull(a.read(snapshot.studentId))
         assertTrue(a.list().isEmpty())
         assertEquals(other, b.read(snapshot.studentId))
+    }
+
+    @Test
+    fun `account deletion failure is reported and can be retried`() {
+        val dir = temporary.newFolder()
+        var canDelete = false
+        val store = AgendaSnapshotStore(dir, cipher, "synthetic-account-a",
+            deleteAccountDirectory = { if (canDelete) it.deleteRecursively() else false })
+        store.write(snapshot)
+        assertTrue(runCatching { store.clear() }.isFailure)
+        assertEquals(snapshot, store.read(snapshot.studentId))
+        canDelete = true
+        store.clear()
+        store.clear()
+        assertTrue(store.list().isEmpty())
+    }
+
+    @Test
+    fun `pending logout cleanup accepts only scoped hashes and preserves other accounts`() {
+        val dir = temporary.newFolder()
+        val a = AgendaSnapshotStore(dir, cipher, "synthetic-account-a")
+        val b = AgendaSnapshotStore(dir, cipher, "synthetic-account-b")
+        a.write(snapshot)
+        b.write(snapshot)
+        assertTrue(runCatching { AgendaSnapshotStore.clearPendingLogout(dir, "../other") }.isFailure)
+        assertEquals(snapshot, a.read(snapshot.studentId))
+        AgendaSnapshotStore.clearPendingLogout(dir, a.accountStorageId)
+        AgendaSnapshotStore.clearPendingLogout(dir, a.accountStorageId)
+        assertTrue(a.list().isEmpty())
+        assertEquals(snapshot, b.read(snapshot.studentId))
     }
 
     @Test

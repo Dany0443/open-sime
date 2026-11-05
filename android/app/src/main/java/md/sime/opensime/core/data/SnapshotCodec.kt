@@ -84,6 +84,12 @@ internal object SnapshotCodec {
         "marks" to value.marks.map { encodeMarkItem(it) },
         "portalAverage" to value.portalAverage?.let { it },
         "scale" to value.scale.name,
+        "semesterEvidence" to value.semesterEvidence.mapKeys { it.key.toString() }.mapValues { (_, e) ->
+            mapOf("level" to e.level.name, "thesisRequirement" to e.thesisRequirement.name,
+                "complete" to e.complete, "classificationsConfirmed" to e.classificationsConfirmed, "deduplicated" to e.deduplicated)
+        },
+        "portalSemesterAverageCandidates" to value.portalSemesterAverageCandidates.mapKeys { it.key.toString() },
+        "portalAnnualAverageCandidate" to value.portalAnnualAverageCandidate,
     )
     private fun decodeSubjectMarksSummary(value: Any?): SubjectMarksSummary {
         val data = value as Map<*, *>
@@ -94,6 +100,20 @@ internal object SnapshotCodec {
             marks = (data["marks"] as List<*>).map { decodeMarkItem(it) },
             portalAverage = data["portalAverage"]?.let { (it as Number).toDouble() },
             scale = SubjectScale.valueOf(data["scale"] as String),
+            semesterEvidence = (data["semesterEvidence"] as? Map<*, *>)?.entries?.mapNotNull { (key, raw) ->
+                runCatching {
+                    val e = raw as Map<*, *>
+                    key.toString().toInt() to SemesterGradeEvidence(
+                        SchoolLevel.valueOf(e["level"] as String), ThesisRequirement.valueOf(e["thesisRequirement"] as String),
+                        e["complete"] as Boolean, e["classificationsConfirmed"] as Boolean, e["deduplicated"] as Boolean)
+                }.getOrNull()
+            }?.toMap().orEmpty(),
+            portalSemesterAverageCandidates = (data["portalSemesterAverageCandidates"] as? Map<*, *>)?.entries?.mapNotNull { (key, raw) ->
+                val semester = key.toString().toIntOrNull()
+                val value = (raw as? Number)?.toDouble()
+                if (semester != null && value != null) semester to value else null
+            }?.toMap().orEmpty(),
+            portalAnnualAverageCandidate = (data["portalAnnualAverageCandidate"] as? Number)?.toDouble(),
         )
     }
     private fun encodeLessonItem(value: LessonItem): Map<String, Any?> = mapOf(
@@ -218,6 +238,7 @@ internal object SnapshotCodec {
         "stale" to value.stale,
         "sem1AbsenceSummary" to value.sem1AbsenceSummary?.let { encodeAbsenceSummary(it) },
         "sem2AbsenceSummary" to value.sem2AbsenceSummary?.let { encodeAbsenceSummary(it) },
+        "gradesCoverageComplete" to value.gradesCoverageComplete,
     )
     private fun decodeStudentAgendaSnapshot(value: Any?): StudentAgendaSnapshot {
         val data = value as Map<*, *>
@@ -240,6 +261,7 @@ internal object SnapshotCodec {
             stale = data["stale"] as Boolean,
             sem1AbsenceSummary = data["sem1AbsenceSummary"]?.let { decodeAbsenceSummary(it) },
             sem2AbsenceSummary = data["sem2AbsenceSummary"]?.let { decodeAbsenceSummary(it) },
+            gradesCoverageComplete = data["gradesCoverageComplete"] as? Boolean ?: false,
         )
     }
 }

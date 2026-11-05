@@ -23,3 +23,12 @@ interface AgendaRepository {
     suspend fun getStudentSnapshot(studentId: StudentId): StudentAgendaSnapshot
 }
 
+/** Read-only snapshots already authorized and verified against one account's encrypted store. */
+internal class CachedAgendaRepository(snapshots: List<StudentAgendaSnapshot>) : AgendaRepository {
+    private val snapshotsByStudent = snapshots.associate { it.studentId to it.copy(stale = true) }
+    override fun listStudents(): List<StudentProfile> = snapshotsByStudent.values.map { it.student }
+    override suspend fun getStudentSnapshot(studentId: StudentId): StudentAgendaSnapshot =
+        snapshotsByStudent[studentId]?.verifyStudentOwnership(studentId)
+            ?: throw md.sime.opensime.core.model.StudentNotFoundException(studentId)
+}
+

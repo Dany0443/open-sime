@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import md.sime.opensime.core.designsystem.AppTextSize
 import md.sime.opensime.core.designsystem.LocalOpenSimeSemanticColors
 import md.sime.opensime.core.designsystem.OpenSimeIcons
 import md.sime.opensime.core.designsystem.OpenSimeSettingsState
@@ -43,16 +42,13 @@ import md.sime.opensime.core.i18n.LocalAppStrings
 
 /**
  * Port of `#settings-dialog` from `web/index.html` and `web/public/style.css:3230-3318`.
- * Contains only genuinely implemented settings (Language, Text size, Theme, Accessibility toggles).
+ * Contains language, theme and accessibility settings.
  */
 @Composable
 fun SettingsDialog(
     settings: OpenSimeSettingsState,
     onUpdateSettings: (OpenSimeSettingsState) -> Unit,
     onDismiss: () -> Unit,
-    hasSavedCredentials: Boolean = false,
-    savedLoginUsername: String? = null,
-    onForgetSavedCredentials: (() -> Unit)? = null,
     isLoggedIn: Boolean = false,
     onLogout: (() -> Unit)? = null,
 ) {
@@ -126,22 +122,7 @@ fun SettingsDialog(
                         )
                     }
 
-                    // Section 2: Text size (`Mărime text`)
-                    SettingsSection(title = strings.settingsTextSizeTitle) {
-                        SegmentedOptionRow(
-                            options = listOf(
-                                AppTextSize.S to strings.textSizeS,
-                                AppTextSize.M to strings.textSizeM,
-                                AppTextSize.L to strings.textSizeL,
-                                AppTextSize.XL to strings.textSizeXl,
-                            ),
-                            selectedOption = settings.textSize,
-                            onSelectOption = { onUpdateSettings(settings.copy(textSize = it)) },
-                            testTagPrefix = "setting_text_size",
-                        )
-                    }
-
-                    // Section 3: Theme (`Temă` - Light and Dark only)
+                    // Section 2: Theme (`Temă` - Light and Dark only)
                     SettingsSection(title = strings.settingsThemeTitle) {
                         SegmentedOptionRow(
                             options = listOf(
@@ -154,7 +135,7 @@ fun SettingsDialog(
                         )
                     }
 
-                    // Section 4: Accessibility options (`Opțiuni accesibilitate`)
+                    // Section 3: Accessibility options (`Opțiuni accesibilitate`)
                     SettingsSection(title = strings.settingsA11yTitle) {
                         Column {
                             SettingToggleRow(
@@ -183,63 +164,7 @@ fun SettingsDialog(
                         }
                     }
 
-                    // Section 5: Saved Login management (only if credentials exist in vault)
-                    if (hasSavedCredentials && onForgetSavedCredentials != null) {
-                        SettingsSection(title = strings.rememberMeLabel) {
-                            Surface(
-                                shape = MaterialTheme.shapes.large,
-                                color = colorScheme.surfaceContainerLow,
-                                border = if (highContrast) BorderStroke(1.5.dp, colorScheme.onSurface) else null,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("settings_saved_credentials_card"),
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = OpenSimeIcons.Lock,
-                                            contentDescription = null,
-                                            tint = colorScheme.primary,
-                                            modifier = Modifier.size(20.dp),
-                                        )
-                                        Text(
-                                            text = if (!savedLoginUsername.isNullOrBlank()) {
-                                                "${strings.studentLabel}: ${maskUsername(savedLoginUsername)}"
-                                            } else {
-                                                strings.rememberMeDesc
-                                            },
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = colorScheme.onSurface,
-                                        )
-                                    }
-                                    OutlinedButton(
-                                        onClick = onForgetSavedCredentials,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .sizeIn(minHeight = 48.dp)
-                                            .testTag("settings_action_forget_credentials"),
-                                    ) {
-                                        Icon(
-                                            imageVector = OpenSimeIcons.Delete,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .padding(end = 8.dp)
-                                                .size(18.dp),
-                                        )
-                                        Text(strings.forgetSavedLogin)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Section 6: Log out (only when active session exists)
+                    // Section 4: Log out (only when active session exists)
                     if (isLoggedIn && onLogout != null) {
                         SettingsSection(title = strings.logoutAction) {
                             OutlinedButton(
@@ -328,14 +253,5 @@ private fun SettingToggleRow(
                 color = colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-internal fun maskUsername(raw: String): String {
-    val trimmed = raw.trim()
-    return when {
-        trimmed.length <= 2 -> "***"
-        trimmed.length <= 4 -> "${trimmed.first()}***"
-        else -> "${trimmed.take(2)}***${trimmed.takeLast(1)}"
     }
 }

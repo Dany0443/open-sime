@@ -5,6 +5,9 @@ import md.sime.opensime.core.model.MarkValue
 import md.sime.opensime.core.model.QualifierCode
 import md.sime.opensime.core.model.StudentId
 import md.sime.opensime.core.model.SubjectScale
+import md.sime.opensime.core.model.SchoolLevel
+import md.sime.opensime.core.model.SemesterGradeEvidence
+import md.sime.opensime.core.model.ThesisRequirement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -18,6 +21,104 @@ import org.junit.Test
  * `src/test/resources/fixtures/portal/` as well as missing, malformed, empty, and edge-case inputs.
  */
 class SimePortalParserTest {
+
+    @Test fun `unscoped marks remain unknown when dashboard has current semester`() {
+        val page = SimePortalParser.parseFullPortal("""
+            <input id="P1_SEMESTER_NUMBER" value="2">
+            <table><tr><td headers="DISCIPLINA">Synthetic</td>
+            <td headers="LISTA_EVALUATION"><span>8</span></td></tr></table>
+        """.trimIndent(), todayIso = "2026-02-27")
+        assertEquals(2, page.metadata.currentSemester)
+        assertEquals(0, page.catalog.subjects.single().markDetails.single().semester)
+        val dashboard = SimePortalParser.parseFullPortal(
+            SimePortalFixtures.readFixture(SimePortalFixtures.DASHBOARD_STUDENT_A_HTML), todayIso = "2026-02-27")
+        val unscoped = dashboard.grades.first().copy(semester = null)
+        val snapshot = SimePortalParser.toStudentAgendaSnapshot(
+            dashboard.copy(grades = listOf(unscoped), metadata = dashboard.metadata.copy(currentSemester = 2)),
+            referenceIsoDate = "2026-02-27", expectedStudentId = StudentId("ID_101"))
+        assertEquals(0, snapshot.recentMarks.single().semester)
+    }
+
+    @Test fun `verified report scope and explicit mark periods are retained`() {
+        val report = SimePortalParser.parseSemesterReport("""
+            <table><tr><td headers="DISCIPLINA">Synthetic</td>
+            <td headers="LISTA_EVALUATION"><span>8</span></td></tr></table>
+        """.trimIndent())
+        val scoped = SimePortalParser.buildCatalog(listOf(SemesterReportInput(2, report)))
+        assertEquals(2, scoped.subjects.single().markDetails.single().semester)
+        val entry = report.getValue("Synthetic")
+        val explicit = entry.copy(marks = entry.marks.map { it.copy(semester = 1) })
+        val unscoped = SimePortalParser.buildCatalog(listOf(SemesterReportInput(0, mapOf("Synthetic" to explicit))))
+        assertEquals(1, unscoped.subjects.single().markDetails.single().semester)
+    }
+
+    @Test fun `conflicting mark and report periods remain unknown through mapping`() {
+        val report = SimePortalParser.parseSemesterReport("""
+            <table><tr><td headers="DISCIPLINA">Synthetic</td>
+            <td headers="LISTA_EVALUATION"><span>8</span></td></tr></table>
+        """.trimIndent())
+        val entry = report.getValue("Synthetic")
+        val conflict = entry.copy(marks = entry.marks.map { it.copy(semester = 1) })
+        val catalog = SimePortalParser.buildCatalog(listOf(SemesterReportInput(2, mapOf("Synthetic" to conflict))))
+        assertEquals(0, catalog.subjects.single().markDetails.single().semester)
+        val dashboard = SimePortalParser.parseFullPortal(
+            SimePortalFixtures.readFixture(SimePortalFixtures.DASHBOARD_STUDENT_A_HTML), todayIso = "2026-02-27")
+        val snapshot = SimePortalParser.toStudentAgendaSnapshot(dashboard.copy(catalog = catalog),
+            referenceIsoDate = "2026-02-27", expectedStudentId = StudentId("ID_101"))
+        assertEquals(0, snapshot.subjectSummaries.single().marks.single().semester)
+        assertNull(snapshot.subjectSummaries.single().resolveSemesterAverage(1))
+        assertNull(snapshot.subjectSummaries.single().resolveSemesterAverage(2))
+        val summary = snapshot.subjectSummaries.single()
+        val ambiguous = summary.marks.single()
+        val withEvidence = summary.copy(marks = listOf(ambiguous,
+            ambiguous.copy(id = "regular-1", semester = 1), ambiguous.copy(id = "regular-2", semester = 1)),
+            semesterEvidence = mapOf(1 to SemesterGradeEvidence(SchoolLevel.GYMNASIUM, ThesisRequirement.NONE,
+                complete = true, classificationsConfirmed = true, deduplicated = true)))
+        assertNull(withEvidence.resolveSemesterAverage(1))
+    }
+
+    @Test fun `unscoped report without semester metadata remains unassigned`() {
+        val page = SimePortalParser.parseFullPortal("""
+            <table><tr><td headers="DISCIPLINA">Synthetic</td>
+            <td headers="LISTA_EVALUATION"><span>8</span></td></tr></table>
+        """.trimIndent(), todayIso = "2026-10-27")
+        val marks = page.catalog.subjects.single().markDetails
+        assertEquals(1, marks.size)
+        assertEquals(0, marks.single().semester)
+        val dashboard = SimePortalParser.parseFullPortal(
+            SimePortalFixtures.readFixture(SimePortalFixtures.DASHBOARD_STUDENT_A_HTML), todayIso = "2026-10-27")
+        val snapshot = SimePortalParser.toStudentAgendaSnapshot(
+            dashboard.copy(catalog = page.catalog, metadata = dashboard.metadata.copy(currentSemester = null)),
+            referenceIsoDate = "2026-10-27", expectedStudentId = StudentId("ID_101"))
+        assertEquals(0, snapshot.subjectSummaries.single().marks.single().semester)
+    }
+
+    @Test
+    fun `semester and annual portal candidates stay separate and unverified`() {
+        val report = SimePortalParser.parseSemesterReport(SimePortalFixtures.readFixture(SimePortalFixtures.REPORT_SEM1_HTML))
+        val catalog = SimePortalParser.buildCatalog(listOf(SemesterReportInput(1, report)), mapOf("Fizica" to 9.25))
+        val page = SimePortalParser.parseFullPortal(SimePortalFixtures.readFixture(SimePortalFixtures.DASHBOARD_STUDENT_A_HTML),
+            todayIso = "2026-10-27").copy(catalog = catalog)
+        val snapshot = SimePortalParser.toStudentAgendaSnapshot(page, referenceIsoDate = "2026-10-27",
+            expectedStudentId = StudentId("ID_101"))
+        val physics = snapshot.subjectSummaries.first { it.subject == "Fizica" }
+        assertEquals(9.0, physics.portalSemesterAverageCandidates.getValue(1), 0.0)
+        assertEquals(9.25, physics.portalAnnualAverageCandidate!!, 0.0)
+        assertNull(physics.resolveAverage())
+        assertNull(physics.resolveSemesterAverage(1))
+    }
+
+    @Test
+    fun `grade cells preserve decimal commas and reject zero as numeric`() {
+        val report = SimePortalParser.parseSemesterReport("""
+            <table><tr><td headers="DISCIPLINA">Synthetic</td>
+            <td headers="LISTA_EVALUATION"><span>8,75</span><span>0</span></td></tr></table>
+        """.trimIndent())
+        val marks = report.getValue("Synthetic").marks
+        assertEquals(2, marks.size)
+        assertEquals(8.75, marks[0].value!!, 0.0)
+        assertEquals("other", marks[1].kind)
+    }
 
     // =========================================================================
     // 1. Public Entry & Login Dialog / Handshake Parsing
@@ -279,16 +380,13 @@ class SimePortalParserTest {
 
         val physicsSummary = summariesBySubject.getValue("Fizica")
         val physicsAvg = physicsSummary.resolveAverage()
-        assertNotNull(physicsAvg)
-        assertEquals(9.0, physicsAvg!!.value, 0.001)
-        assertFalse("Portal-provided MED_SEM must not be marked estimated", physicsAvg.isEstimated)
+        assertNull("An unverified portal average cannot be promoted to an official result", physicsAvg)
+        assertEquals(9.0, physicsSummary.portalSemesterAverageCandidates.getValue(1), 0.001)
         assertTrue(physicsSummary.marks.any { it.isThesis })
 
         val historySummary = summariesBySubject.getValue("Istoria românilor și universală")
         val historyAvg = historySummary.resolveAverage()
-        assertNotNull(historyAvg)
-        assertEquals(8.75, historyAvg!!.value, 0.001)
-        assertTrue("Missing MED_SEM must be marked isEstimated = true", historyAvg.isEstimated)
+        assertNull("Unknown thesis classification and incomplete evidence cannot yield an average", historyAvg)
         assertTrue(historySummary.marks.any { (it.value as? MarkValue.Numeric)?.decimalScore == 9.5 })
 
         val musicSummary = summariesBySubject.getValue("Educație muzicală")
@@ -378,11 +476,10 @@ class SimePortalParserTest {
         )
         val mathSummary = snapshot.subjectSummaries.first { it.subject == "Matematica" }
         val resolvedAvg = mathSummary.resolveAverage()
-        assertNotNull(resolvedAvg)
-        assertTrue(
-            "When Sem 2 has no official MED_SEM and no MED_AN is present, overall subject average must be marked isEstimated = true",
-            resolvedAvg!!.isEstimated,
-        )
+        assertNull("Incomplete and unverified semester data cannot yield an annual average", resolvedAvg)
+        // The dashboard's inline report precedes the extra report for the same subject/semester.
+        assertEquals(9.5, sem1Report.getValue("Matematica").semesterAverage!!, 0.001)
+        assertEquals(9.0, mathSummary.portalSemesterAverageCandidates.getValue(1), 0.001)
 
         // Verify MarkValue.Numeric rejects inconsistent integer score vs decimalScore
         assertThrows(IllegalArgumentException::class.java) {

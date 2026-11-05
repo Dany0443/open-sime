@@ -5,9 +5,29 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import md.sime.opensime.BuildConfig
 import md.sime.opensime.core.model.AccountRole
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.core.model.StudentId
+
+// Resolved only in debug builds; the observer and its Application are absent from release.
+private fun debugSchemaCall(method: String, types: Array<Class<*>>, vararg args: Any): Any? = try {
+    Class.forName("md.sime.opensime.core.portal.DebugGradeSchemaInspector")
+        .getMethod(method, *types).invoke(null, *args)
+} catch (_: Exception) {
+    null
+}
+
+private fun debugSchemaBegin(session: SimePortalSession, student: String, pageStudent: String, html: String): Long =
+    debugSchemaCall("begin", arrayOf(SimePortalSession::class.java, String::class.java, String::class.java, String::class.java), session, student, pageStudent, html) as? Long ?: 0L
+
+private fun debugSchemaReport(token: Long, semester: Int, html: String) {
+    debugSchemaCall("report", arrayOf(Long::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, String::class.java), token, semester, html)
+}
+
+private fun debugSchemaFinish(token: Long, verified: Boolean) {
+    debugSchemaCall("finish", arrayOf(Long::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!), token, verified)
+}
 
 /**
  * High-level portal client for reading student-scoped agenda data from `agenda.sime.md`.
@@ -56,13 +76,24 @@ open class SimePortalClient(
      * Mirrors `SimeClient.withRetry` in `web/server.js:2264-2272`.
      */
     suspend fun <T> withRetry(operation: suspend () -> T): T {
+        val generation = session.sessionGeneration
+        val logoutGeneration = session.logoutGeneration
+        val requestContext = currentCoroutineContext()
+        fun ensureCurrent() {
+            requestContext.ensureActive()
+            if (session.logoutGeneration != logoutGeneration) throw CancellationException("Logged out")
+        }
+        ensureCurrent()
         try {
             return operation()
         } catch (err: SimeSessionExpiredError) {
             val relogin = reloginAction ?: throw err
             reloginMutex.withLock {
-                relogin()
+                ensureCurrent()
+                // Another expiry retry may already have completed the same reauthentication.
+                if (session.sessionGeneration == generation || !session.isAuthenticated) relogin()
             }
+            ensureCurrent()
             return operation()
         }
     }
@@ -82,6 +113,7 @@ open class SimePortalClient(
         page: PortalStudentDashboardPage,
         ajaxId: String,
         extra: Map<String, String> = emptyMap(),
+        debugInspectionReport: Boolean = false,
     ): String {
         val cleanAjaxId = ajaxId.trim()
         if (cleanAjaxId.isEmpty()) {
@@ -130,6 +162,7 @@ open class SimePortalClient(
             headers = headers,
             kind = SimeRequestKind.XHR,
             gated = false,
+            debugInspectionReport = debugInspectionReport,
         )
         return resp.text
     }
@@ -163,75 +196,89 @@ open class SimePortalClient(
             }
         }
 
-        val extraReports = mutableListOf<SemesterReportInput>()
-        val doc = SimeDomHelpers.parseHtml(page.html)
+        val inspectionToken = if (BuildConfig.DEBUG && !requestedStudentId.isNullOrBlank() && page.studentKey.isNotEmpty()) {
+            debugSchemaBegin(session, session.canonicalStudentKey(requestedStudentId), page.studentKey, page.html)
+        } else 0L
+        var inspectionVerified = false
+        try {
+            val extraReports = mutableListOf<SemesterReportInput>()
+            val doc = SimeDomHelpers.parseHtml(page.html)
 
-        for (region in SimePortalParser.REGIONS) {
-            val inlineScope = SimePortalParser.findSemesterScope(doc, region)
-            if (inlineScope != null && SimePortalParser.parseSemesterReportFromRoot(inlineScope).isNotEmpty()) {
-                continue
-            }
-            val ajaxId = SimePortalParser.findReportAjaxId(page.html, region.id) ?: continue
-            try {
-                val repHtml = ajax(page, ajaxId)
-                val rep = SimePortalParser.parseSemesterReport(repHtml)
-                if (rep.isNotEmpty()) {
-                    extraReports.add(SemesterReportInput(semester = region.semester, report = rep))
+            for (region in SimePortalParser.REGIONS) {
+                val inlineScope = SimePortalParser.findSemesterScope(doc, region)
+                if (inlineScope != null && SimePortalParser.parseSemesterReportFromRoot(inlineScope).isNotEmpty()) {
+                    continue
                 }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (err: SimeSessionExpiredError) {
-                throw err
-            } catch (err: SimeStudentMismatchError) {
-                throw err
-            } catch (err: Exception) {
-                if (requireComplete) throw err
-                // fallback to inline report data
+                val ajaxId = SimePortalParser.findReportAjaxId(page.html, region.id) ?: continue
+                try {
+                    val repHtml = ajax(page, ajaxId, debugInspectionReport = true)
+                    if (BuildConfig.DEBUG && inspectionToken != 0L) {
+                        debugSchemaReport(inspectionToken, region.semester, repHtml)
+                    }
+                    val rep = SimePortalParser.parseSemesterReport(repHtml)
+                    if (rep.isNotEmpty()) {
+                        extraReports.add(SemesterReportInput(semester = region.semester, report = rep))
+                    }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (err: SimeSessionExpiredError) {
+                    throw err
+                } catch (err: SimeStudentMismatchError) {
+                    throw err
+                } catch (err: Exception) {
+                    if (BuildConfig.DEBUG && inspectionToken != 0L) debugSchemaFinish(inspectionToken, false)
+                    if (requireComplete) throw err
+                    // fallback to inline report data
+                }
             }
-        }
 
-        val data = SimePortalParser.parseFullPortal(
-            html = page.html,
-            todayIso = todayProvider(),
-            extraReports = extraReports,
-            extraCalendar = extraCalendar,
-        )
-
-        val pageKey = page.studentKey.ifEmpty { SimeStudentParser.studentKey(data.student.id) }
-        if (!requestedStudentId.isNullOrBlank()) {
-            val canonRequested = session.canonicalStudentKey(requestedStudentId)
-                .ifEmpty { SimeStudentParser.studentKey(requestedStudentId) }
-            if (canonRequested.isNotEmpty() && canonRequested != pageKey) {
-                throw SimeStudentMismatchError(
-                    message = "Portal page belongs to another student than $requestedStudentId",
-                    requestedStudentId = StudentId(canonRequested),
-                    actualStudentId = pageKey.takeIf { it.isNotEmpty() }?.let(::StudentId),
-                )
-            }
-        }
-
-        val own = if (pageKey.isNotEmpty()) session.listStudents().firstOrNull { it.id == pageKey } else null
-        val canonicalProfile = if (pageKey.isNotEmpty()) {
-            data.metadata.copy(
-                id = pageKey,
-                fullName = data.metadata.fullName.ifEmpty { own?.fullName ?: pageKey },
-                className = data.metadata.className ?: own?.className,
-                schoolName = data.metadata.schoolName ?: own?.schoolName,
+            val data = SimePortalParser.parseFullPortal(
+                html = page.html,
+                todayIso = todayProvider(),
+                extraReports = extraReports,
+                extraCalendar = extraCalendar,
             )
-        } else {
-            data.metadata
-        }
 
-        return data.copy(
-            metadata = canonicalProfile,
-            student = ParsedStudentProfile(
-                id = canonicalProfile.id,
-                fullName = canonicalProfile.fullName,
-                className = canonicalProfile.className,
-                schoolName = canonicalProfile.schoolName,
-            ),
-            students = session.listStudents(),
-        )
+            val pageKey = page.studentKey.ifEmpty { SimeStudentParser.studentKey(data.student.id) }
+            if (!requestedStudentId.isNullOrBlank()) {
+                val canonRequested = session.canonicalStudentKey(requestedStudentId)
+                    .ifEmpty { SimeStudentParser.studentKey(requestedStudentId) }
+                if (canonRequested.isNotEmpty() && canonRequested != pageKey) {
+                    throw SimeStudentMismatchError(
+                        message = "Portal page belongs to another student than $requestedStudentId",
+                        requestedStudentId = StudentId(canonRequested),
+                        actualStudentId = pageKey.takeIf { it.isNotEmpty() }?.let(::StudentId),
+                    )
+                }
+            }
+
+            val own = if (pageKey.isNotEmpty()) session.listStudents().firstOrNull { it.id == pageKey } else null
+            val canonicalProfile = if (pageKey.isNotEmpty()) {
+                data.metadata.copy(
+                    id = pageKey,
+                    fullName = data.metadata.fullName.ifEmpty { own?.fullName ?: pageKey },
+                    className = data.metadata.className ?: own?.className,
+                    schoolName = data.metadata.schoolName ?: own?.schoolName,
+                )
+            } else {
+                data.metadata
+            }
+
+            val result = data.copy(
+                metadata = canonicalProfile,
+                student = ParsedStudentProfile(
+                    id = canonicalProfile.id,
+                    fullName = canonicalProfile.fullName,
+                    className = canonicalProfile.className,
+                    schoolName = canonicalProfile.schoolName,
+                ),
+                students = session.listStudents(),
+            )
+            inspectionVerified = true
+            return result
+        } finally {
+            if (BuildConfig.DEBUG && inspectionToken != 0L) debugSchemaFinish(inspectionToken, inspectionVerified)
+        }
     }
 
     /**
@@ -320,7 +367,7 @@ open class SimePortalClient(
         val reports = mutableListOf<SemesterReportInput>()
         for (region in SimePortalParser.REGIONS) {
             val ajaxId = SimePortalParser.findReportAjaxId(page.html, region.id) ?: continue
-            val repHtml = ajax(page, ajaxId)
+            val repHtml = ajax(page, ajaxId, debugInspectionReport = true)
             val rep = SimePortalParser.parseSemesterReport(repHtml)
             if (rep.isNotEmpty()) {
                 reports.add(SemesterReportInput(semester = region.semester, report = rep))

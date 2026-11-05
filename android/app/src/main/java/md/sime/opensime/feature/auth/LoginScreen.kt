@@ -65,7 +65,7 @@ import md.sime.opensime.core.model.AccountRole
  * 1. Full-screen experience (replaces modal dialog).
  * 2. Back navigation returns to the landing screen without clearing credentials or logging out.
  * 3. Account type selector defaults to PARENT for new manual logins and makes the distinction obvious.
- * 4. Remember me is strictly optional and off by default.
+ * 4. Remember me is optional and enabled by default; password input stays in memory only.
  * 5. Supports light/dark themes, accessibility, password autofill, and 48dp touch targets.
  */
 @Composable
@@ -76,6 +76,7 @@ fun LoginScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    showRememberMe: Boolean = true,
 ) {
     val strings = LocalAppStrings.current
     val colorScheme = MaterialTheme.colorScheme
@@ -83,11 +84,11 @@ fun LoginScreen(
     val scrollState = rememberScrollState()
 
     var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     // Requirement: Default to Parent for any new manual login attempt
     var selectedRole by rememberSaveable { mutableStateOf(AccountRole.PARENT) }
-    var rememberMe by rememberSaveable { mutableStateOf(false) }
-    var passwordVisible by rememberSaveable { mutableStateOf(false) }
+    var rememberMe by rememberSaveable { mutableStateOf(true) }
+    var passwordVisible by remember { mutableStateOf(false) }
     var localValidationMessage by remember { mutableStateOf<String?>(null) }
 
     // Intercept Android hardware/gesture back without discarding saved credentials
@@ -96,6 +97,7 @@ fun LoginScreen(
     }
 
     fun submit() {
+        if (isAuthenticating) return
         val trimmedUser = username.trim()
         if (trimmedUser.isBlank() || password.isBlank()) {
             localValidationMessage = strings.loginRequired
@@ -297,8 +299,8 @@ fun LoginScreen(
                         .testTag("auth_password_input"),
                 )
 
-                // Remember me checkbox (strictly off-by-default)
-                Row(
+                // Optional encrypted persistence, enabled by default.
+                if (showRememberMe) Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(

@@ -1,5 +1,11 @@
 package md.sime.opensime.core.portal
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -26,6 +32,68 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.HttpsURLConnection
 
 class SimeHttpTransportTest {
+
+    @Test
+    fun `cancelled hop cannot store cookies referer or follow a redirect`() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        var hops = 0
+        val transport = SimeHttpTransport(globalBreaker = CircuitBreaker(), executor = SimeHttpExecutor {
+            if (++hops == 1) {
+                withContext(NonCancellable) { release.await() }
+                SimeHttpExecutor.RawHopResponse(302, mapOf(
+                    "Set-Cookie" to listOf("synthetic_session=late; Path=/; Secure"),
+                    "Location" to listOf("/ords/r/agenda/main/1")), byteArrayOf())
+            } else SimeHttpExecutor.RawHopResponse(200, emptyMap(), byteArrayOf())
+        })
+        val request = launch(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { transport.request("GET", SimeUrlValidator.PUBLIC_PORTAL_URL) }
+        }
+        request.cancel()
+        release.complete(Unit)
+        request.join()
+        assertEquals(1, hops)
+        assertTrue(transport.cookies.isEmpty())
+        assertNull(transport.lastUrl)
+    }
+
+    @Test
+    fun `cancelled blocking timeout remains cancellation and does not update transport state`() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        var failure: Throwable? = null
+        val transport = SimeHttpTransport(globalBreaker = CircuitBreaker(), executor = SimeHttpExecutor {
+            withContext(NonCancellable) { release.await() }
+            throw SocketTimeoutException("Synthetic timeout")
+        })
+        val request = launch(start = CoroutineStart.UNDISPATCHED) {
+            failure = runCatching { transport.request("GET", SimeUrlValidator.PUBLIC_PORTAL_URL) }.exceptionOrNull()
+        }
+        request.cancel()
+        release.complete(Unit)
+        request.join()
+        assertTrue(failure is CancellationException)
+        assertTrue(transport.cookies.isEmpty())
+        assertNull(transport.lastUrl)
+    }
+
+    @Test
+    fun `clearing transport invalidates an unfinished hop without deleting newer cookies`() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val transport = SimeHttpTransport(globalBreaker = CircuitBreaker(), executor = SimeHttpExecutor {
+            release.await()
+            SimeHttpExecutor.RawHopResponse(200, mapOf(
+                "Set-Cookie" to listOf("synthetic_session=obsolete; Path=/; Secure")), byteArrayOf())
+        })
+        val request = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { transport.request("GET", SimeUrlValidator.PUBLIC_PORTAL_URL) }
+        }
+        transport.clearCookies()
+        transport.cookies.storeFromResponse(SimeUrlValidator.PUBLIC_PORTAL_URL,
+            listOf("synthetic_session=current; Path=/; Secure"))
+        release.complete(Unit)
+        assertTrue(request.await().exceptionOrNull() is CancellationException)
+        assertEquals("synthetic_session=current", transport.cookies.cookieHeader(SimeUrlValidator.PUBLIC_PORTAL_URL))
+        assertNull(transport.lastUrl)
+    }
 
     // -------------------------------------------------------------------------
     // 1. SimeCookieJar: Domain, Path, Secure, Expiry, Eviction, Redaction, Concurrency

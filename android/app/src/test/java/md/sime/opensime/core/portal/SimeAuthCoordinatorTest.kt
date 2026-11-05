@@ -1,5 +1,9 @@
 package md.sime.opensime.core.portal
 
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -31,6 +35,89 @@ class SimeAuthCoordinatorTest {
     private val loginUntrustedRedirectJson = SimePortalFixtures.readFixture(SimePortalFixtures.LOGIN_RESPONSE_UNTRUSTED_REDIRECT_JSON)
     private val dashboardStudentAHtml = SimePortalFixtures.readFixture(SimePortalFixtures.DASHBOARD_STUDENT_A_HTML)
     private val dashboardStudentBHtml = SimePortalFixtures.readFixture(SimePortalFixtures.DASHBOARD_STUDENT_B_HTML)
+
+    @Test
+    fun `already cancelled switch cannot change the active student before acquiring the mutex`() = runBlocking {
+        val coordinator = createTwoStudentCoordinator()
+        coordinator.login("synthetic-user", "synthetic-password")
+        val original = coordinator.activeSnapshot
+        val originalId = coordinator.activeStudentId
+        val switch = launch(start = CoroutineStart.UNDISPATCHED) {
+            currentCoroutineContext().cancel()
+            runCatching { coordinator.switchStudent("ID_601", forceRefresh = true) }
+        }
+        switch.join()
+        assertEquals(originalId, coordinator.activeStudentId)
+        assertEquals(original, coordinator.activeSnapshot)
+        assertNull(coordinator.lastError)
+    }
+
+    @Test
+    fun `logout while parsing a student response cannot recreate its aliases or snapshots`() = runBlocking {
+        lateinit var coordinator: SimeAuthCoordinator
+        var logoutDuringParse = false
+        coordinator = createCoordinator(todayProvider = {
+            if (logoutDuringParse) { logoutDuringParse = false; coordinator.logout() }
+            "2026-10-20"
+        }) { request ->
+            when {
+                request.url == SimeUrlValidator.PUBLIC_PORTAL_URL -> htmlResponse(publicEntryHtml)
+                request.url.contains("login_desktop") -> htmlResponse(validDialogHtml)
+                request.method == "POST" -> jsonResponse(loginSuccessJson)
+                request.url.contains("P1_ELEVE_ID:ID_601") -> htmlResponse(dashboardStudentBHtml)
+                else -> htmlResponse(dashboardStudentAHtml)
+            }
+        }
+        coordinator.login("synthetic-user", "synthetic-password")
+        logoutDuringParse = true
+        runCatching { coordinator.switchStudent("ID_601", forceRefresh = true) }
+        assertFalse(coordinator.isAuthenticated)
+        assertNull(coordinator.activeSnapshot)
+        assertTrue(coordinator.availableStudents().isEmpty())
+        assertEquals("", coordinator.session.canonicalStudentKey("ID_601"))
+        assertNull(coordinator.lastError)
+    }
+
+    @Test
+    fun `logout invalidates a queued login before it can contact the portal`() = runBlocking {
+        var requests = 0
+        val coordinator = createCoordinator { requests++; htmlResponse(publicEntryHtml) }
+        coordinator.operationMutex.lock()
+        val queued = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { coordinator.login("synthetic-user", "synthetic-password") }
+        }
+        coordinator.logout()
+        coordinator.operationMutex.unlock()
+        assertTrue(queued.await().exceptionOrNull() is CancellationException)
+        assertEquals(0, requests)
+        assertFalse(coordinator.isAuthenticated)
+        assertNull(coordinator.lastError)
+    }
+
+    @Test
+    fun `cleared portal session cannot be restored by a late landing response`() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val coordinator = createCoordinator { request ->
+            when {
+                request.url == SimeUrlValidator.PUBLIC_PORTAL_URL -> htmlResponse(publicEntryHtml)
+                request.url.contains("login_desktop") -> htmlResponse(validDialogHtml)
+                request.method == "POST" -> jsonResponse(loginSuccessJson)
+                else -> { release.await(); htmlResponse(dashboardStudentAHtml) }
+            }
+        }
+        val request = async(start = CoroutineStart.UNDISPATCHED) {
+            runCatching { coordinator.session.login("synthetic-user", "synthetic-password") }
+        }
+        coordinator.session.clear()
+        coordinator.session.http.cookies.storeFromResponse(SimeUrlValidator.PUBLIC_PORTAL_URL,
+            listOf("synthetic_session=current; Path=/; Secure"))
+        release.complete(Unit)
+        assertTrue(request.await().exceptionOrNull() is CancellationException)
+        assertFalse(coordinator.isAuthenticated)
+        assertTrue(coordinator.session.listStudents().isEmpty())
+        assertEquals("", coordinator.session.currentStudentKey)
+        assertEquals("synthetic_session=current", coordinator.session.http.cookies.cookieHeader(SimeUrlValidator.PUBLIC_PORTAL_URL))
+    }
 
     // -------------------------------------------------------------------------
     // 1. Successful 4-Step Login Sequence & Dashboard Verification
@@ -666,6 +753,7 @@ class SimeAuthCoordinatorTest {
 
     private fun createCoordinator(
         nowMillis: () -> Long = System::currentTimeMillis,
+        todayProvider: () -> String = { "2026-10-20" },
         handler: suspend (SimeHttpExecutor.RawHopRequest) -> SimeHttpExecutor.RawHopResponse,
     ): SimeAuthCoordinator {
         val transport = SimeHttpTransport(
@@ -677,7 +765,7 @@ class SimeAuthCoordinatorTest {
         val session = SimePortalSession(
             http = transport,
             nowMillis = nowMillis,
-            todayProvider = { "2026-10-20" },
+            todayProvider = todayProvider,
         )
         return SimeAuthCoordinator(
             session = session,

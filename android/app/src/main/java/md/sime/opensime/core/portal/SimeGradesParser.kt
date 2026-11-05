@@ -3,7 +3,6 @@ package md.sime.opensime.core.portal
 import md.sime.opensime.core.model.QualifierCode
 import md.sime.opensime.core.portal.SimeDomHelpers.classContains
 import md.sime.opensime.core.portal.SimeDomHelpers.headerHas
-import md.sime.opensime.core.portal.SimeDomHelpers.mean
 import md.sime.opensime.core.portal.SimeDomHelpers.parseFragment
 import md.sime.opensime.core.portal.SimeDomHelpers.parseHtml
 import md.sime.opensime.core.portal.SimeDomHelpers.textOf
@@ -125,7 +124,7 @@ internal object SimeGradesParser {
         }
 
         val numVal = toFloat(raw)
-        if (numVal != null && numVal in 0.0..10.0) {
+        if (numVal != null && numVal in 1.0..10.0) {
             val formattedLabel = if (numVal == numVal.toLong().toDouble()) {
                 numVal.toLong().toString()
             } else {
@@ -171,7 +170,7 @@ internal object SimeGradesParser {
                     (!rawAttr.isNullOrEmpty() && TEZA_RE.containsMatchIn(rawAttr)) ||
                     (parentClass.isNotEmpty() && TEZA_RE.containsMatchIn(parentClass))
 
-            val tokens = splitMarkTokens(text)
+            val tokens = if (toFloat(text) != null) listOf(text) else splitMarkTokens(text)
             if (tokens.size > 1) {
                 for (tok in tokens) {
                     val m = normalizeMark(tok, rawAttr, isThesis, semester)
@@ -184,7 +183,8 @@ internal object SimeGradesParser {
         }
         if (marks.isNotEmpty()) return marks
 
-        for (token in splitMarkTokens(textOf(cell, " "))) {
+        val cellText = textOf(cell, " ")
+        for (token in if (toFloat(cellText) != null) listOf(cellText) else splitMarkTokens(cellText)) {
             val m = normalizeMark(token, null, false, semester)
             if (m != null) marks.add(m)
         }
@@ -382,18 +382,11 @@ internal object SimeGradesParser {
             for ((name, entry) in report) {
                 val s = subjects.getOrPut(name) { MutableSubjectAccum(subject = name) }
                 if (s.teacher == null) s.teacher = entry.teacher
-                val values = entry.marks
-                    .filter { it.kind == "numeric" && it.value != null }
-                    .mapNotNull { it.value }
                 val existing = s.semesters.firstOrNull { it.semester == semester }
                 if (existing != null) {
                     if (existing.marks.isEmpty() && entry.marks.isNotEmpty()) {
                         existing.marks = entry.marks
                     }
-                    val existVals = existing.marks
-                        .filter { it.kind == "numeric" && it.value != null }
-                        .mapNotNull { it.value }
-                    existing.average = mean(existVals)
                     if (existing.officialAverage == null && entry.semesterAverage !== null) {
                         existing.officialAverage = entry.semesterAverage
                     }
@@ -402,7 +395,7 @@ internal object SimeGradesParser {
                         MutableSemEntry(
                             semester = semester,
                             marks = entry.marks,
-                            average = mean(values),
+                            average = null,
                             officialAverage = entry.semesterAverage,
                         ),
                     )
@@ -423,8 +416,8 @@ internal object SimeGradesParser {
                 }
             val sem1 = sortedSemesters.firstOrNull { it.semester == 1 }
             val sem2 = sortedSemesters.firstOrNull { it.semester == 2 }
-            val sem1Average = sem1?.let { it.officialAverage ?: it.average }
-            val sem2Average = sem2?.let { it.officialAverage ?: it.average }
+            val sem1Average = sem1?.officialAverage
+            val sem2Average = sem2?.officialAverage
 
             val markDetails = sortedSemesters.flatMap { semEntry ->
                 semEntry.marks.map { m ->
@@ -435,7 +428,12 @@ internal object SimeGradesParser {
                         raw = m.raw.ifEmpty { m.value?.toString() ?: m.label },
                         isThesis = m.isThesis,
                         date = m.date,
-                        semester = semEntry.semester,
+                        semester = when {
+                            semEntry.semester in 1..2 && m.semester in 1..2 && semEntry.semester != m.semester -> 0
+                            semEntry.semester in 1..2 -> semEntry.semester
+                            m.semester in 1..2 -> m.semester!!
+                            else -> 0
+                        },
                         subject = s.subject,
                     )
                 }
@@ -445,28 +443,8 @@ internal object SimeGradesParser {
                 .filter { it.kind == "numeric" && it.value != null }
                 .mapNotNull { it.value }
             val markCount = if (numericMarks.isNotEmpty()) numericMarks.size else markDetails.size
-            val official = sortedSemesters.mapNotNull { it.officialAverage }
-            val computedAverage = if (numericMarks.isNotEmpty()) {
-                mean(numericMarks)
-            } else {
-                mean(official)
-            }
             val explicitAnnual = annualMap[s.subject]
-            val annualAverage = explicitAnnual ?: if (sem1Average != null && sem2Average != null) {
-                mean(listOf(sem1Average, sem2Average))
-            } else {
-                computedAverage
-            }
-            val average = computedAverage ?: annualAverage
             val scale = getSubjectScale(s.subject)
-
-            // Only treat a subject's overall average as non-estimated when the portal provided an explicit
-            // annual average (MED_AN), or when only one semester is present and it has an official MED_SEM.
-            val officialPortalAverage = explicitAnnual ?: if (sortedSemesters.size == 1) {
-                sortedSemesters[0].officialAverage
-            } else {
-                null
-            }
 
             ParsedCatalogSubject(
                 subject = s.subject,
@@ -478,25 +456,19 @@ internal object SimeGradesParser {
                 markCount = markCount,
                 sem1Average = sem1Average,
                 sem2Average = sem2Average,
-                annualAverage = annualAverage,
-                average = average,
-                officialPortalAverage = officialPortalAverage,
+                annualAverage = explicitAnnual,
+                average = null,
+                officialPortalAverage = null,
             )
         }.sortedWith { a, b -> a.subject.compareTo(b.subject) }
-
-        val averages = list.mapNotNull { it.average }
-        val sem1Avgs = list.mapNotNull { it.sem1Average }
-        val sem2Avgs = list.mapNotNull { it.sem2Average }
-        val annualAvgs = list.mapNotNull { it.annualAverage }
-        val generalAverage = mean(averages)
 
         return ParsedCatalog(
             subjects = list,
             disciplines = list,
-            sem1GeneralAverage = mean(sem1Avgs),
-            sem2GeneralAverage = mean(sem2Avgs),
-            annualGeneralAverage = mean(annualAvgs) ?: generalAverage,
-            generalAverage = generalAverage,
+            sem1GeneralAverage = null,
+            sem2GeneralAverage = null,
+            annualGeneralAverage = null,
+            generalAverage = null,
         )
     }
 

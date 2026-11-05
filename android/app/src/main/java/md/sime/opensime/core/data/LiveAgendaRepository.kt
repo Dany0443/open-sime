@@ -48,10 +48,12 @@ class LiveAgendaRepository(
     )
 
     private val cacheLock = Any()
+    private var loggedOut = false
     private val snapshotCache = linkedMapOf<StudentId, CachedSnapshot>()
     private val inFlight = mutableMapOf<Pair<Long, StudentId>, CompletableDeferred<StudentAgendaSnapshot>>()
 
     override fun listStudents(): List<StudentProfile> {
+        if (synchronized(cacheLock) { loggedOut }) return emptyList()
         val coordinatorStudents = authCoordinator?.availableStudents()
         if (!coordinatorStudents.isNullOrEmpty()) {
             return coordinatorStudents
@@ -60,6 +62,7 @@ class LiveAgendaRepository(
     }
 
     override suspend fun getStudentSnapshot(studentId: StudentId): StudentAgendaSnapshot {
+        ensureNotLoggedOut()
         val rawInput = studentId.value.trim()
         if (rawInput.isEmpty()) {
             throw StudentNotFoundException(studentId)
@@ -76,10 +79,11 @@ class LiveAgendaRepository(
 
         // 1. Check in-memory student-keyed TTL cache for current session generation
         val cached = synchronized(cacheLock) {
+            if (loggedOut) throw CancellationException("Logged out")
             val entry = snapshotCache[canonicalId]
             if (entry != null && entry.sessionGeneration == currentGen) entry else null
         } ?: restorePersisted(canonicalId, currentGen)
-        if (cached != null && (now - cached.cachedAtEpochMillis) < overviewTtlMillis) {
+        if (cached != null && (now - cached.cachedAtEpochMillis) in 0 until overviewTtlMillis) {
             return cached.snapshot.verifyStudentOwnership(canonicalId)
         }
 
@@ -91,6 +95,7 @@ class LiveAgendaRepository(
         return try {
             reconcileStudent(canonicalId)
         } catch (err: Throwable) {
+            ensureNotLoggedOut()
             if (cached != null && currentGen == client.session.sessionGeneration && isUpstreamTransientFailure(err)) {
                 return cached.snapshot.verifyStudentOwnership(canonicalId).copy(stale = true)
             }
@@ -100,13 +105,17 @@ class LiveAgendaRepository(
 
     /** One authoritative transaction per student/session; failures never publish partial data. */
     suspend fun reconcileStudent(studentId: StudentId): StudentAgendaSnapshot {
+        ensureNotLoggedOut()
         val key = client.session.canonicalStudentKey(studentId.value.trim())
         if (key.isEmpty()) throw StudentNotFoundException(studentId)
         val id = StudentId(key)
         val generation = client.session.sessionGeneration
         val requestKey = generation to id
         val mine = CompletableDeferred<StudentAgendaSnapshot>()
-        val request = synchronized(cacheLock) { inFlight.getOrPut(requestKey) { mine } }
+        val request = synchronized(cacheLock) {
+            if (loggedOut) throw CancellationException("Logged out")
+            inFlight.getOrPut(requestKey) { mine }
+        }
         if (request !== mine) return request.await().verifyStudentOwnership(id)
         try {
             val fresh = client.fetchStudentSnapshot(id, forceRefresh = true).verifyStudentOwnership(id)
@@ -118,10 +127,11 @@ class LiveAgendaRepository(
                     .associateWith { completedAt },
             )
             synchronized(cacheLock) {
-                if (generation != client.session.sessionGeneration) throw CancellationException("Session changed")
+                if (loggedOut || generation != client.session.sessionGeneration) throw CancellationException("Session changed")
                 snapshotCache[id] = CachedSnapshot(verified, completedAt, generation)
+                // Logout invalidates under this same lock before deleting account files.
+                runCatching { snapshotStore?.write(verified) }
             }
-            runCatching { snapshotStore?.write(verified) }
             mine.complete(verified)
             return verified
         } catch (err: Throwable) {
@@ -139,11 +149,13 @@ class LiveAgendaRepository(
     }
 
     fun cachedSnapshotFor(studentId: StudentId): StudentAgendaSnapshot? {
+        if (synchronized(cacheLock) { loggedOut }) return null
         val canonicalKey = client.session.canonicalStudentKey(studentId.value)
         if (canonicalKey.isEmpty()) return null
         val canonicalId = StudentId(canonicalKey)
         val currentGen = client.session.sessionGeneration
         return synchronized(cacheLock) {
+            if (loggedOut) return null
             val entry = snapshotCache[canonicalId]
             if (entry != null && entry.sessionGeneration == currentGen) {
                 entry.snapshot.verifyStudentOwnership(canonicalId)
@@ -161,15 +173,30 @@ class LiveAgendaRepository(
         }
     }
 
+    fun invalidateForLogout() {
+        synchronized(cacheLock) {
+            loggedOut = true
+            snapshotCache.clear()
+            inFlight.values.forEach { it.cancel(CancellationException("Logged out")) }
+            inFlight.clear()
+        }
+    }
+
+    private fun ensureNotLoggedOut() {
+        if (synchronized(cacheLock) { loggedOut }) throw CancellationException("Logged out")
+    }
+
     fun clearPersistentCache() {
         snapshotStore?.clear()
     }
 
     private fun restorePersisted(studentId: StudentId, sessionGeneration: Long): CachedSnapshot? {
+        ensureNotLoggedOut()
         val restored = snapshotStore?.read(studentId) ?: return null
         val cachedAt = restored.successfulSyncMillis.values.maxOrNull() ?: 0L
         val entry = CachedSnapshot(restored, cachedAt, sessionGeneration)
         synchronized(cacheLock) {
+            if (loggedOut) return null
             val existing = snapshotCache[studentId]
             if (existing == null || existing.sessionGeneration != sessionGeneration) {
                 snapshotCache[studentId] = entry

@@ -20,11 +20,9 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -39,16 +37,6 @@ enum class ThemeMode {
     SYSTEM,
     LIGHT,
     DARK,
-}
-
-/**
- * In-app text size scale matching `html[data-text-size]` in `web/public/style.css`.
- */
-enum class AppTextSize(val code: String, val scaleFactor: Float) {
-    S("S", 0.90f),
-    M("M", 1.00f),
-    L("L", 1.125f),
-    XL("XL", 1.25f),
 }
 
 /**
@@ -70,7 +58,6 @@ enum class NamedThemePalette(val id: String, val displayNameRo: String, val disp
 @Immutable
 data class OpenSimeSettingsState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val textSize: AppTextSize = AppTextSize.M,
     val namedPalette: NamedThemePalette = NamedThemePalette.SIME_INDIGO,
     val highContrast: Boolean = false,
     val simpleMode: Boolean = false,
@@ -81,7 +68,6 @@ data class OpenSimeSettingsState(
     companion object {
         private const val PREFS_NAME = "open_sime_settings"
         private const val KEY_THEME_MODE = "theme_mode"
-        private const val KEY_TEXT_SIZE = "text_size"
         private const val KEY_PALETTE = "named_palette"
         private const val KEY_HIGH_CONTRAST = "high_contrast"
         private const val KEY_SIMPLE_MODE = "simple_mode"
@@ -89,6 +75,11 @@ data class OpenSimeSettingsState(
         private const val KEY_LANGUAGE = "language"
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_EXPLICITLY_LOGGED_OUT = "explicitly_logged_out"
+        private const val KEY_PENDING_LOGOUT_CACHE = "pending_logout_cache"
+        private const val KEY_PENDING_UNKNOWN_CACHE = "pending_unknown_logout_cache"
+        private const val KEY_PENDING_OWNERSHIP_CHECK = "pending_logout_ownership_check"
+        private const val KEY_UNKNOWN_CACHE_ACK = "unknown_logout_cache_acknowledged"
+        private const val KEY_AUTH_TRANSITION = "pending_auth_ownership_transition"
 
         fun detectSystemTheme(context: Context): ThemeMode {
             val nightModeFlags = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
@@ -116,11 +107,116 @@ data class OpenSimeSettingsState(
                 .apply()
         }
 
+        fun recordExplicitLogout(context: Context, accountStorageId: String? = null, ownershipCheckPending: Boolean = false) {
+            val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            synchronized(preferences) {
+                val pending = preferences.getString(KEY_PENDING_LOGOUT_CACHE, null)
+                check(accountStorageId == null || pending == null || pending == accountStorageId) {
+                    "Another account cleanup is pending"
+                }
+                val editor = preferences.edit().putBoolean(KEY_EXPLICITLY_LOGGED_OUT, true)
+                if (accountStorageId != null) editor.putString(KEY_PENDING_LOGOUT_CACHE, accountStorageId).remove(KEY_AUTH_TRANSITION)
+                if (ownershipCheckPending) editor.putBoolean(KEY_PENDING_OWNERSHIP_CHECK, true)
+                check(editor.commit()) { "Local logout could not be saved" }
+            }
+        }
+
+        fun recordSuccessfulLogin(context: Context, beforeCommit: () -> Unit) {
+            val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            synchronized(preferences) {
+                beforeCommit()
+                check(preferences.edit().putBoolean(KEY_EXPLICITLY_LOGGED_OUT, false)
+                    .remove(KEY_AUTH_TRANSITION).remove(KEY_PENDING_LOGOUT_CACHE).commit()) {
+                    "Login eligibility could not be saved"
+                }
+            }
+        }
+
+        fun beginAuthTransition(context: Context, beforeCommit: () -> Unit) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            synchronized(prefs) {
+                beforeCommit()
+                check(prefs.getString(KEY_PENDING_LOGOUT_CACHE, null) == null) { "Account cleanup is pending" }
+                check(!prefs.getBoolean(KEY_AUTH_TRANSITION, false) && !prefs.getBoolean(KEY_PENDING_OWNERSHIP_CHECK, false)) {
+                    "Authentication cleanup is pending"
+                }
+                check(prefs.edit().putBoolean(KEY_AUTH_TRANSITION, true).commit()) { "Authentication transition could not be saved" }
+            }
+        }
+
+        fun hasAuthTransition(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_AUTH_TRANSITION, false)
+
+        fun cancelUnverifiedAuthTransition(context: Context, beforeCommit: () -> Unit) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            synchronized(prefs) {
+                beforeCommit()
+                check(prefs.getString(KEY_PENDING_LOGOUT_CACHE, null) == null) { "Account cleanup is pending" }
+                check(prefs.edit().remove(KEY_AUTH_TRANSITION).commit()) { "Authentication transition could not be cleared" }
+            }
+        }
+
+        fun markInterruptedAuthUnknown(context: Context) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            synchronized(prefs) {
+                check(prefs.edit().putBoolean(KEY_EXPLICITLY_LOGGED_OUT, true)
+                    .putBoolean(KEY_PENDING_UNKNOWN_CACHE, true).remove(KEY_UNKNOWN_CACHE_ACK)
+                    .remove(KEY_AUTH_TRANSITION).commit()) { "Interrupted authentication could not be saved" }
+            }
+        }
+
+        fun recordVerifiedAuthOwner(context: Context, accountStorageId: String, beforeCommit: () -> Unit) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            synchronized(prefs) {
+                beforeCommit()
+                val pending = prefs.getString(KEY_PENDING_LOGOUT_CACHE, null)
+                check(pending == null || pending == accountStorageId) { "Another account cleanup is pending" }
+                check(prefs.edit().putBoolean(KEY_EXPLICITLY_LOGGED_OUT, true)
+                    .putString(KEY_PENDING_LOGOUT_CACHE, accountStorageId).remove(KEY_AUTH_TRANSITION).commit()) {
+                    "Authentication owner could not be saved"
+                }
+            }
+        }
+
+        fun pendingLogoutCache(context: Context): String? =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_PENDING_LOGOUT_CACHE, null)
+
+        fun hasUnknownLogoutCache(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_PENDING_UNKNOWN_CACHE, false)
+
+        fun hasAcknowledgedUnknownCache(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_UNKNOWN_CACHE_ACK, false)
+
+        fun acknowledgeUnknownCache(context: Context) {
+            check(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_UNKNOWN_CACHE_ACK, true).commit()) { "Local cleanup acknowledgement could not be saved" }
+        }
+
+        fun hasPendingOwnershipCheck(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_PENDING_OWNERSHIP_CHECK, false)
+
+        fun completeOwnershipCheck(context: Context, unknownCache: Boolean) {
+            val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .remove(KEY_PENDING_OWNERSHIP_CHECK)
+            if (unknownCache) editor.putBoolean(KEY_PENDING_UNKNOWN_CACHE, true).remove(KEY_UNKNOWN_CACHE_ACK)
+            check(editor.commit()) { "Local ownership check could not be saved" }
+        }
+
+        fun setUnknownLogoutCache(context: Context, value: Boolean) {
+            check(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_PENDING_UNKNOWN_CACHE, value).remove(KEY_UNKNOWN_CACHE_ACK).commit()) { "Local cleanup state could not be saved" }
+        }
+
+        fun completeLogoutCleanup(context: Context) {
+            check(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().remove(KEY_PENDING_LOGOUT_CACHE).commit()) { "Local logout cleanup could not be saved" }
+        }
+
         val Saver: Saver<OpenSimeSettingsState, List<String>> = Saver(
             save = { state ->
                 listOf(
                     state.themeMode.name,
-                    state.textSize.name,
+                    "M", // Preserve the old saved-state slot for activity recreation across upgrades.
                     state.namedPalette.name,
                     state.highContrast.toString(),
                     state.simpleMode.toString(),
@@ -132,7 +228,6 @@ data class OpenSimeSettingsState(
             restore = { saved ->
                 OpenSimeSettingsState(
                     themeMode = saved.getOrNull(0)?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.SYSTEM,
-                    textSize = saved.getOrNull(1)?.let { runCatching { AppTextSize.valueOf(it) }.getOrNull() } ?: AppTextSize.M,
                     namedPalette = saved.getOrNull(2)?.let { runCatching { NamedThemePalette.valueOf(it) }.getOrNull() } ?: NamedThemePalette.SIME_INDIGO,
                     highContrast = saved.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
                     simpleMode = saved.getOrNull(4)?.toBooleanStrictOrNull() ?: false,
@@ -178,7 +273,6 @@ data class OpenSimeSettingsState(
 
             return OpenSimeSettingsState(
                 themeMode = resolvedTheme,
-                textSize = prefs.getString(KEY_TEXT_SIZE, null)?.let { runCatching { AppTextSize.valueOf(it) }.getOrNull() } ?: AppTextSize.M,
                 namedPalette = prefs.getString(KEY_PALETTE, null)?.let { runCatching { NamedThemePalette.valueOf(it) }.getOrNull() } ?: NamedThemePalette.SIME_INDIGO,
                 highContrast = prefs.getBoolean(KEY_HIGH_CONTRAST, false),
                 simpleMode = prefs.getBoolean(KEY_SIMPLE_MODE, false),
@@ -192,7 +286,6 @@ data class OpenSimeSettingsState(
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_THEME_MODE, state.themeMode.name)
-                .putString(KEY_TEXT_SIZE, state.textSize.name)
                 .putString(KEY_PALETTE, state.namedPalette.name)
                 .putBoolean(KEY_HIGH_CONTRAST, state.highContrast)
                 .putBoolean(KEY_SIMPLE_MODE, state.simpleMode)
@@ -498,19 +591,9 @@ fun OpenSimeTheme(
         }
     }
 
-    val baseDensity = LocalDensity.current
-    val simpleModeFactor = if (settings.simpleMode && settings.textSize == AppTextSize.M) 1.10f else 1.0f
-    val targetFontScale = (baseDensity.fontScale * settings.textSize.scaleFactor * simpleModeFactor)
-        .coerceIn(0.75f, 2.25f)
-    val effectiveDensity = Density(
-        density = baseDensity.density,
-        fontScale = targetFontScale,
-    )
-
     CompositionLocalProvider(
         LocalAppStrings provides strings,
         LocalOpenSimeSemanticColors provides semanticColors,
-        LocalDensity provides effectiveDensity,
     ) {
         MaterialExpressiveTheme(
             colorScheme = colorScheme,

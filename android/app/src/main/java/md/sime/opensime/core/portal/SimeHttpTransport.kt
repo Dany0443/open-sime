@@ -2,7 +2,10 @@ package md.sime.opensime.core.portal
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import md.sime.opensime.BuildConfig
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -12,6 +15,15 @@ import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import javax.net.ssl.HttpsURLConnection
+
+private fun debugSchemaTransportCall(method: String, types: Array<Class<*>>, vararg args: Any) {
+    try {
+        Class.forName("md.sime.opensime.core.portal.DebugGradeSchemaInspector")
+            .getMethod(method, *types).invoke(null, *args)
+    } catch (err: Exception) {
+        throw CancellationException("Debug inspection boundary unavailable").also { it.initCause(err) }
+    }
+}
 
 /**
  * Request kind determining browser navigation vs. AJAX/XHR headers (`web/server.js:1656-1675`).
@@ -185,13 +197,15 @@ class SimeHttpTransport(
 ) {
     private val stateLock = Any()
     private var lastNavigateUrl: String? = null
+    private var generation = 0L
 
     val lastUrl: String?
         get() = synchronized(stateLock) { lastNavigateUrl }
 
     fun clearCookies() {
-        cookies.clear()
         synchronized(stateLock) {
+            generation += 1L
+            cookies.clear()
             lastNavigateUrl = null
         }
     }
@@ -209,108 +223,127 @@ class SimeHttpTransport(
         headers: Map<String, String> = emptyMap(),
         kind: SimeRequestKind = SimeRequestKind.NAVIGATE,
         gated: Boolean = false,
+        debugInspectionReport: Boolean = false,
     ): SimeHttpResponse {
-        var currentMethod = method.trim().uppercase(Locale.ROOT)
-        var currentUrl = SimeUrlValidator.requireSimeUrl(url)
-        var currentBodyBytes: ByteArray? = data?.let { encodeFormUrlEncoded(it) }
-
-        if (gated) {
-            globalBreaker.ensureClosed()
-            breaker.ensureClosed()
-            gate.wait()
-        }
-
-        for (hop in 0..maxRedirects) {
-            globalBreaker.ensureClosed()
-            breaker.ensureClosed()
-
-            val prevNavigateUrl = synchronized(stateLock) { lastNavigateUrl }
-            val mergedHeaders = linkedMapOf<String, String>()
-            mergedHeaders.putAll(defaultHeaders(kind = kind, hasReferer = prevNavigateUrl != null))
-            mergedHeaders.putAll(headers)
-
-            if (kind == SimeRequestKind.NAVIGATE && prevNavigateUrl != null && !hasHeader(mergedHeaders, "Referer")) {
-                mergedHeaders["Referer"] = prevNavigateUrl
+        if (BuildConfig.DEBUG) debugSchemaTransportCall("enterRequest", arrayOf(SimeHttpTransport::class.java), this)
+        var requestCompleted = false
+        try {
+            val requestContext = currentCoroutineContext()
+            val requestGeneration = synchronized(stateLock) { generation }
+            fun ensureCurrent() {
+                requestContext.ensureActive()
+                if (generation != requestGeneration) throw CancellationException("Session changed")
             }
-            if (currentBodyBytes != null && !hasHeader(mergedHeaders, "Content-Type")) {
-                mergedHeaders["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8"
-            }
-            val cookieHeader = cookies.cookieHeader(currentUrl)
-            if (!cookieHeader.isNullOrEmpty()) {
-                mergedHeaders["Cookie"] = cookieHeader
+            var currentMethod = method.trim().uppercase(Locale.ROOT)
+            var currentUrl = SimeUrlValidator.requireSimeUrl(url)
+            var currentBodyBytes: ByteArray? = data?.let { encodeFormUrlEncoded(it) }
+
+            if (gated) {
+                globalBreaker.ensureClosed()
+                breaker.ensureClosed()
+                gate.wait()
             }
 
-            val hopResponse = try {
-                executor.executeHop(
-                    SimeHttpExecutor.RawHopRequest(
-                        method = currentMethod,
-                        url = currentUrl,
-                        headers = mergedHeaders,
-                        bodyBytes = currentBodyBytes,
-                        connectTimeoutMs = connectTimeoutMs,
-                        readTimeoutMs = readTimeoutMs,
-                        maxBodyBytes = maxBodyBytes,
-                    ),
-                )
-            } catch (err: CancellationException) {
-                throw err
-            } catch (err: SimeRateLimitError) {
-                breaker.trip(err.waitSeconds)
-                throw err
-            } catch (err: SimeMaintenanceError) {
-                globalBreaker.trip(err.waitSeconds)
-                throw err
-            } catch (err: SimePortalError) {
-                throw err
-            } catch (err: SocketTimeoutException) {
-                throw SimeNetworkError("Request timed out", err)
-            } catch (err: Exception) {
-                throw SimeNetworkError("Network error", err)
-            }
+            for (hop in 0..maxRedirects) {
+                synchronized(stateLock) { ensureCurrent() }
+                globalBreaker.ensureClosed()
+                breaker.ensureClosed()
 
-            cookies.storeFromResponse(currentUrl, hopResponse.allHeaders("Set-Cookie"))
+                val prevNavigateUrl = synchronized(stateLock) { lastNavigateUrl }
+                val mergedHeaders = linkedMapOf<String, String>()
+                mergedHeaders.putAll(defaultHeaders(kind = kind, hasReferer = prevNavigateUrl != null))
+                mergedHeaders.putAll(headers)
 
-            if (hopResponse.status in REDIRECT_STATUS_CODES) {
-                val location = hopResponse.firstHeader("Location")?.trim()
-                if (location.isNullOrEmpty()) {
-                    throw SimeNetworkError("Redirect without Location header")
+                if (kind == SimeRequestKind.NAVIGATE && prevNavigateUrl != null && !hasHeader(mergedHeaders, "Referer")) {
+                    mergedHeaders["Referer"] = prevNavigateUrl
                 }
-                currentUrl = SimeUrlValidator.resolveSimeUrl(location, currentUrl)
-                if (hopResponse.status in GET_REWRITE_REDIRECT_CODES) {
-                    currentMethod = "GET"
-                    currentBodyBytes = null
+                if (currentBodyBytes != null && !hasHeader(mergedHeaders, "Content-Type")) {
+                    mergedHeaders["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8"
                 }
-                continue
-            }
+                val cookieHeader = cookies.cookieHeader(currentUrl)
+                if (!cookieHeader.isNullOrEmpty()) {
+                    mergedHeaders["Cookie"] = cookieHeader
+                }
 
-            try {
-                raiseForStatus(hopResponse)
-            } catch (err: SimeRateLimitError) {
-                breaker.trip(err.waitSeconds)
-                throw err
-            } catch (err: SimeMaintenanceError) {
-                globalBreaker.trip(err.waitSeconds)
-                throw err
-            }
+                val hopResponse = try {
+                    if (BuildConfig.DEBUG) debugSchemaTransportCall("beforeHop", arrayOf(SimeHttpTransport::class.java, String::class.java, Boolean::class.javaPrimitiveType!!), this, kind.name, debugInspectionReport)
+                    var hopSucceeded = false
+                    try {
+                        executor.executeHop(
+                            SimeHttpExecutor.RawHopRequest(
+                                method = currentMethod,
+                                url = currentUrl,
+                                headers = mergedHeaders,
+                                bodyBytes = currentBodyBytes,
+                                connectTimeoutMs = connectTimeoutMs,
+                                readTimeoutMs = readTimeoutMs,
+                                maxBodyBytes = maxBodyBytes,
+                            ),
+                        ).also { hopSucceeded = it.status in 200..399 }
+                    } finally {
+                        if (BuildConfig.DEBUG) debugSchemaTransportCall("afterHop", arrayOf(Boolean::class.javaPrimitiveType!!), hopSucceeded)
+                    }
+                } catch (err: Exception) {
+                    synchronized(stateLock) { ensureCurrent() }
+                    when (err) {
+                        is CancellationException -> throw err
+                        is SimeRateLimitError -> { breaker.trip(err.waitSeconds); throw err }
+                        is SimeMaintenanceError -> { globalBreaker.trip(err.waitSeconds); throw err }
+                        is SimePortalError -> throw err
+                        is SocketTimeoutException -> throw SimeNetworkError("Request timed out", err)
+                        else -> throw SimeNetworkError("Network error", err)
+                    }
+                }
 
-            if (hopResponse.bodyBytes.size > maxBodyBytes) {
-                throw SimeNetworkError("Response body too large")
-            }
-
-            val text = decodeBody(hopResponse.bodyBytes, hopResponse.firstHeader("Content-Type"))
-            if (kind == SimeRequestKind.NAVIGATE) {
                 synchronized(stateLock) {
-                    lastNavigateUrl = currentUrl
+                    ensureCurrent()
+                    cookies.storeFromResponse(currentUrl, hopResponse.allHeaders("Set-Cookie"))
                 }
-            }
-            return SimeHttpResponse(
-                status = hopResponse.status,
-                url = currentUrl,
-                text = text,
-            )
-        }
 
-        throw SimeNetworkError("Too many redirects")
+                if (hopResponse.status in REDIRECT_STATUS_CODES) {
+                    val location = hopResponse.firstHeader("Location")?.trim()
+                    if (location.isNullOrEmpty()) {
+                        throw SimeNetworkError("Redirect without Location header")
+                    }
+                    currentUrl = SimeUrlValidator.resolveSimeUrl(location, currentUrl)
+                    if (hopResponse.status in GET_REWRITE_REDIRECT_CODES) {
+                        currentMethod = "GET"
+                        currentBodyBytes = null
+                    }
+                    continue
+                }
+
+                try {
+                    raiseForStatus(hopResponse)
+                } catch (err: SimeRateLimitError) {
+                    breaker.trip(err.waitSeconds)
+                    throw err
+                } catch (err: SimeMaintenanceError) {
+                    globalBreaker.trip(err.waitSeconds)
+                    throw err
+                }
+
+                if (hopResponse.bodyBytes.size > maxBodyBytes) {
+                    throw SimeNetworkError("Response body too large")
+                }
+
+                val text = decodeBody(hopResponse.bodyBytes, hopResponse.firstHeader("Content-Type"))
+                synchronized(stateLock) {
+                    ensureCurrent()
+                    if (kind == SimeRequestKind.NAVIGATE) lastNavigateUrl = currentUrl
+                }
+                requestCompleted = true
+                return SimeHttpResponse(
+                    status = hopResponse.status,
+                    url = currentUrl,
+                    text = text,
+                )
+            }
+
+            throw SimeNetworkError("Too many redirects")
+        } finally {
+            if (BuildConfig.DEBUG) debugSchemaTransportCall("leaveRequest", arrayOf(Boolean::class.javaPrimitiveType!!), requestCompleted)
+        }
     }
 
     private fun raiseForStatus(response: SimeHttpExecutor.RawHopResponse) {

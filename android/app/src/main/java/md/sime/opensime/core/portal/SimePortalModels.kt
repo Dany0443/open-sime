@@ -9,7 +9,6 @@ import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
 import org.jsoup.select.Elements
 import java.util.Locale
-import kotlin.math.roundToInt
 
 data class SemesterRegionSpec(
     val semester: Int,
@@ -424,11 +423,6 @@ internal object SimeDomHelpers {
         if (!NUMBER_RE.matches(normalized)) return null
         return normalized.toDoubleOrNull()
     }
-
-    fun round2(value: Double): Double = (value * 100.0).roundToInt() / 100.0
-
-    fun mean(values: List<Double>): Double? =
-        if (values.isEmpty()) null else round2(values.average())
 
     fun selectCss(root: Element, selector: String): Elements {
         val ciMatch = CASE_INSENSITIVE_ATTR_RE.matchEntire(selector.trim())

@@ -1,10 +1,13 @@
 package md.sime.opensime
 
+
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
@@ -13,30 +16,30 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import java.io.File
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import md.sime.opensime.core.data.AgendaRepository
-import md.sime.opensime.core.data.AgendaSnapshotStore
 import md.sime.opensime.core.data.LiveAgendaRepository
 import md.sime.opensime.core.data.SampleAgendaRepository
 import md.sime.opensime.core.designsystem.CookieAvatar
@@ -47,17 +50,12 @@ import md.sime.opensime.core.designsystem.ThemeMode
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.i18n.errorMessageFor
 import md.sime.opensime.core.model.AccountRole
-import md.sime.opensime.core.model.DataSourceMode
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.core.model.StudentId
 import md.sime.opensime.core.model.StudentMismatchException
 import md.sime.opensime.core.model.StudentProfile
 import md.sime.opensime.core.portal.SimeAuthCoordinator
-import md.sime.opensime.core.portal.AndroidKeyStoreVaultCipher
 import md.sime.opensime.core.portal.SimeCredentialVault
-import md.sime.opensime.core.portal.SimeLoginRejectedError
-import md.sime.opensime.core.portal.SimeNetworkError
-import md.sime.opensime.core.portal.SimePortalClient
 import md.sime.opensime.core.portal.SimeSessionExpiredError
 import md.sime.opensime.core.portal.SimeStudentMismatchError
 import md.sime.opensime.feature.absences.AbsencesScreen
@@ -72,6 +70,15 @@ import md.sime.opensime.feature.settings.SettingsDialog
 import md.sime.opensime.feature.timetable.TimetableScreen
 import md.sime.opensime.navigation.OpenSimeAdaptiveShell
 import md.sime.opensime.navigation.TopLevelDestination
+
+private fun debugInspectionBridge(method: String, types: Array<Class<*>>, vararg args: Any) {
+    try {
+        Class.forName("md.sime.opensime.core.portal.DebugInspectionBridge")
+            .getMethod(method, *types).invoke(null, *args)
+    } catch (_: Exception) {
+        // Debug controls are optional and must not alter the normal app flow.
+    }
+}
 
 /**
  * Student-isolated state coordinator.
@@ -162,9 +169,10 @@ class OpenSimeSessionCoordinator(
 
         return try {
             repositoryLoadCalls += 1
-            val loaded = (if (forceRefresh && repository is LiveAgendaRepository) {
-                (repository as LiveAgendaRepository).reconcileStudent(studentId)
-            } else repository.getStudentSnapshot(studentId)).verifyStudentOwnership(studentId)
+            val source = repository
+            val loaded = (if (source is LiveAgendaRepository) withContext(Dispatchers.IO) {
+                if (forceRefresh) source.reconcileStudent(studentId) else source.getStudentSnapshot(studentId)
+            } else source.getStudentSnapshot(studentId)).verifyStudentOwnership(studentId)
             currentCoroutineContext().ensureActive()
             if (myGeneration == repositoryGeneration) {
                 cacheByStudent[studentId] = loaded
@@ -206,17 +214,14 @@ class OpenSimeSessionCoordinator(
     ): Result<StudentAgendaSnapshot?> = try {
         Result.success(selectStudent(studentId = studentId, forceRefresh = forceRefresh))
     } catch (cancel: CancellationException) {
-        throw cancel
+        // An upstream single-flight request can be cancelled while this UI caller still owns its load.
+        currentCoroutineContext().ensureActive()
+        Result.failure(cancel)
     } catch (err: Throwable) {
         Result.failure(err)
     }
 }
 
-class OpenSimeRetainedSession : ViewModel() {
-    val auth = SimeAuthCoordinator()
-    var repository by mutableStateOf<AgendaRepository?>(null)
-    var snapshotStore by mutableStateOf<AgendaSnapshotStore?>(null)
-}
 
 @Composable
 fun OpenSimeApp(
@@ -227,27 +232,16 @@ fun OpenSimeApp(
     val context = LocalContext.current
     val effectiveVault = remember(credentialVault) { credentialVault ?: SimeCredentialVault(context) }
     val retained = viewModel<OpenSimeRetainedSession>()
-    var activeRepository by retained::repository
-    var activeSnapshotStore by retained::snapshotStore
-    if (repository != null && activeRepository !== repository) activeRepository = repository
-    var isLiveAuthenticated by rememberSaveable { mutableStateOf(repository != null && repository !is SampleAgendaRepository) }
-    var hasSavedCredentialsState by remember { mutableStateOf(effectiveVault.hasSavedCredentials()) }
-    var savedUsername by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(hasSavedCredentialsState) {
-        savedUsername = if (hasSavedCredentialsState) effectiveVault.loadCredentials()?.username else null
+    if (BuildConfig.DEBUG) SideEffect {
+        debugInspectionBridge("attach", arrayOf(OpenSimeRetainedSession::class.java, SimeAuthCoordinator::class.java), retained, authCoordinator)
     }
-
-    var isRestoringSession by remember { mutableStateOf(false) }
-    var sessionRestorationAttempted by rememberSaveable { mutableStateOf(false) }
+    if (repository != null && retained.repository !== repository && !retained.logoutRequested) retained.repository = repository
+    val activeRepository = retained.repository
+    val isLiveAuthenticated = retained.isLiveAuthenticated && authCoordinator.isAuthenticated
+    val isRestoringSession = retained.isRestoringSession
     var showLoginScreen by rememberSaveable { mutableStateOf(false) }
-
-    val coordinator = remember(activeRepository) {
-        activeRepository?.let { OpenSimeSessionCoordinator(it) }
-    }
-    val students = remember(activeRepository, coordinator) {
-        coordinator?.availableStudents() ?: emptyList()
-    }
+    var recoveryLogin by rememberSaveable { mutableStateOf(false) }
+    val students = remember(activeRepository) { activeRepository?.listStudents().orEmpty() }
 
     var settings by rememberSaveable(stateSaver = OpenSimeSettingsState.Saver) {
         mutableStateOf(OpenSimeSettingsState.loadFromPreferences(context))
@@ -258,186 +252,53 @@ fun OpenSimeApp(
         OpenSimeSettingsState.saveToPreferences(context, newSettings)
     }
 
-    var selectedStudentIdValue by rememberSaveable {
-        mutableStateOf(
-            students.firstOrNull()?.id?.value ?: "",
-        )
-    }
-
-    var currentSnapshot by remember(activeRepository) {
-        mutableStateOf<StudentAgendaSnapshot?>(null)
-    }
-    var loadError by remember(activeRepository) {
-        mutableStateOf<Throwable?>(null)
-    }
-    var isLoading by remember(activeRepository) {
-        mutableStateOf(activeRepository != null)
-    }
-    var reloadTrigger by remember { mutableIntStateOf(0) }
-    var handledReloadTrigger by remember { mutableIntStateOf(0) }
+    val selectedStudentIdValue = retained.selectedStudentIdValue
+    val currentSnapshot = retained.currentSnapshot
+    val loadError = retained.loadError
+    val isLoading = retained.isLoading
 
     var currentDestination by rememberSaveable { mutableStateOf(TopLevelDestination.HOME) }
     var isProfileSelected by rememberSaveable { mutableStateOf(false) }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
 
-    // Direct SIME authentication state
-    var isAuthenticating by remember { mutableStateOf(false) }
-    var authError by remember { mutableStateOf<Throwable?>(null) }
-    val coroutineScope = rememberCoroutineScope()
+    val isAuthenticating = retained.isAuthenticating
+    val authError = retained.authError
 
-    fun handleSignIn(username: String, password: String, role: AccountRole, rememberMe: Boolean = false) {
-        coroutineScope.launch {
-            isAuthenticating = true
-            authError = null
-            val result = runCatching { authCoordinator.login(username, password, role) }
-            result.fold(
-                onSuccess = { session ->
-                    OpenSimeSettingsState.setExplicitlyLoggedOut(context, false)
-                    if (rememberMe) {
-                        effectiveVault.saveCredentials(username, password, role)
-                    } else {
-                        effectiveVault.clearCredentials()
-                    }
-                    hasSavedCredentialsState = effectiveVault.hasSavedCredentials()
-                    savedUsername = if (rememberMe) username.trim() else null
-                    val liveClient = SimePortalClient(session = authCoordinator.session)
-                    val store = AgendaSnapshotStore(
-                        rootDirectory = File(context.filesDir, "agenda-snapshots"),
-                        cipher = AndroidKeyStoreVaultCipher(),
-                        accountKey = username.trim(),
-                    )
-                    val liveRepo = LiveAgendaRepository(
-                        client = liveClient,
-                        authCoordinator = authCoordinator,
-                        snapshotStore = store,
-                    )
-                    coordinator?.clear()
-                    activeSnapshotStore = store
-                    activeRepository = liveRepo
-                    isLiveAuthenticated = true
-                    showLoginScreen = false
-                    isAuthenticating = false
-                    authError = null
-                    selectedStudentIdValue = session.initialStudent.id.value
-                },
-                onFailure = { err ->
-                    isAuthenticating = false
-                    authError = err
-                },
-            )
-        }
+    fun handleSignIn(username: String, password: String, role: AccountRole, rememberMe: Boolean) {
+        retained.signIn(context, authCoordinator, effectiveVault, username, password, role, rememberMe)
     }
 
     fun handleSignOut() {
-        coroutineScope.launch {
-            OpenSimeSettingsState.setExplicitlyLoggedOut(context, true)
-            authCoordinator.logout()
-            activeSnapshotStore?.clear()
-            coordinator?.clear()
-            isLiveAuthenticated = false
-            activeRepository = null
-            activeSnapshotStore = null
-            currentSnapshot = null
-            loadError = null
-            selectedStudentIdValue = ""
-            showLoginScreen = false
-            reloadTrigger += 1
-        }
+        showSettingsDialog = false
+        showLoginScreen = true
+        currentDestination = TopLevelDestination.HOME
+        isProfileSelected = false
+        retained.viewModelScope.launch { retained.logout(context, authCoordinator, effectiveVault) }
     }
 
-    fun handleForgetCredentials() {
-        effectiveVault.clearCredentials()
-        hasSavedCredentialsState = false
-        savedUsername = null
+    fun retryData() {
+        if (activeRepository is md.sime.opensime.core.data.CachedAgendaRepository || !authCoordinator.isAuthenticated) {
+            showLoginScreen = true
+        } else if (selectedStudentIdValue.isNotBlank()) {
+            retained.selectStudent(StudentId(selectedStudentIdValue), forceRefresh = true, coordinator = authCoordinator)
+        }
     }
 
     LaunchedEffect(Unit) {
-        val explicitlyLoggedOut = OpenSimeSettingsState.isExplicitlyLoggedOut(context)
-        if (!sessionRestorationAttempted && !explicitlyLoggedOut && activeRepository == null && effectiveVault.hasSavedCredentials()) {
-            val saved = effectiveVault.loadCredentials()
-            if (saved != null) {
-                isRestoringSession = true
-                sessionRestorationAttempted = true
-                val result = withTimeoutOrNull(15_000L) {
-                    runCatching { authCoordinator.login(saved.username, saved.password, saved.role) }
-                }
-                isRestoringSession = false
-                if (result != null && result.isSuccess) {
-                    val session = result.getOrThrow()
-                    val liveClient = SimePortalClient(session = authCoordinator.session)
-                    val store = AgendaSnapshotStore(
-                        rootDirectory = File(context.filesDir, "agenda-snapshots"),
-                        cipher = AndroidKeyStoreVaultCipher(),
-                        accountKey = saved.username.trim(),
-                    )
-                    val liveRepo = LiveAgendaRepository(
-                        client = liveClient,
-                        authCoordinator = authCoordinator,
-                        snapshotStore = store,
-                    )
-                    coordinator?.clear()
-                    activeSnapshotStore = store
-                    activeRepository = liveRepo
-                    isLiveAuthenticated = true
-                    selectedStudentIdValue = session.initialStudent.id.value
-                } else {
-                    val err = result?.exceptionOrNull() ?: SimeNetworkError("Timeout connecting to SIME portal")
-                    if (err is SimeLoginRejectedError) {
-                        effectiveVault.clearCredentials()
-                        hasSavedCredentialsState = false
-                        savedUsername = null
-                        authError = err
-                        showLoginScreen = true
-                    }
-                    loadError = err
-                }
-            } else {
-                sessionRestorationAttempted = true
-            }
-        }
+        if (repository == null) retained.restore(context, authCoordinator, effectiveVault)
+        else retained.recoverPendingLogout(context, authCoordinator, effectiveVault)
     }
-
-    LaunchedEffect(selectedStudentIdValue, reloadTrigger, activeRepository) {
-        val currentCoord = coordinator ?: return@LaunchedEffect
-        if (selectedStudentIdValue.isBlank()) {
-            val firstStudent = currentCoord.availableStudents().firstOrNull()?.id?.value
-            if (firstStudent != null) {
-                selectedStudentIdValue = firstStudent
-            }
-            return@LaunchedEffect
+    LaunchedEffect(retained.loginRequired, retained.isLiveAuthenticated) {
+        if (retained.loginRequired) showLoginScreen = true
+        else if (retained.isLiveAuthenticated) showLoginScreen = false
+    }
+    LaunchedEffect(retained.recoveryCompleted) {
+        if (retained.recoveryCompleted) recoveryLogin = false
+    }
+    LaunchedEffect(activeRepository) {
+        if (activeRepository != null && selectedStudentIdValue.isBlank()) {
+            activeRepository.listStudents().firstOrNull()?.let { retained.selectStudent(it.id, coordinator = authCoordinator) }
         }
-        val targetId = StudentId(selectedStudentIdValue)
-        currentSnapshot = currentCoord.cachedSnapshotFor(targetId)
-            ?: (activeRepository as? LiveAgendaRepository)?.cachedSnapshotFor(targetId)
-            ?: authCoordinator.cachedSnapshotFor(targetId)
-        loadError = null
-        isLoading = true
-        val manual = reloadTrigger != handledReloadTrigger
-        handledReloadTrigger = reloadTrigger
-        val restoredFromDisk = activeRepository is LiveAgendaRepository &&
-            currentSnapshot != null && currentCoord.cachedSnapshotFor(targetId) == null
-
-        val result = currentCoord.loadStudentSafely(
-            studentId = targetId,
-            forceRefresh = manual || restoredFromDisk,
-        )
-        currentCoroutineContext().ensureActive()
-        result.fold(
-            onSuccess = { loaded ->
-                if (loaded != null && loaded.studentId == targetId) {
-                    currentSnapshot = loaded
-                    loadError = null
-                    isLoading = false
-                }
-            },
-            onFailure = { err ->
-                if (currentCoord.activeStudentId == targetId) {
-                    currentSnapshot = currentSnapshot?.takeIf { it.studentId == targetId }?.copy(stale = true)
-                    loadError = err
-                    isLoading = false
-                }
-            },
-        )
     }
 
     val systemDark = isSystemInDarkTheme()
@@ -458,7 +319,46 @@ fun OpenSimeApp(
         val showOnboarding = !settings.onboardingCompleted && repository == null
 
         when {
-            isRestoringSession -> {
+            retained.logoutInProgress -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        CircularProgressIndicator()
+                        Text(strings.logoutInProgress)
+                    }
+                }
+            }
+            retained.unknownLogoutCache && recoveryLogin -> {
+                LoginScreen(
+                    isAuthenticating = isAuthenticating,
+                    authError = authError,
+                    onSignIn = { username, password, role, _ ->
+                        retained.recoverUnknownCache(context, authCoordinator, username, password, role)
+                    },
+                    onBack = { recoveryLogin = false },
+                    onOpenSettings = { showSettingsDialog = true },
+                    showRememberMe = false,
+                )
+            }
+            retained.logoutError != null -> {
+                Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ErrorStateCard(
+                        title = strings.logoutCleanupFailed,
+                        message = if (retained.unknownLogoutCache) strings.logoutUnknownCacheDesc else strings.logoutCleanupFailedDesc,
+                        retryLabel = strings.actionRetry,
+                        onRetry = { handleSignOut() },
+                    )
+                    if (retained.unknownLogoutCache) OutlinedButton(onClick = { recoveryLogin = true }) {
+                        Text(strings.logoutRecoverAccount)
+                    }
+                    if (retained.unknownLogoutCache) OutlinedButton(onClick = { retained.acknowledgeUnknownCache(context, effectiveVault) }) {
+                        Text(strings.logoutContinueUnknown)
+                    }
+                  }
+                }
+            }
+            isRestoringSession && activeRepository == null && !retained.logoutRequested -> {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.surface,
@@ -488,6 +388,18 @@ fun OpenSimeApp(
                 }
             }
 
+            retained.restorationError != null && activeRepository == null && !showLoginScreen -> {
+                Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    ErrorStateCard(title = strings.sessionRestoreFailed,
+                        message = strings.errorMessageFor(retained.restorationError), retryLabel = strings.actionRetry,
+                        onRetry = { showLoginScreen = true })
+                    OutlinedButton(onClick = { showLoginScreen = true }, modifier = Modifier.sizeIn(minHeight = 48.dp)) {
+                        Text(strings.loginSubmit)
+                    }
+                }
+            }
+
             showLoginScreen -> {
                 LoginScreen(
                     isAuthenticating = isAuthenticating,
@@ -497,9 +409,10 @@ fun OpenSimeApp(
                     },
                     onBack = {
                         showLoginScreen = false
-                        authError = null
+                        retained.dismissLogin()
                     },
                     onOpenSettings = { showSettingsDialog = true },
+                    showRememberMe = !retained.unknownLogoutCache,
                 )
             }
 
@@ -523,6 +436,10 @@ fun OpenSimeApp(
                 )
             }
 
+            selectedStudentIdValue.isBlank() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            }
+
             else -> {
                 OpenSimeAdaptiveShell(
                     currentDestination = currentDestination,
@@ -540,18 +457,35 @@ fun OpenSimeApp(
                     availableStudents = students,
                     selectedStudentId = StudentId(selectedStudentIdValue),
                     onSelectStudent = { newId ->
-                        if (newId.value != selectedStudentIdValue) {
-                            currentSnapshot = null
-                            loadError = null
-                            isLoading = true
-                            selectedStudentIdValue = newId.value
-                        }
+                        if (BuildConfig.DEBUG) debugInspectionBridge("selectionChanged", emptyArray())
+                        retained.selectStudent(newId, coordinator = authCoordinator)
                     },
                     simpleMode = settings.simpleMode,
-                    isSamplePreview = !isLiveAuthenticated && (snapshot == null || snapshot.dataSourceMode == DataSourceMode.SAMPLE_PREVIEW),
+                    isSamplePreview = activeRepository is SampleAgendaRepository,
                     onSignInClick = { showLoginScreen = true },
                     onSignOutClick = { handleSignOut() },
                 ) {
+                    Column(Modifier.fillMaxSize()) {
+                    if (retained.unknownLogoutCache) {
+                        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+                            Text(strings.logoutUnknownCacheDesc, modifier = Modifier.padding(16.dp))
+                        }
+                    }
+                    if (activeRepository is md.sime.opensime.core.data.CachedAgendaRepository || snapshot?.stale == true) {
+                        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()
+                            .testTag("session_cache_notice")) {
+                            Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(if (isRestoringSession) strings.cachedSessionRestoring else strings.cachedSessionNotice,
+                                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { retryData() }, enabled = !isRestoringSession && !isLoading,
+                                    modifier = Modifier.sizeIn(minHeight = 48.dp).testTag("session_retry_btn")) {
+                                    Text(strings.actionRetry)
+                                }
+                            }
+                        }
+                    }
+                    Box(Modifier.weight(1f)) {
                     val err = loadError
                     when {
                         err != null && snapshot == null -> {
@@ -581,7 +515,7 @@ fun OpenSimeApp(
                                             if (isSessionExpired) {
                                                 showLoginScreen = true
                                             } else {
-                                                reloadTrigger += 1
+                                                retryData()
                                             }
                                         },
                                     )
@@ -615,17 +549,15 @@ fun OpenSimeApp(
                         if (showProfile) {
                             ProfileScreen(
                                 snapshot = snapshot,
-                                hasSavedCredentials = hasSavedCredentialsState,
                                 onSignInClick = { showLoginScreen = true },
                                 onSignOutClick = { handleSignOut() },
-                                onForgetCredentialsClick = { handleForgetCredentials() },
                             )
                         } else {
                             when (destination) {
                                 TopLevelDestination.HOME -> HomeScreen(
                                     snapshot = snapshot,
-                                    isRefreshing = isLoading,
-                                    onRefresh = { if (!isLoading) reloadTrigger += 1 },
+                                    isRefreshing = isLoading || isRestoringSession,
+                                    onRefresh = { if (!isLoading && !isRestoringSession) retryData() },
                                     refreshError = loadError?.let { strings.errorMessageFor(it) },
                                     reduceMotion = settings.reduceMotion,
                                     onNavigateToMarks = {
@@ -665,6 +597,8 @@ fun OpenSimeApp(
                             RenderActiveScreen(target)
                         }
                     }
+                    }
+                    }
                 }
             }
         }
@@ -676,10 +610,7 @@ fun OpenSimeApp(
                 settings = settings,
                 onUpdateSettings = { updateSettings(it) },
                 onDismiss = { showSettingsDialog = false },
-                hasSavedCredentials = hasSavedCredentialsState,
-                savedLoginUsername = savedUsername,
-                onForgetSavedCredentials = { handleForgetCredentials() },
-                isLoggedIn = isLiveAuthenticated,
+                isLoggedIn = activeRepository != null && activeRepository !is SampleAgendaRepository,
                 onLogout = {
                     showSettingsDialog = false
                     handleSignOut()

@@ -10,6 +10,7 @@ import md.sime.opensime.core.model.StudentId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -19,6 +20,90 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class SimePortalClientTest {
+
+    @Test(timeout = 10_000)
+    fun `logout invalidates delayed grades absences and timetable requests`() = runBlocking {
+        for (kind in listOf("grades", "absences", "timetable")) {
+            val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val client = createTwoStudentClient(beforeRequest = {
+                entered.complete(Unit)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { release.await() }
+            }, onAjax = { request ->
+                if (request.bodyBytes?.toString(Charsets.UTF_8)?.contains("x01=GET") == true)
+                    jsonResponse(calendarWeekJson) else htmlResponse(reportSem1Html)
+            })
+            // Force a cold fetch so all three paths have a real in-flight portal operation.
+            val pages = SimePortalSession::class.java.getDeclaredField("studentPages").apply { isAccessible = true }
+            (pages.get(client.session) as MutableMap<*, *>).clear()
+            val request = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                runCatching {
+                    when (kind) {
+                        "grades" -> client.getCatalog("id_101")
+                        "absences" -> client.getAbsenceRecords("id_101")
+                        else -> client.getWeek("id_101", "2026-10-24")
+                    }
+                }
+            }
+            assertFalse("$kind did not reach its controlled request", request.isCompleted)
+            entered.await()
+            SimeAuthCoordinator(client.session).logout()
+            release.complete(Unit)
+            assertTrue(kind, request.await().exceptionOrNull() is kotlinx.coroutines.CancellationException)
+            assertFalse(client.isAuthenticated)
+            assertTrue(client.listStudents().isEmpty())
+            assertTrue(client.http.cookies.isEmpty())
+            assertEquals("", client.session.currentStudentKey)
+        }
+    }
+
+    @Test
+    fun `late expiry after logout cannot trigger automatic reauthentication`() = runBlocking {
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val session = createLoggedInClient().session
+        var relogins = 0
+        val client = SimePortalClient(session, reloginAction = { relogins++ })
+        val request = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            runCatching { client.withRetry<Unit> { release.await(); throw SimeSessionExpiredError() } }
+        }
+        SimeAuthCoordinator(session).logout()
+        release.complete(Unit)
+        assertTrue(request.await().exceptionOrNull() is kotlinx.coroutines.CancellationException)
+        assertEquals(0, relogins)
+        assertFalse(session.isAuthenticated)
+    }
+
+    @Test
+    fun `overlapping expiry failures share one successful reauthentication`() = runBlocking {
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val session = createLoggedInClient { request ->
+            when {
+                request.url == SimeUrlValidator.PUBLIC_PORTAL_URL -> htmlResponse(publicEntryHtml)
+                request.url.contains("login_desktop") -> htmlResponse(validDialogHtml)
+                request.method == "POST" -> jsonResponse(loginSuccessJson)
+                else -> htmlResponse(dashboardStudentAHtml)
+            }
+        }.session
+        var relogins = 0
+        val client = SimePortalClient(session, reloginAction = {
+            relogins++
+            release.await()
+            session.login("synthetic-user", "synthetic-password")
+        })
+        suspend fun request(): String {
+            var attempts = 0
+            return client.withRetry {
+                if (++attempts == 1) throw SimeSessionExpiredError()
+                "verified"
+            }
+        }
+        val first = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { request() }
+        val second = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { request() }
+        release.complete(Unit)
+        assertEquals("verified", first.await())
+        assertEquals("verified", second.await())
+        assertEquals(1, relogins)
+    }
 
     private val publicEntryHtml = SimePortalFixtures.readFixture(SimePortalFixtures.PUBLIC_ENTRY_HTML)
     private val validDialogHtml = SimePortalFixtures.readFixture(SimePortalFixtures.LOGIN_DIALOG_VALID_HTML)
@@ -159,7 +244,8 @@ class SimePortalClientTest {
         // Verify that sem1 data is preserved from inline
         val mathSubject = enriched.catalog.subjects.firstOrNull { it.subject == "Matematica" }
         assertNotNull(mathSubject)
-        assertEquals(9.0, mathSubject!!.average!!, 0.01)
+        assertNull(mathSubject!!.average)
+        assertEquals(9.0, mathSubject.sem1Average!!, 0.01)
     }
 
     @Test
@@ -194,7 +280,8 @@ class SimePortalClientTest {
         assertTrue(capturedAjaxRequests.isNotEmpty())
         val fizica = enriched.catalog.subjects.firstOrNull { it.subject == "Fizica" }
         assertNotNull(fizica)
-        assertEquals(9.0, fizica!!.average!!, 0.01)
+        assertNull(fizica!!.average)
+        assertEquals(9.0, fizica.sem1Average!!, 0.01)
         assertTrue(fizica.markDetails.any { it.isThesis })
     }
 
@@ -669,12 +756,14 @@ class SimePortalClientTest {
     private fun createTwoStudentClient(
         onStudentADelayMs: Long = 0L,
         onStudentBDelayMs: Long = 0L,
+        beforeRequest: suspend () -> Unit = {},
         onAjax: suspend (SimeHttpExecutor.RawHopRequest) -> SimeHttpExecutor.RawHopResponse = {
             htmlResponse("<div>ok</div>")
         },
     ): SimePortalClient {
         val transport = SimeHttpTransport(
             executor = SimeHttpExecutor { req ->
+                beforeRequest()
                 when {
                     req.url.contains("wwv_flow.ajax") -> onAjax(req)
                     req.url.contains("P1_ELEVE_ID:ID_501") -> {

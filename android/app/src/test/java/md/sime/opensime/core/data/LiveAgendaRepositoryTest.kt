@@ -44,6 +44,19 @@ class LiveAgendaRepositoryTest {
     // -------------------------------------------------------------------------
 
     @Test
+    fun `wall clock rollback never treats a future cached snapshot as fresh`() = runBlocking {
+        val now = AtomicLong(10_000L)
+        val calls = AtomicInteger()
+        val client = createMockClient { calls.incrementAndGet(); createMockSnapshot(it.value, "10A") }
+        val repository = LiveAgendaRepository(client, nowMillis = now::get)
+        val student = StudentId("id_101")
+        repository.getStudentSnapshot(student)
+        now.set(5_000L)
+        repository.getStudentSnapshot(student)
+        assertEquals(2, calls.get())
+    }
+
+    @Test
     fun `listStudents returns domain profiles for all known students in session`() {
         val (repo, _) = createRepositoryFixture()
 
@@ -518,6 +531,48 @@ class LiveAgendaRepositoryTest {
         assertEquals("10A", a.await().student.className)
         assertEquals("7B", repo.cachedSnapshotFor(StudentId("id_201"))?.student?.className)
         assertEquals("10A", repo.cachedSnapshotFor(StudentId("id_101"))?.student?.className)
+    }
+
+    @Test
+    fun `logout invalidates both students and delayed refreshes cannot recreate encrypted snapshots`() = runBlocking {
+        val directory = Files.createTempDirectory("logout-refresh-test").toFile()
+        try {
+            val store = AgendaSnapshotStore(directory, StandardAesGcmVaultCipher(), "synthetic-parent")
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var hold = false
+            var arrivals = 0
+            val client = createMockClient {
+                if (hold) {
+                    if (++arrivals == 2) entered.complete(Unit)
+                    release.await()
+                }
+                createMockSnapshot(it.value, if (it.value == "id_101") "10A" else "7B")
+            }
+            val repo = LiveAgendaRepository(client, snapshotStore = store)
+            val a = StudentId("id_101")
+            val b = StudentId("id_201")
+            assertEquals("10A", repo.reconcileStudent(a).student.className)
+            assertEquals("7B", repo.reconcileStudent(b).student.className)
+            assertEquals(2, store.list().size)
+            hold = true
+            val first = async(start = CoroutineStart.UNDISPATCHED) { runCatching { repo.reconcileStudent(a) } }
+            val second = async(start = CoroutineStart.UNDISPATCHED) { runCatching { repo.reconcileStudent(b) } }
+            entered.await()
+            repo.invalidateForLogout()
+            store.clear()
+            release.complete(Unit)
+            assertTrue(first.await().exceptionOrNull() is CancellationException)
+            assertTrue(second.await().exceptionOrNull() is CancellationException)
+            assertNull(repo.cachedSnapshotFor(a))
+            assertNull(repo.cachedSnapshotFor(b))
+            assertTrue(repo.listStudents().isEmpty())
+            assertTrue(store.list().isEmpty())
+            assertTrue(runCatching { repo.getStudentSnapshot(a) }.exceptionOrNull() is CancellationException)
+            repo.invalidateForLogout()
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 
     private fun createRepositoryFixture(

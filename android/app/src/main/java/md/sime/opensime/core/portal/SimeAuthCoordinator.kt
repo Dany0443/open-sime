@@ -1,8 +1,10 @@
 package md.sime.opensime.core.portal
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import md.sime.opensime.core.model.AccountRole
@@ -61,6 +63,7 @@ class SimeAuthCoordinator(
     private var _activeStudentId: StudentId? = null
     private var _activeSnapshot: StudentAgendaSnapshot? = null
     private var _lastError: SimePortalError? = null
+    private var verifiedAccount: String? = null
 
     private val snapshotsByStudent = linkedMapOf<StudentId, StudentAgendaSnapshot>()
     private val loginGuardByAccount = linkedMapOf<String, RejectionGuardEntry>()
@@ -102,11 +105,23 @@ class SimeAuthCoordinator(
         username: String,
         password: String,
         role: AccountRole = AccountRole.PARENT,
-    ): SimeAuthenticatedSession = operationMutex.withLock {
+    ): SimeAuthenticatedSession {
+        val requestedGeneration = session.logoutGeneration
+        return operationMutex.withLock {
+            loginLocked(username, password, role, requestedGeneration).first
+        }
+    }
+
+    private suspend fun loginLocked(username: String, password: String, role: AccountRole,
+        requestedGeneration: Long,
+    ): Pair<SimeAuthenticatedSession, Long> {
+        val operationContext = currentCoroutineContext()
+        operationContext.ensureActive()
         val cleanUsername = username.trim()
         val accountKey = cleanUsername.lowercase(Locale.ROOT)
 
-        synchronized(stateLock) {
+        val myGeneration = synchronized(stateLock) {
+            if (requestedGeneration != session.logoutGeneration) throw CancellationException("Logged out")
             _lastError = null
             if (accountKey.isNotEmpty()) {
                 val guard = loginGuardByAccount[accountKey]
@@ -120,15 +135,12 @@ class SimeAuthCoordinator(
                     throw err
                 }
             }
-        }
-
-        val myGeneration = synchronized(stateLock) {
             authGeneration += 1L
             clearCoordinatorStateLocked(keepRejectionGuards = true)
             authGeneration
         }
 
-        try {
+        return try {
             val handshake = session.login(
                 username = cleanUsername,
                 password = password,
@@ -154,9 +166,9 @@ class SimeAuthCoordinator(
                 ?: initialSnapshot.student
 
             synchronized(stateLock) {
+                operationContext.ensureActive()
                 if (authGeneration != myGeneration) {
-                    session.clear()
-                    throw SimeAppSessionError("Sesiunea a fost închisă în timpul autentificării.")
+                    throw CancellationException("Session changed")
                 }
                 loginGuardByAccount.remove(accountKey)
                 latestSwitchTicket += 1L
@@ -165,6 +177,7 @@ class SimeAuthCoordinator(
                 _activeSnapshot = initialSnapshot
                 _lastError = null
                 snapshotsByStudent[canonicalStudentId] = initialSnapshot
+                verifiedAccount = cleanUsername
             }
 
             SimeAuthenticatedSession(
@@ -172,13 +185,14 @@ class SimeAuthCoordinator(
                 initialStudent = initialProfile,
                 students = domainStudents,
                 initialSnapshot = initialSnapshot,
-            )
+            ) to myGeneration
         } catch (cancel: CancellationException) {
-            logout()
+            logoutIfCurrent(myGeneration)
             throw cancel
         } catch (err: Throwable) {
             val typed = SimePortalError.fromThrowable(err)
             synchronized(stateLock) {
+                if (authGeneration != myGeneration) throw CancellationException("Session changed")
                 if (typed is SimeLoginRejectedError && accountKey.isNotEmpty()) {
                     val entry = loginGuardByAccount.getOrPut(accountKey) { RejectionGuardEntry() }
                     entry.rejections += 1
@@ -189,9 +203,52 @@ class SimeAuthCoordinator(
                 }
                 clearCoordinatorStateLocked(keepRejectionGuards = true)
                 _lastError = typed
+                session.clear(preserveRejectedFlag = typed is SimeLoginRejectedError)
             }
-            session.clear(preserveRejectedFlag = typed is SimeLoginRejectedError)
             throw typed
+        }
+    }
+
+    /** Persistence is part of completing manual login; failed storage never reaches the signed-in UI. */
+    internal suspend fun loginWithPersistence(
+        username: String,
+        password: String,
+        role: AccountRole,
+        rememberMe: Boolean,
+        vault: SimeCredentialVault,
+        beforePersistence: () -> Unit = {},
+    ): SimeAuthenticatedSession {
+        val requestedGeneration = session.logoutGeneration
+        return operationMutex.withLock {
+            val (authenticated, generation) = loginLocked(username, password, role, requestedGeneration)
+            try {
+                withContext(Dispatchers.IO) {
+                    val persistenceContext = currentCoroutineContext()
+                    persistenceContext.ensureActive()
+                    synchronized(stateLock) {
+                        if (authGeneration != generation) throw CancellationException("Session changed")
+                    }
+                    try { beforePersistence() } catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) { throw SimeCredentialStorageError() }
+                    vault.updateLoginPersistence(username, password, role, rememberMe) {
+                        persistenceContext.ensureActive()
+                        synchronized(stateLock) {
+                            if (authGeneration != generation) throw CancellationException("Session changed")
+                        }
+                    }
+                }
+                currentCoroutineContext().ensureActive()
+                synchronized(stateLock) {
+                    if (authGeneration != generation) throw CancellationException("Session changed")
+                }
+                authenticated
+            } catch (cancel: CancellationException) {
+                logoutIfCurrent(generation)
+                throw cancel
+            } catch (err: SimeCredentialStorageError) {
+                logoutIfCurrent(generation)
+                throw err
+            }
         }
     }
 
@@ -203,8 +260,36 @@ class SimeAuthCoordinator(
         synchronized(stateLock) {
             authGeneration += 1L
             clearCoordinatorStateLocked(keepRejectionGuards = true)
+            session.clear(preserveRejectedFlag = false, explicitLogout = true)
         }
-        session.clear(preserveRejectedFlag = false)
+    }
+
+    /** Atomically captures only the account verified by the current coordinator generation. */
+    internal fun logoutAndGetVerifiedAccount(): String? = synchronized(stateLock) {
+        val account = verifiedAccount
+        logout()
+        account
+    }
+
+    internal fun hasVerifiedCleanupAccount(): Boolean = synchronized(stateLock) { verifiedAccount != null }
+
+    /** Keep only verified cleanup ownership when cancellation ends a session. */
+    internal fun logoutPreservingVerifiedAccount(): String? = synchronized(stateLock) {
+        val account = verifiedAccount
+        logout()
+        verifiedAccount = account
+        account
+    }
+
+    private fun logoutIfCurrent(generation: Long) {
+        synchronized(stateLock) {
+            if (authGeneration != generation) return
+            val account = verifiedAccount
+            authGeneration += 1L
+            clearCoordinatorStateLocked(keepRejectionGuards = true)
+            session.clear()
+            verifiedAccount = account
+        }
     }
 
     /**
@@ -223,6 +308,7 @@ class SimeAuthCoordinator(
         forceRefresh: Boolean = false,
         gated: Boolean = false,
     ): StudentAgendaSnapshot {
+        currentCoroutineContext().ensureActive()
         val cleanInput = rawStudentId?.trim().orEmpty()
         if (!session.isAuthenticated) {
             val err = SimeAppSessionError("Sesiunea a expirat. Autentifică-te din nou.")
@@ -355,6 +441,7 @@ class SimeAuthCoordinator(
         forceRefresh: Boolean = false,
         gated: Boolean = false,
     ): StudentAgendaSnapshot {
+        currentCoroutineContext().ensureActive()
         val cleanInput = rawStudentId?.trim().orEmpty()
         if (!session.isAuthenticated) {
             val err = SimeAppSessionError("Sesiunea a expirat. Autentifică-te din nou.")
@@ -436,9 +523,9 @@ class SimeAuthCoordinator(
                 if (authGeneration == myGeneration) {
                     clearCoordinatorStateLocked(keepRejectionGuards = true)
                     _lastError = typed
+                    session.clear(preserveRejectedFlag = false)
                 }
             }
-            session.clear(preserveRejectedFlag = false)
             return
         }
 
@@ -457,6 +544,7 @@ class SimeAuthCoordinator(
     }
 
     private fun clearCoordinatorStateLocked(keepRejectionGuards: Boolean) {
+        verifiedAccount = null
         desiredStudentKey = ""
         _activeStudentId = null
         _activeSnapshot = null

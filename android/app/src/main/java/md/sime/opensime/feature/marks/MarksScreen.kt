@@ -100,6 +100,7 @@ private fun SubjectMarksCard(
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
     val sem1Marks = summary.marksForSemester(1)
     val sem2Marks = summary.marksForSemester(2)
+    val unknownMarks = summary.marks.filter { it.semester !in 1..2 }
 
     Surface(
         shape = MaterialTheme.shapes.extraLarge,
@@ -136,7 +137,7 @@ private fun SubjectMarksCard(
             }
 
             // `.mark-groups`
-            if (sem1Marks.isEmpty() && sem2Marks.isEmpty()) {
+            if (sem1Marks.isEmpty() && sem2Marks.isEmpty() && unknownMarks.isEmpty()) {
                 Text(
                     text = strings.emptyMarkText(summary.scale),
                     style = MaterialTheme.typography.bodyMedium,
@@ -157,6 +158,9 @@ private fun SubjectMarksCard(
                             marks = sem2Marks,
                             strings = strings,
                         )
+                    }
+                    if (unknownMarks.isNotEmpty()) {
+                        MarkGroupSection(title = strings.unknownSemesterMarks, marks = unknownMarks, strings = strings)
                     }
                 }
             }
@@ -257,6 +261,7 @@ private fun MarksTableSurface(
                 val rowBg = if (idx % 2 == 1) colorScheme.surfaceContainer else colorScheme.surfaceContainerLow
                 val sem1 = subject.marksForSemester(1)
                 val sem2 = subject.marksForSemester(2)
+                val unknown = subject.marks.filter { it.semester !in 1..2 }
 
                 Row(
                     modifier = Modifier
@@ -287,6 +292,9 @@ private fun MarksTableSurface(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colorScheme.onSurfaceVariant,
                             )
+                        }
+                        if (unknown.isNotEmpty()) {
+                            MarkGroupSection(title = strings.unknownSemesterMarks, marks = unknown, strings = strings)
                         }
                     }
 

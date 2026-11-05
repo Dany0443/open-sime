@@ -1,6 +1,8 @@
 package md.sime.opensime.core.model
 
 import java.util.Locale
+import java.math.BigDecimal
+import java.math.RoundingMode
 import kotlin.math.roundToInt
 
 /**
@@ -190,6 +192,19 @@ data class MarkItem(
     val topic: String? = null,
 )
 
+enum class SchoolLevel { GYMNASIUM, LYCEUM }
+enum class ThesisRequirement { NONE, REQUIRED, UNKNOWN }
+
+/** Evidence covers the subject and semester, including summative assessment, exemptions,
+ * retakes, extensions, complete mark coverage, and verified grading rules. */
+data class SemesterGradeEvidence(
+    val level: SchoolLevel,
+    val thesisRequirement: ThesisRequirement,
+    val complete: Boolean,
+    val classificationsConfirmed: Boolean,
+    val deduplicated: Boolean,
+)
+
 data class SubjectMarksSummary(
     val subject: String,
     val teacherName: String,
@@ -197,19 +212,45 @@ data class SubjectMarksSummary(
     val marks: List<MarkItem>,
     val portalAverage: Double? = null,
     val scale: SubjectScale = inferSubjectScale(subject, marks),
+    val semesterEvidence: Map<Int, SemesterGradeEvidence> = emptyMap(),
+    val portalSemesterAverageCandidates: Map<Int, Double> = emptyMap(),
+    val portalAnnualAverageCandidate: Double? = null,
 ) {
-    /**
-     * Returns the portal-provided average if available, or computes an explicitly labeled
-     * estimated average from numeric marks only (never counting qualifiers `FB`, `B`, `S`, `I`).
-     */
+    /** Annual estimate only; old portal averages have no verified period or provenance. */
     fun resolveAverage(): AverageMetric? {
-        if (portalAverage != null) {
-            return AverageMetric(value = roundTwoDecimals(portalAverage), isEstimated = false)
+        val first = resolveSemesterAverage(1) ?: return null
+        val second = resolveSemesterAverage(2) ?: return null
+        return AverageMetric(decimalMean(listOf(first.value, second.value)) ?: return null, isEstimated = true)
+    }
+
+    /** Local estimates require confirmed coverage and classification, never inferred portal metadata. */
+    fun resolveSemesterAverage(targetSemester: Int): AverageMetric? {
+        if (scale != SubjectScale.NUMERIC || targetSemester !in 1..2) return null
+        if (marks.any { it.semester !in 1..2 }) return null
+        val evidence = semesterEvidence[targetSemester] ?: return null
+        if (!evidence.complete || !evidence.classificationsConfirmed || !evidence.deduplicated ||
+            evidence.thesisRequirement == ThesisRequirement.UNKNOWN) return null
+        val period = marks.filter { it.semester == targetSemester }
+        if (period.map { it.id }.distinct().size != period.size || period.any { it.subject != subject }) return null
+        val numeric = period.map { mark ->
+            val value = (mark.value as? MarkValue.Numeric)?.decimalScore ?: return null
+            if (!value.isFinite() || value < 1.0 || value > 10.0) return null
+            mark to value
         }
-        val numericScores = marks.mapNotNull { (it.value as? MarkValue.Numeric)?.decimalScore }
-        if (numericScores.isEmpty()) return null
-        val mean = numericScores.average()
-        return AverageMetric(value = roundTwoDecimals(mean), isEstimated = true)
+        val regular = numeric.filterNot { it.first.isThesis }.map { it.second }
+        val theses = numeric.filter { it.first.isThesis }.map { it.second }
+        if (regular.size < 2) return null
+        val regularMean = decimalMean(regular) ?: return null
+        val result = when (evidence.thesisRequirement) {
+            ThesisRequirement.NONE -> if (theses.isEmpty()) regularMean else return null
+            ThesisRequirement.REQUIRED -> {
+                if (evidence.level != SchoolLevel.LYCEUM || theses.size != 1 ||
+                    regularMean < 5.0 || theses.single() < 5.0) return null
+                decimalMean(listOf(regularMean, theses.single())) ?: return null
+            }
+            ThesisRequirement.UNKNOWN -> return null
+        }
+        return AverageMetric(result, isEstimated = true)
     }
 
     fun marksForSemester(targetSemester: Int): List<MarkItem> =
@@ -352,6 +393,7 @@ data class StudentAgendaSnapshot(
     val stale: Boolean = false,
     val sem1AbsenceSummary: AbsenceSummary? = null,
     val sem2AbsenceSummary: AbsenceSummary? = null,
+    val gradesCoverageComplete: Boolean = false,
 ) {
     val studentId: StudentId get() = student.id
 
@@ -369,39 +411,22 @@ data class StudentAgendaSnapshot(
         return this
     }
 
-    /**
-     * Computes the general average across subjects that have a valid numeric average.
-     * If any contributing subject average is estimated or no portal general average was supplied,
-     * the result is marked `isEstimated = true`.
-     */
-    fun resolveGeneralAverage(portalGeneralAverage: Double? = null): AverageMetric? {
-        if (portalGeneralAverage != null) {
-            return AverageMetric(value = roundTwoDecimals(portalGeneralAverage), isEstimated = false)
-        }
-        val resolvedSubjectAverages = subjectSummaries.mapNotNull { it.resolveAverage() }
-        if (resolvedSubjectAverages.isEmpty()) return null
-        val mean = resolvedSubjectAverages.map { it.value }.average()
-        return AverageMetric(
-            value = roundTwoDecimals(mean),
-            isEstimated = true,
-        )
+    /** Estimated annual general average only when all eligible subjects are covered. */
+    fun resolveGeneralAverage(): AverageMetric? {
+        if (!gradesCoverageComplete) return null
+        val subjects = subjectSummaries.filter { it.scale == SubjectScale.NUMERIC }
+        if (subjects.isEmpty()) return null
+        val values = subjects.map { it.resolveAverage()?.value ?: return null }
+        return AverageMetric(decimalMean(values) ?: return null, isEstimated = true)
     }
 
-    /**
-     * Computes the estimated average for a specific semester from numeric marks in that semester.
-     */
+    /** Estimated semester general average only when all eligible subjects are covered. */
     fun resolveSemesterAverage(semester: Int): AverageMetric? {
-        val semesterSubjectMeans = subjectSummaries.mapNotNull { subject ->
-            val numericScores = subject.marks
-                .filter { it.semester == semester }
-                .mapNotNull { (it.value as? MarkValue.Numeric)?.decimalScore }
-            if (numericScores.isEmpty()) null else roundTwoDecimals(numericScores.average())
-        }
-        if (semesterSubjectMeans.isEmpty()) return null
-        return AverageMetric(
-            value = roundTwoDecimals(semesterSubjectMeans.average()),
-            isEstimated = true,
-        )
+        if (!gradesCoverageComplete || semester !in 1..2) return null
+        val subjects = subjectSummaries.filter { it.scale == SubjectScale.NUMERIC }
+        if (subjects.isEmpty()) return null
+        val values = subjects.map { it.resolveSemesterAverage(semester)?.value ?: return null }
+        return AverageMetric(decimalMean(values) ?: return null, isEstimated = true)
     }
 
     /**
@@ -431,8 +456,11 @@ data class StudentAgendaSnapshot(
     }
 }
 
-internal fun roundTwoDecimals(value: Double): Double =
-    (value * 100.0).roundToInt() / 100.0
+internal fun decimalMean(values: List<Double>): Double? {
+    if (values.isEmpty() || values.any { !it.isFinite() }) return null
+    val sum = values.fold(BigDecimal.ZERO) { total, value -> total + BigDecimal.valueOf(value) }
+    return sum.divide(BigDecimal.valueOf(values.size.toLong()), 2, RoundingMode.DOWN).toDouble()
+}
 
 fun parseHmToMinutes(hm: String): Int? {
     val parts = hm.trim().split(":")

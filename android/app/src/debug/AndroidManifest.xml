@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:name="md.sime.opensime.core.portal.DebugSchemaApplication">
+        <activity android:name="md.sime.opensime.core.portal.DebugSchemaActivity" android:exported="false" />
+    </application>
+</manifest>

@@ -799,7 +799,7 @@ private fun GpaMetricCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = strings.generalAverageEstimated,
+                    text = if (gpa == null) strings.generalAverageUnavailable else strings.generalAverageEstimated,
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontWeight = FontWeight.Bold,
                     ),

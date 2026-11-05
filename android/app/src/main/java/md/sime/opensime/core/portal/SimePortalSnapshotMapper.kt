@@ -66,7 +66,7 @@ internal object SimePortalSnapshotMapper {
                 subject = g.subject.orEmpty(),
                 value = g.toDomainMarkValue(),
                 isoDate = g.date.orEmpty(),
-                semester = g.semester ?: currentSemester,
+                semester = g.semester ?: 0,
                 isThesis = g.isThesis,
             )
         }
@@ -78,7 +78,7 @@ internal object SimePortalSnapshotMapper {
                     subject = subj.subject,
                     value = m.toDomainMarkValue(),
                     isoDate = m.date.orEmpty(),
-                    semester = m.semester ?: currentSemester,
+                    semester = m.semester ?: 0,
                     isThesis = m.isThesis,
                     teacherName = subj.teacher,
                 )
@@ -95,6 +95,10 @@ internal object SimePortalSnapshotMapper {
                 marks = domainMarks,
                 portalAverage = subj.officialPortalAverage,
                 scale = domainScale,
+                portalSemesterAverageCandidates = subj.semesters.mapNotNull { entry ->
+                    entry.officialAverage?.let { entry.semester to it }
+                }.toMap(),
+                portalAnnualAverageCandidate = subj.annualAverage,
             )
         }
 

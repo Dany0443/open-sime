@@ -1,6 +1,5 @@
 package md.sime.opensime
 
-import md.sime.opensime.core.designsystem.AppTextSize
 import md.sime.opensime.core.designsystem.NamedThemePalette
 import md.sime.opensime.core.designsystem.OpenSimeSettingsState
 import md.sime.opensime.core.designsystem.ThemeMode
@@ -161,17 +160,12 @@ class NavigationAndLocalizationTest {
     }
 
     @Test
-    fun `settings state round-trips through Saver and text size multipliers match web`() {
-        assertEquals(0.90f, AppTextSize.S.scaleFactor, 0.001f)
-        assertEquals(1.00f, AppTextSize.M.scaleFactor, 0.001f)
-        assertEquals(1.125f, AppTextSize.L.scaleFactor, 0.001f)
-        assertEquals(1.25f, AppTextSize.XL.scaleFactor, 0.001f)
+    fun `settings restore retains accessibility preferences from legacy saved state`() {
 
         val custom = OpenSimeSettingsState(
             language = AppLanguage.RU,
             themeMode = ThemeMode.DARK,
-            namedPalette = NamedThemePalette.SIME_INDIGO,
-            textSize = AppTextSize.L,
+            namedPalette = NamedThemePalette.FOREST_CALM,
             simpleMode = true,
             highContrast = true,
             reduceMotion = true,
@@ -181,6 +175,9 @@ class NavigationAndLocalizationTest {
         assertTrue(custom.highContrast)
         assertTrue(custom.simpleMode)
         assertTrue(custom.onboardingCompleted)
+
+        val restored = OpenSimeSettingsState.Saver.restore(listOf("DARK", "XL", "FOREST_CALM", "true", "true", "true", "RU", "true"))
+        assertEquals(custom, restored)
 
         val defaultState = OpenSimeSettingsState()
         assertFalse(defaultState.onboardingCompleted)

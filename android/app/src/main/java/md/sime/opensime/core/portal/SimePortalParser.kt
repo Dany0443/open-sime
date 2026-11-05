@@ -269,14 +269,14 @@ object SimePortalParser {
         if (reports.isEmpty()) {
             val rep = parseSemesterReportFromRoot(doc)
             if (rep.isNotEmpty()) {
-                reports.add(SemesterReportInput(semester = metadata.currentSemester ?: 1, report = rep))
+                reports.add(SemesterReportInput(semester = 0, report = rep))
             }
         }
         if (reports.isEmpty() && grades.isNotEmpty()) {
             val bySem = linkedMapOf<Int, MutableMap<String, ParsedSubjectReportRow>>()
             for (g in grades) {
                 val subj = g.subject ?: continue
-                val sem = g.semester ?: metadata.currentSemester ?: 1
+                val sem = g.semester ?: 0
                 val semMap = bySem.getOrPut(sem) { linkedMapOf() }
                 val existing = semMap[subj]
                 val updatedMarks = (existing?.marks.orEmpty()) + g

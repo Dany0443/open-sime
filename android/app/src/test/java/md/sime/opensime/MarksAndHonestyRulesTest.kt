@@ -33,7 +33,7 @@ class MarksAndHonestyRulesTest {
     }
 
     @Test
-    fun `subject with mixed numeric and qualifier marks excludes qualifiers from estimated average`() {
+    fun `qualifier subject with mixed numeric and qualifier marks has no numeric average`() {
         val summary = SubjectMarksSummary(
             subject = "Educația plastică",
             teacherName = "Prof. Exemplu",
@@ -45,14 +45,11 @@ class MarksAndHonestyRulesTest {
             ),
         )
 
-        val avg = summary.resolveAverage()
-        assertNotNull(avg)
-        assertEquals(9.0, avg!!.value, 0.001)
-        assertTrue(avg.isEstimated)
+        assertNull(summary.resolveAverage())
     }
 
     @Test
-    fun `portal provided average is marked as not estimated`() {
+    fun `unverified portal average without period provenance is unavailable`() {
         val summary = SubjectMarksSummary(
             subject = "Matematica",
             teacherName = "Prof. Exemplu",
@@ -63,22 +60,18 @@ class MarksAndHonestyRulesTest {
             portalAverage = 9.45,
         )
 
-        val avg = summary.resolveAverage()
-        assertNotNull(avg)
-        assertEquals(9.45, avg!!.value, 0.001)
-        assertFalse(avg.isEstimated)
+        assertEquals(9.45, summary.portalAverage!!, 0.001)
+        assertNull(summary.resolveAverage())
     }
 
     @Test
-    fun `semester averages exclude qualifiers and match per-semester numeric subject averages`() {
+    fun `semester averages remain unavailable without complete evidence`() {
         val snapshots = SampleAgendaRepository.buildDefaultSampleSnapshots()
         val snap7A = snapshots.getValue(SampleAgendaRepository.STUDENT_SEVENTH_GRADE)
 
         val sem1Avg = snap7A.resolveSemesterAverage(1)
         val sem2Avg = snap7A.resolveSemesterAverage(2)
-        assertNotNull(sem1Avg)
-        assertTrue(sem1Avg!!.isEstimated)
-        assertTrue(sem1Avg.value in 8.0..10.0)
+        assertNull(sem1Avg)
         // Student 7A is in Semester 1 and has no Semester 2 marks yet
         assertNull(sem2Avg)
     }
@@ -134,9 +127,7 @@ class MarksAndHonestyRulesTest {
 
         snapshots.values.forEach { snapshot ->
             assertEquals(DataSourceMode.SAMPLE_PREVIEW, snapshot.dataSourceMode)
-            val generalAvg = snapshot.resolveGeneralAverage()
-            assertNotNull(generalAvg)
-            assertTrue(generalAvg!!.isEstimated)
+            assertNull(snapshot.resolveGeneralAverage())
         }
 
         val snap11R = snapshots.getValue(SampleAgendaRepository.STUDENT_ELEVENTH_GRADE)

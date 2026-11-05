@@ -1,12 +1,26 @@
 package md.sime.opensime.core.portal
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
+import md.sime.opensime.BuildConfig
 import md.sime.opensime.core.model.AccountRole
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.core.model.StudentId
 import org.jsoup.nodes.Element
 import java.net.URI
 import java.util.Locale
+
+private fun debugSchemaCheckStudent(session: SimePortalSession, student: String) {
+    try {
+        Class.forName("md.sime.opensime.core.portal.DebugGradeSchemaInspector")
+            .getMethod("checkStudent", SimePortalSession::class.java, String::class.java)
+            .invoke(null, session, student)
+    } catch (err: Exception) {
+        throw CancellationException("Debug inspection ownership unavailable").also { it.initCause(err) }
+    }
+}
 
 /**
  * Verified dashboard HTML page for a single student in the current in-memory session.
@@ -66,9 +80,13 @@ class SimePortalSession(
     private var _credentialsRejected: Boolean = false
     private var _currentStudentKey: String = ""
     private var _sessionGeneration: Long = 0L
+    private var _logoutGeneration: Long = 0L
 
     val sessionGeneration: Long
         get() = synchronized(stateLock) { _sessionGeneration }
+
+    internal val logoutGeneration: Long
+        get() = synchronized(stateLock) { _logoutGeneration }
 
     // alias key (normalized lowercase) -> canonical student key (normalized lowercase)
     private val aliases = linkedMapOf<String, String>()
@@ -97,17 +115,28 @@ class SimePortalSession(
     val isAuthenticated: Boolean
         get() = synchronized(stateLock) { _sessionId != null && _portalUrl != null }
 
+    internal fun debugWithVerifiedOwner(generation: Long, student: String, action: () -> Unit): Boolean =
+        synchronized(stateLock) {
+            if (_sessionId == null || _portalUrl == null || _sessionGeneration != generation || _currentStudentKey != student) {
+                false
+            } else {
+                action()
+                true
+            }
+        }
+
     /**
      * Clears all in-memory authentication state, student mappings, cached pages, and session cookies.
      * Mirrors `SimeClient.resetSession()` (`web/server.js:2091-2099`).
      */
-    fun clear(preserveRejectedFlag: Boolean = false) {
+    fun clear(preserveRejectedFlag: Boolean = false, explicitLogout: Boolean = false) {
         synchronized(stateLock) {
             _sessionId = null
             _portalUrl = null
             _role = null
             _currentStudentKey = ""
             _sessionGeneration += 1L
+            if (explicitLogout) _logoutGeneration = _sessionGeneration
             if (!preserveRejectedFlag) {
                 _credentialsRejected = false
             }
@@ -115,8 +144,8 @@ class SimePortalSession(
             knownStudents.clear()
             studentUrls.clear()
             studentPages.clear()
+            http.clearCookies()
         }
-        http.clearCookies()
     }
 
     /**
@@ -201,7 +230,12 @@ class SimePortalSession(
             throw SimeLoginRejectedError("Username and password are required")
         }
 
-        clear(preserveRejectedFlag = false)
+        val operationContext = currentCoroutineContext()
+        operationContext.ensureActive()
+        val generation = synchronized(stateLock) {
+            clear(preserveRejectedFlag = false)
+            _sessionGeneration
+        }
 
         val userType = if (role == AccountRole.PARENT) USER_TYPE_PARENT else USER_TYPE_STUDENT
         val userTypeName = if (role == AccountRole.PARENT) USER_TYPE_NAME_PARENT else USER_TYPE_NAME_STUDENT
@@ -266,6 +300,8 @@ class SimePortalSession(
                 throw err
             } catch (err: SimeLoginRejectedError) {
                 synchronized(stateLock) {
+                    operationContext.ensureActive()
+                    if (_sessionGeneration != generation) throw CancellationException("Session changed")
                     _credentialsRejected = true
                 }
                 throw err
@@ -294,11 +330,12 @@ class SimePortalSession(
             }
 
             synchronized(stateLock) {
+                operationContext.ensureActive()
+                if (_sessionGeneration != generation) throw CancellationException("Session changed")
                 _sessionId = redirect.sessionId
                 _portalUrl = redirect.portalUrl
                 _role = role
                 _credentialsRejected = false
-                _sessionGeneration += 1L
 
                 val pageKey = noteFetchedLocked(
                     url = redirect.portalUrl,
@@ -318,6 +355,7 @@ class SimePortalSession(
                     fetchedAtEpochMillis = nowMillis(),
                 )
 
+                _sessionGeneration += 1L
                 return PortalHandshakeResult(
                     sessionId = redirect.sessionId,
                     portalUrl = redirect.portalUrl,
@@ -328,8 +366,11 @@ class SimePortalSession(
                 )
             }
         } catch (err: Throwable) {
-            val keepRejected = err is SimeLoginRejectedError && synchronized(stateLock) { _credentialsRejected }
-            clear(preserveRejectedFlag = keepRejected)
+            synchronized(stateLock) {
+                if (_sessionGeneration == generation) {
+                    clear(preserveRejectedFlag = err is SimeLoginRejectedError && _credentialsRejected)
+                }
+            }
             throw err
         }
     }
@@ -345,6 +386,7 @@ class SimePortalSession(
         gated: Boolean = false,
     ): PortalStudentDashboardPage {
         val targetKey = requireAuthorizedStudentKey(rawStudentId, isExplicitSwitch = true)
+        if (BuildConfig.DEBUG) debugSchemaCheckStudent(this, targetKey)
         return fetchStudentPage(targetKey, gated = gated)
     }
 
@@ -362,6 +404,7 @@ class SimePortalSession(
         assertCurrent: Boolean = false,
     ): PortalStudentDashboardPage {
         val targetKey = requireAuthorizedStudentKey(rawStudentId, isExplicitSwitch = false)
+        if (BuildConfig.DEBUG) debugSchemaCheckStudent(this, targetKey)
         val now = nowMillis()
 
         val cached = synchronized(stateLock) {
@@ -387,6 +430,7 @@ class SimePortalSession(
         page: PortalStudentDashboardPage,
         requestedStudentId: String?,
     ): StudentAgendaSnapshot {
+        val generation = sessionGeneration
         val expectedKey = requireAuthorizedStudentKey(requestedStudentId, isExplicitSwitch = false)
         assertPageBelongsToStudent(page, expectedKey)
 
@@ -395,6 +439,7 @@ class SimePortalSession(
             todayIso = todayProvider(),
         )
         val parsedPageKey = synchronized(stateLock) {
+            if (_sessionGeneration != generation) throw CancellationException("Session changed")
             val doc = SimeDomHelpers.parseHtml(page.html)
             learnPageLocked(doc)
         }
@@ -492,10 +537,10 @@ class SimePortalSession(
         targetKey: String,
         gated: Boolean,
     ): PortalStudentDashboardPage {
-        val (rawHref, activeSessionId) = synchronized(stateLock) {
+        val (rawHref, activeSessionId, generation) = synchronized(stateLock) {
             val sid = _sessionId ?: throw SimeAppSessionError("Sesiunea a expirat. Autentifică-te din nou.")
             val href = studentUrls[targetKey]
-            href to sid
+            Triple(href, sid, _sessionGeneration)
         }
 
         if (rawHref.isNullOrBlank() || !hasChecksumParam(rawHref)) {
@@ -516,6 +561,7 @@ class SimePortalSession(
             val page = fetchDashboard(
                 url = switchUrl,
                 gated = gated && attempt == 0,
+                generation = generation,
             )
             if (page.studentKey == targetKey) {
                 return page
@@ -525,6 +571,7 @@ class SimePortalSession(
 
         // Remove any mismatched active state and fail closed with STUDENT_MISMATCH
         synchronized(stateLock) {
+            if (_sessionGeneration != generation) throw CancellationException("Session changed")
             studentPages.remove(targetKey)
             if (_currentStudentKey == targetKey) {
                 _currentStudentKey = lastActualKey.orEmpty()
@@ -540,7 +587,13 @@ class SimePortalSession(
     private suspend fun fetchDashboard(
         url: String,
         gated: Boolean,
+        generation: Long,
     ): PortalStudentDashboardPage {
+        val operationContext = currentCoroutineContext()
+        operationContext.ensureActive()
+        synchronized(stateLock) {
+            if (_sessionGeneration != generation) throw CancellationException("Session changed")
+        }
         val resp = try {
             http.request(
                 method = "GET",
@@ -549,16 +602,16 @@ class SimePortalSession(
                 gated = gated,
             )
         } catch (err: SimeAuthError) {
-            clear(preserveRejectedFlag = false)
+            clearIfCurrent(generation)
             throw err
         } catch (err: SimeForbiddenError) {
-            clear(preserveRejectedFlag = false)
+            clearIfCurrent(generation)
             throw err
         }
 
         val path = URI(resp.url).rawPath?.lowercase(Locale.ROOT).orEmpty()
         if (path.endsWith("/public") || path.contains("login")) {
-            clear(preserveRejectedFlag = false)
+            clearIfCurrent(generation)
             throw SimeSessionExpiredError("Portal session expired (redirected to public or login)")
         }
 
@@ -572,6 +625,8 @@ class SimePortalSession(
         }
 
         return synchronized(stateLock) {
+            operationContext.ensureActive()
+            if (_sessionGeneration != generation) throw CancellationException("Session changed")
             val key = noteFetchedLocked(
                 url = url,
                 html = resp.text,
@@ -586,6 +641,10 @@ class SimePortalSession(
                 fetchedAtEpochMillis = nowMillis(),
             )
         }
+    }
+
+    private fun clearIfCurrent(generation: Long) {
+        synchronized(stateLock) { if (_sessionGeneration == generation) clear() }
     }
 
     /**
