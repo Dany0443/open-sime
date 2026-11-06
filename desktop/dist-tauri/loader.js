@@ -5,7 +5,11 @@
     const detailEl = document.getElementById("status-detail");
     const codeEl = document.getElementById("status-code");
 
-    if (card) card.classList.add("is-error");
+    if (window.__simeLoadingIndicator) window.__simeLoadingIndicator.stop();
+    if (card) {
+      card.classList.add("is-error");
+      card.hidden = false;
+    }
     if (titleEl) {
       titleEl.textContent = "Serviciul local Open SIME nu a putut porni";
     }

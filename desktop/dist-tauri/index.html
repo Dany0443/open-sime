@@ -12,16 +12,17 @@
   </head>
   <body>
     <main class="shell" role="main" aria-live="polite">
-      <div class="card" id="status-card">
+      <div class="indicator" id="loading-indicator" role="progressbar" aria-label="Se încarcă">
+        <canvas id="loading-canvas" aria-hidden="true"></canvas>
+      </div>
+      <div class="card is-error" id="status-card" hidden>
         <h1 class="title">Open SIME</h1>
-        <p class="subtitle" id="status-title">Se pornește serviciul local Open SIME…</p>
-        <p class="detail" id="status-detail">
-          Aplicația pregătește conexiunea securizată pe 127.0.0.1.
-        </p>
+        <p class="subtitle" id="status-title"></p>
+        <p class="detail" id="status-detail"></p>
         <pre class="code" id="status-code" hidden></pre>
       </div>
     </main>
+    <script src="loading-indicator.js"></script>
     <script src="loader.js"></script>
   </body>
 </html>
-

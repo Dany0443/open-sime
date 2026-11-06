@@ -7,10 +7,14 @@
   --error: #ba1a1a;
   --error-bg: #ffdad6;
   --border: #c2c6d1;
+  --primary-container: #dee0ff;
+  --on-primary-container: #00105c;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --primary-container: #293ca0;
+    --on-primary-container: #dee0ff;
     --bg: #10141a;
     --surface: #1c2026;
     --text: #e0e2ea;
@@ -42,7 +46,31 @@ body {
   max-width: 520px;
 }
 
+.shell {
+  display: flex;
+  justify-content: center;
+}
+
+.indicator {
+  width: clamp(72px, 14vmin, 160px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--primary-container);
+}
+
+.indicator[hidden],
+.card[hidden] {
+  display: none;
+}
+
+.indicator canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .card {
+  width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 20px;
