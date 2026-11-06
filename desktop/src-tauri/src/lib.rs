@@ -3,8 +3,9 @@ use serde::Deserialize;
 use std::sync::Mutex;
 #[allow(unused_imports)]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::window::Color;
 #[allow(unused_imports)]
-use tauri::{AppHandle, Manager, RunEvent, Url, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, Theme, Url, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 #[allow(unused_imports)]
 use tauri_plugin_shell::process::CommandEvent;
@@ -37,6 +38,24 @@ struct ReadyPayload {
 struct ErrorPayload {
   code: Option<String>,
   message: Option<String>,
+}
+
+// Native window/webview background matching `dist-tauri/loader.css` (`--bg`), so the window
+// never flashes white before the first page paints. Falls back to light when the theme is unknown.
+fn startup_background_rgb(theme: Option<Theme>) -> (u8, u8, u8) {
+  match theme {
+    Some(Theme::Dark) => (0x10, 0x14, 0x1a),
+    _ => (0xf8, 0xf9, 0xff),
+  }
+}
+
+fn show_main_window_without_flash(app: &AppHandle) {
+  if let Some(window) = app.get_webview_window("main") {
+    let (r, g, b) = startup_background_rgb(window.theme().ok());
+    let _ = window.set_background_color(Some(Color(r, g, b, 255)));
+    let _ = window.show();
+    let _ = window.set_focus();
+  }
 }
 
 fn shutdown_sidecar(app: &AppHandle) {
@@ -408,6 +427,9 @@ pub fn run() {
     .plugin(tauri_plugin_shell::init())
     .manage(Mutex::new(SidecarState::default()))
     .setup(|app| {
+      // The window is created hidden (tauri.conf.json); paint its background before showing it.
+      show_main_window_without_flash(app.handle());
+
       #[cfg(debug_assertions)]
       {
         let _ = (
@@ -419,10 +441,6 @@ pub fn run() {
           build_show_startup_error_script as fn(&str, &str) -> String,
           make_instance_nonce as fn() -> String,
         );
-        if let Some(window) = app.get_webview_window("main") {
-          let _ = window.show();
-          let _ = window.set_focus();
-        }
       }
 
       #[cfg(not(debug_assertions))]
@@ -452,6 +470,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn test_startup_background_matches_loader_theme() {
+    assert_eq!(startup_background_rgb(Some(Theme::Dark)), (0x10, 0x14, 0x1a));
+    assert_eq!(startup_background_rgb(Some(Theme::Light)), (0xf8, 0xf9, 0xff));
+    assert_eq!(startup_background_rgb(None), (0xf8, 0xf9, 0xff));
+  }
 
   #[test]
   fn test_build_show_startup_error_script_escapes() {
