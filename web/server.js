@@ -1882,6 +1882,7 @@ class SimeAuth {
     this.sessionId = null;
     this.portalUrl = null;
     this.credentialsRejected = false;
+    this.revoked = false;
   }
 
   get isAuthenticated() {
@@ -1893,7 +1894,16 @@ class SimeAuth {
     this.portalUrl = null;
   }
 
+  // Wipes the credentials from memory and makes every later login attempt fail.
+  revoke() {
+    this.invalidate();
+    this.username = "";
+    this.password = "";
+    this.revoked = true;
+  }
+
   async login(http, { force = false } = {}) {
+    if (this.revoked) throw new SimeAppSessionError("Session was revoked");
     this.breaker.ensureClosed();
     if (this.credentialsRejected && !force) {
       throw new SimeAuthError("Credentials were rejected earlier; log in again to retry");
@@ -2562,16 +2572,47 @@ function sha(s) {
 }
 
 function serialize(session, fn) {
-  const run = session.chain.then(fn, fn);
+  // Operations queued before a logout/forget must not run (or answer) after the session is revoked.
+  const guarded = () => {
+    assertSessionActive(session);
+    return fn();
+  };
+  const run = session.chain.then(guarded, guarded);
   session.chain = run.catch(() => undefined);
   return run;
 }
 
+function assertSessionActive(session) {
+  if (!session || session.revoked) throw new SimeAppSessionError("Session was revoked");
+}
+
+// Ends a session for good: later awaits of in-flight work see `revoked` and refuse to commit or
+// return data, caches and credentials are wiped, and the bearer token stops working.
+function revokeSession(token, session) {
+  if (token) sessions.delete(token);
+  if (!session || session.revoked) return;
+  session.revoked = true;
+  session.cache.clear();
+  for (const k of Object.keys(session.students)) delete session.students[k];
+  session.studentList = [];
+  session.defaultStudentId = "";
+  session.deviceHash = null;
+  if (session.client) {
+    session.client.studentPages?.clear();
+    if (session.client.auth && typeof session.client.auth.revoke === "function") session.client.auth.revoke();
+    if (typeof session.client.resetSession === "function") session.client.resetSession();
+  }
+}
+
 function storeStudentSessionState(session, studentId, data) {
+  assertSessionActive(session);
   const id = String(studentId || data.studentKey || data.student?.id || data.metadata?.id || "");
   const now = Date.now();
-  const payload = { ...data, cachedAt: now };
   const prevRecord = session.students[id];
+  if (prevRecord && prevRecord.cachedAt > now) {
+    return prevRecord;
+  }
+  const payload = { ...data, cachedAt: now };
   const record = {
     metadata: payload.metadata,
     reusita: payload.reusita,
@@ -2588,6 +2629,12 @@ function storeStudentSessionState(session, studentId, data) {
   if (id) {
     session.students[id] = record;
     session.cache.set(`overview:${id}`, { at: now, data: payload });
+    if (session.client?.auth?.username) {
+      const masterKey = getRememberSecretKey();
+      if (masterKey) {
+        saveSnapshot(session.client.auth.username, id, payload, masterKey);
+      }
+    }
   }
   if (Array.isArray(payload.students) && payload.students.length) {
     session.studentList = payload.students;
@@ -2608,10 +2655,13 @@ function cached(session, key, ttl, producer) {
     if (hit && Date.now() - hit.at < ttl) return meta(hit, false);
     if (hit && breaker.remainingSeconds() > 0) return meta(hit, true);
     try {
-      const entry = { at: Date.now(), data: await producer() };
+      const data = await producer();
+      assertSessionActive(session);
+      const entry = { at: Date.now(), data };
       session.cache.set(key, entry);
       return meta(entry, false);
     } catch (err) {
+      assertSessionActive(session);
       if (hit && isUpstreamFailure(err)) return meta(hit, true);
       throw err;
     }
@@ -2680,7 +2730,7 @@ function sendError(res, err, token) {
     return res.status(401).json(makeErrorPayload("PORTAL_LOGIN_REJECTED", "Numele de utilizator sau parola sunt incorecte."));
   }
   if (err instanceof SimeAppSessionError) {
-    if (token) sessions.delete(token);
+    if (token) revokeSession(token, sessions.get(token));
     return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Sesiunea a expirat. Autentifică-te din nou."));
   }
   if (err instanceof SimeUnexpectedPageError) {
@@ -2721,6 +2771,7 @@ function dataRoute(app, name, ttl, build, { keyFor = () => "", validate = () => 
       const canonicalKey = resKey.key;
       const key = `${name}:${canonicalKey}:${keyFor(req)}`;
       const result = await cached(req.session, key, ttl, () => build(req.session.client, { id: canonicalKey }, req));
+      assertSessionActive(req.session);
       const students = req.session.client.listStudents();
       const student = students.find((s) => s.id === canonicalKey) || { id: canonicalKey };
       return res.json({
@@ -2818,7 +2869,513 @@ function getRememberKeyPath(env = process.env, platform = process.platform, argv
 
 let memRememberKey = null;
 
+// ---------------------------------------------------------------------------------------------
+// Remember Me key custody.
+// Desktop production sidecar: the key exists only in memory, delivered by the Tauri shell over the
+// private stdin pipe after it was read from the OS credential store (Windows Credential Manager,
+// macOS Keychain, Linux Secret Service). There is no file or env fallback; no key => Remember Me off.
+// Standalone web/dev mode keeps the legacy key file (documented limitation, not used by the desktop).
+// ---------------------------------------------------------------------------------------------
+const rememberKeyState = {
+  key: null,
+  code: "KEYSTORE_NOT_PROVIDED",
+  resolved: false,
+  channel: false,
+  generation: 0,
+  rotatedCount: 0,
+  lastSeq: 0,
+};
+const pendingRotations = new Map();
+let resolveRememberKeyReady = () => {};
+const rememberKeyReady = new Promise((resolve) => {
+  resolveRememberKeyReady = resolve;
+});
+let sendRememberKeyControl = (line) => {
+  process.stdout.write(`${line}\n`);
+};
+
+function wipeRememberKey() {
+  if (Buffer.isBuffer(rememberKeyState.key)) rememberKeyState.key.fill(0);
+  rememberKeyState.key = null;
+}
+
+function settleRememberKey(code) {
+  rememberKeyState.code = code;
+  rememberKeyState.resolved = true;
+  resolveRememberKeyReady();
+}
+
+// Parses one control line from the Tauri shell. The line may contain the key: never log it.
+function applyKeyControlLine(line) {
+  if (typeof line !== "string" || line.length > 256) return false;
+  const text = line.trim();
+
+  // Rotation confirmation: SIME_KEY_ROTATED <req_id> <hex>
+  if (text.startsWith("SIME_KEY_ROTATED ")) {
+    const parts = text.slice("SIME_KEY_ROTATED ".length).trim().split(/\s+/);
+    if (parts.length < 2) return false;
+    const [reqId, hex] = parts;
+    const key = /^[0-9a-fA-F]{64}$/.test(hex) ? Buffer.from(hex, "hex") : null;
+    if (!key || key.every((b) => b === 0)) {
+      wipeRememberKey();
+      settleRememberKey("KEYSTORE_CORRUPT");
+      const pending = pendingRotations.get(reqId);
+      if (pending) {
+        pendingRotations.delete(reqId);
+        pending.reject(new Error("KEYSTORE_CORRUPT"));
+      }
+      return false;
+    }
+    wipeRememberKey();
+    rememberKeyState.key = key;
+    rememberKeyState.rotatedCount = (rememberKeyState.rotatedCount || 0) + 1;
+    rememberKeyState.generation = (rememberKeyState.generation || 0) + 1;
+    settleRememberKey(null);
+
+    const pending = pendingRotations.get(reqId);
+    if (pending) {
+      pendingRotations.delete(reqId);
+      pending.resolve(key);
+    }
+    return true;
+  }
+
+  // Rotation error response: SIME_KEY_ROTATE_ERROR <req_id> <code>
+  if (text.startsWith("SIME_KEY_ROTATE_ERROR ")) {
+    const parts = text.slice("SIME_KEY_ROTATE_ERROR ".length).trim().split(/\s+/);
+    if (parts.length < 2) return false;
+    const [reqId, code] = parts;
+    const safeCode = /^[A-Z_]{1,40}$/.test(code) ? code : "KEYSTORE_FAILED";
+    wipeRememberKey();
+    settleRememberKey(safeCode);
+    const pending = pendingRotations.get(reqId);
+    if (pending) {
+      pendingRotations.delete(reqId);
+      pending.reject(new Error(safeCode));
+    }
+    return true;
+  }
+
+  // Provisioning unavailable: SIME_KEY_UNAVAILABLE [seq] <code>
+  if (text.startsWith("SIME_KEY_UNAVAILABLE ")) {
+    const parts = text.slice("SIME_KEY_UNAVAILABLE ".length).trim().split(/\s+/);
+    let seq = null;
+    let code = parts[0];
+    if (parts.length >= 2 && /^\d+$/.test(parts[0])) {
+      seq = Number(parts[0]);
+      code = parts[1];
+    }
+    // If a rotation has already executed, drop stale provisioning result
+    if ((rememberKeyState.rotatedCount || 0) > 0) {
+      return false;
+    }
+    if (seq !== null && seq < (rememberKeyState.lastSeq || 0)) {
+      return false;
+    }
+    if (seq !== null) {
+      rememberKeyState.lastSeq = seq;
+    }
+    wipeRememberKey();
+    settleRememberKey(/^[A-Z_]{1,40}$/.test(code) ? code : "KEYSTORE_FAILED");
+    if (isProductionSidecar()) purgeLegacyRememberStore();
+    return true;
+  }
+
+  // Provisioning key: SIME_KEY [seq] <hex>
+  if (text.startsWith("SIME_KEY ")) {
+    const parts = text.slice("SIME_KEY ".length).trim().split(/\s+/);
+    let seq = null;
+    let hex = parts[0];
+    if (parts.length >= 2 && /^\d+$/.test(parts[0])) {
+      seq = Number(parts[0]);
+      hex = parts[1];
+    }
+    // If a rotation has already executed, drop stale provisioning result
+    if ((rememberKeyState.rotatedCount || 0) > 0) {
+      return false;
+    }
+    if (seq !== null && seq < (rememberKeyState.lastSeq || 0)) {
+      return false;
+    }
+    if (seq !== null) {
+      rememberKeyState.lastSeq = seq;
+    }
+    const key = /^[0-9a-fA-F]{64}$/.test(hex) ? Buffer.from(hex, "hex") : null;
+    if (!key || key.every((b) => b === 0)) {
+      wipeRememberKey();
+      settleRememberKey("KEYSTORE_CORRUPT");
+      return false;
+    }
+    wipeRememberKey();
+    rememberKeyState.key = key;
+    settleRememberKey(null);
+    if (isProductionSidecar()) migrateLegacyRememberKey(key);
+    return true;
+  }
+
+  return false;
+}
+
+// After Forget This Device emptied the token store the key has no purpose left: drop it from memory,
+// send a rotation request to the Tauri shell, and return a Promise that settles when the OS credential
+// store confirms the key replacement.
+function requestRememberKeyRotation(timeoutMs = 5000) {
+  if (!rememberKeyState.channel) {
+    wipeRememberKey();
+    const newKey = crypto.randomBytes(32);
+    rememberKeyState.key = newKey;
+    rememberKeyState.rotatedCount = (rememberKeyState.rotatedCount || 0) + 1;
+    rememberKeyState.generation = (rememberKeyState.generation || 0) + 1;
+    settleRememberKey(null);
+    return Promise.resolve(newKey);
+  }
+
+  const reqId = `rot_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      pendingRotations.delete(reqId);
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("KEY_ROTATION_TIMEOUT"));
+    }, timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+
+    pendingRotations.set(reqId, {
+      resolve: (key) => {
+        cleanup();
+        resolve(key);
+      },
+      reject: (err) => {
+        cleanup();
+        reject(err);
+      },
+    });
+
+    wipeRememberKey();
+    rememberKeyState.code = "KEYSTORE_ROTATING";
+    try {
+      sendRememberKeyControl(`SIME_KEY_ROTATE ${reqId}`);
+    } catch (err) {
+      cleanup();
+      reject(err);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Crash and interrupted-operation recovery for Forget This Device.
+// A marker is persisted atomically before mutating token stores or cache files, and cleared only
+// after token removal, snapshot purging, and native OS key rotation have all confirmed success.
+// If the app or machine crashes in the middle, the next launch detects the marker and resumes
+// purging and key rotation.
+// ---------------------------------------------------------------------------------------------
+function getForgetRecoveryMarkerPath({ env = process.env, platform = process.platform, argv = process.argv } = {}) {
+  const storePath = getRememberStorePath(env, platform, argv);
+  const dir = path.dirname(storePath);
+  return path.join(dir, "forget-recovery.json");
+}
+
+function writeForgetRecoveryMarker(data = {}, options = {}) {
+  try {
+    const markerPath = getForgetRecoveryMarkerPath(options);
+    const dir = path.dirname(markerPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const tmp = `${markerPath}.tmp.${process.pid}.${Date.now()}`;
+    fs.writeFileSync(tmp, JSON.stringify({ ...data, timestamp: Date.now() }), { mode: 0o600 });
+    fs.renameSync(tmp, markerPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearForgetRecoveryMarker(options = {}) {
+  try {
+    const markerPath = getForgetRecoveryMarkerPath(options);
+    if (fs.existsSync(markerPath)) {
+      secureDeleteFile(markerPath);
+    }
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+function readForgetRecoveryMarker(options = {}) {
+  try {
+    const markerPath = getForgetRecoveryMarkerPath(options);
+    if (!fs.existsSync(markerPath)) return null;
+    const raw = fs.readFileSync(markerPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasForgetRecoveryMarker(options = {}) {
+  return Boolean(readForgetRecoveryMarker(options));
+}
+
+async function recoverInterruptedForget(options = {}) {
+  const marker = readForgetRecoveryMarker(options);
+  if (!marker) {
+    return false;
+  }
+  purgeAllSnapshots(options);
+
+  let tokenPersisted = true;
+  if (marker.forgetAll) {
+    tokenPersisted = saveRememberTokens({}, options);
+  } else if (marker.tokenHash) {
+    const tokens = loadRememberTokens(options);
+    if (tokens[marker.tokenHash]) {
+      delete tokens[marker.tokenHash];
+      tokenPersisted = saveRememberTokens(tokens, options);
+    }
+  }
+
+  // If token removal could NOT be durably written to disk, preserve the marker to retry on next launch
+  if (!tokenPersisted) {
+    return false;
+  }
+
+  if (Object.keys(loadRememberTokens(options)).length === 0) {
+    if (rememberKeyState.channel && !rememberKeyState.resolved) {
+      await rememberKeyReady;
+    }
+    await requestRememberKeyRotation();
+  }
+  clearForgetRecoveryMarker(options);
+  return true;
+}
+
+function isRememberMeAvailable() {
+  return isProductionSidecar() ? rememberKeyState.key !== null : true;
+}
+
+function rememberUnavailableCode() {
+  return isProductionSidecar() ? rememberKeyState.code || "KEYSTORE_UNAVAILABLE" : "REMEMBER_UNAVAILABLE";
+}
+
+function secureDeleteFile(filePath) {
+  try {
+    const { size } = fs.statSync(filePath);
+    fs.writeFileSync(filePath, crypto.randomBytes(Math.max(1, Math.min(size, 1 << 20))));
+  } catch {
+    // best effort overwrite before unlink
+  }
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // already gone
+  }
+}
+
+// Upgrade path: tokens written by earlier versions were protected by a key file stored next to them.
+// Re-encrypt them under the OS-held key, then destroy the legacy key file.
+function migrateLegacyRememberKey(newKey) {
+  const keyPath = getRememberKeyPath();
+  if (!fs.existsSync(keyPath)) return;
+  let legacy = null;
+  try {
+    const raw = fs.readFileSync(keyPath);
+    legacy = raw.length === 32 ? raw : deriveRememberKey(raw);
+  } catch {
+    legacy = null;
+  }
+  const migrated = mutateRememberTokens((tokens) => {
+    for (const [hash, entry] of Object.entries(tokens)) {
+      if (entry && decryptRememberToken(entry.encrypted, newKey)) continue; // already under the OS key
+      const creds = legacy && entry ? decryptRememberToken(entry.encrypted, legacy) : null;
+      const reencrypted = creds ? encryptRememberToken(creds, newKey) : null;
+      if (reencrypted) entry.encrypted = reencrypted;
+      else delete tokens[hash];
+    }
+  });
+  if (legacy) legacy.fill(0);
+  if (migrated.ok) secureDeleteFile(keyPath);
+}
+
+// Without an OS key the legacy key file and the tokens it protects must not linger side by side.
+function purgeLegacyRememberStore() {
+  const keyPath = getRememberKeyPath();
+  if (!fs.existsSync(keyPath)) return;
+  secureDeleteFile(keyPath);
+  const storePath = getRememberStorePath();
+  if (fs.existsSync(storePath)) secureDeleteFile(storePath);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Encrypted Offline Student Snapshots (AES-256-GCM)
+// - Key separation: The snapshot key is derived from the master secret (held in OS credential store)
+//   using domain separation HMAC-SHA256("open-sime-student-snapshots-v1"). It is NEVER stored in
+//   the snapshot directory or alongside the files.
+// - Isolation & Ownership: Every snapshot records the account hash and student ID inside the
+//   authenticated payload. On load, ownership is verified before returning any data.
+// - Failure handling: Corrupted, modified, or non-authentic data returns null; partial data is never returned.
+// - Clean up: Account snapshots can be purged on Forget This Device without affecting other accounts.
+// ---------------------------------------------------------------------------------------------
+
+function getSnapshotDir(env = process.env, platform = process.platform, argv = process.argv) {
+  if (env && env.SIME_SNAPSHOT_DIR) return path.resolve(env.SIME_SNAPSHOT_DIR);
+  return path.join(resolveDataDir(env, platform, argv), "snapshots");
+}
+
+function deriveSnapshotKey(masterKey) {
+  if (!masterKey) return null;
+  const keyBuf = Buffer.isBuffer(masterKey) ? masterKey : deriveRememberKey(masterKey);
+  return crypto.createHmac("sha256", keyBuf).update("open-sime-student-snapshots-v1").digest();
+}
+
+function encryptSnapshot(payload, snapshotKey) {
+  if (!payload || !snapshotKey) return null;
+  try {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", snapshotKey, iv);
+    const plaintext = Buffer.from(JSON.stringify(payload), "utf-8");
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return Buffer.concat([iv, tag, ciphertext]);
+  } catch {
+    return null;
+  }
+}
+
+function decryptSnapshot(encryptedBuf, snapshotKey) {
+  if (!encryptedBuf || !Buffer.isBuffer(encryptedBuf) || encryptedBuf.length < 28 || !snapshotKey) {
+    return null;
+  }
+  try {
+    const iv = encryptedBuf.subarray(0, 12);
+    const tag = encryptedBuf.subarray(12, 28);
+    const ciphertext = encryptedBuf.subarray(28);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", snapshotKey, iv);
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    const parsed = JSON.parse(plaintext.toString("utf-8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotFilename(accountUsername, studentId) {
+  const accHash = sha(String(accountUsername || "").toLowerCase()).slice(0, 16);
+  const stuHash = sha(String(studentId || "")).slice(0, 16);
+  return `snap_${accHash}_${stuHash}.enc`;
+}
+
+function saveSnapshot(accountUsername, studentId, data, masterKey, options = {}) {
+  if (!accountUsername || !studentId || !data || !masterKey) return false;
+  const snapshotKey = deriveSnapshotKey(masterKey);
+  if (!snapshotKey) return false;
+
+  const now = options.savedAt || Date.now();
+  const accHash = sha(String(accountUsername).toLowerCase());
+  const payload = {
+    version: 1,
+    account: accHash,
+    studentId: String(studentId),
+    savedAt: now,
+    data,
+  };
+
+  const encrypted = encryptSnapshot(payload, snapshotKey);
+  if (!encrypted) return false;
+
+  const dir = getSnapshotDir(options.env, options.platform, options.argv);
+  const targetFile = path.join(dir, snapshotFilename(accountUsername, studentId));
+  const tmpFile = `${targetFile}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    }
+    const fd = fs.openSync(tmpFile, "w", 0o600);
+    try {
+      fs.writeSync(fd, encrypted);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmpFile, targetFile);
+    return true;
+  } catch {
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {}
+    return false;
+  }
+}
+
+function loadSnapshot(accountUsername, studentId, masterKey, options = {}) {
+  if (!accountUsername || !studentId || !masterKey) return null;
+  const snapshotKey = deriveSnapshotKey(masterKey);
+  if (!snapshotKey) return null;
+
+  const dir = getSnapshotDir(options.env, options.platform, options.argv);
+  const targetFile = path.join(dir, snapshotFilename(accountUsername, studentId));
+
+  try {
+    if (!fs.existsSync(targetFile)) return null;
+    const encrypted = fs.readFileSync(targetFile);
+    const parsed = decryptSnapshot(encrypted, snapshotKey);
+    if (!parsed || parsed.version !== 1) return null;
+
+    const expectedAccHash = sha(String(accountUsername).toLowerCase());
+    if (parsed.account !== expectedAccHash || parsed.studentId !== String(studentId)) {
+      // Ownership or student mismatch; discard
+      return null;
+    }
+    return {
+      data: parsed.data,
+      savedAt: parsed.savedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function deleteStudentSnapshot(accountUsername, studentId, options = {}) {
+  if (!accountUsername || !studentId) return;
+  const dir = getSnapshotDir(options.env, options.platform, options.argv);
+  const targetFile = path.join(dir, snapshotFilename(accountUsername, studentId));
+  if (fs.existsSync(targetFile)) {
+    secureDeleteFile(targetFile);
+  }
+}
+
+function deleteAccountSnapshots(accountUsername, options = {}) {
+  if (!accountUsername) return;
+  const dir = getSnapshotDir(options.env, options.platform, options.argv);
+  if (!fs.existsSync(dir)) return;
+  const accPrefix = `snap_${sha(String(accountUsername).toLowerCase()).slice(0, 16)}_`;
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (f.startsWith(accPrefix) && f.endsWith(".enc")) {
+        secureDeleteFile(path.join(dir, f));
+      }
+    }
+  } catch {}
+}
+
+function purgeAllSnapshots(options = {}) {
+  const dir = getSnapshotDir(options.env, options.platform, options.argv);
+  if (!fs.existsSync(dir)) return;
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (f.startsWith("snap_") && f.endsWith(".enc")) {
+        secureDeleteFile(path.join(dir, f));
+      }
+    }
+  } catch {}
+}
+
 function getRememberSecretKey() {
+  if (isProductionSidecar()) return rememberKeyState.key;
   if (process.env.SIME_REMEMBER_SECRET) {
     return deriveRememberKey(process.env.SIME_REMEMBER_SECRET);
   }
@@ -2844,8 +3401,11 @@ function getRememberSecretKey() {
   }
 }
 
-function loadRememberTokens() {
-  const storePath = getRememberStorePath();
+function loadRememberTokens(options = {}) {
+  const env = options.env || (options.SIME_DATA_DIR ? options : process.env);
+  const platform = options.platform || process.platform;
+  const argv = options.argv || process.argv;
+  const storePath = getRememberStorePath(env, platform, argv);
   try {
     if (!fs.existsSync(storePath)) return {};
     const raw = fs.readFileSync(storePath, "utf8");
@@ -2856,17 +3416,47 @@ function loadRememberTokens() {
   }
 }
 
-function saveRememberTokens(tokens) {
-  const storePath = getRememberStorePath();
+// Atomic, durable write: either the previous or the new store is visible after a crash.
+// Returns false when the store could not be written; callers must treat that as a failure.
+function saveRememberTokens(tokens, options = {}) {
+  if (options.failSave) return false;
+  const env = options.env || (options.SIME_DATA_DIR ? options : process.env);
+  const platform = options.platform || process.platform;
+  const argv = options.argv || process.argv;
+  const storePath = getRememberStorePath(env, platform, argv);
+  const tmpPath = `${storePath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
   try {
     const dir = path.dirname(storePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
-    fs.writeFileSync(storePath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+    const fd = fs.openSync(tmpPath, "w", 0o600);
+    try {
+      fs.writeSync(fd, JSON.stringify(tokens, null, 2));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmpPath, storePath);
+    return true;
   } catch {
-    // Fail closed or keep in memory if file cannot be written
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      // nothing to clean up
+    }
+    return false;
   }
+}
+
+// Read-modify-write without an await in between, so concurrent requests can never overwrite each
+// other's changes with a stale snapshot. Skips the write when nothing changed.
+function mutateRememberTokens(mutator) {
+  const tokens = loadRememberTokens();
+  const before = JSON.stringify(tokens);
+  const result = mutator(tokens);
+  if (JSON.stringify(tokens) === before) return { ok: true, result };
+  return { ok: saveRememberTokens(tokens), result };
 }
 
 function parseCookie(cookieHeader, name) {
@@ -2986,7 +3576,7 @@ function createApp() {
 
   app.get("/api/auth/config", (_req, res) => {
     res.json({
-      rememberMeAvailable: true,
+      rememberMeAvailable: isRememberMeAvailable(),
     });
   });
 
@@ -3030,33 +3620,45 @@ function createApp() {
         studentList: data.students || [],
         cache: new Map(),
         chain: Promise.resolve(),
+        revoked: false,
+        deviceHash: null,
       };
       const record = storeStudentSessionState(session, studentId, data);
       const token = crypto.randomBytes(32).toString("base64url");
       sessions.set(token, session);
 
       const shouldRemember = Boolean(remember || rememberMe);
+      const rememberResult = { saved: false };
       if (shouldRemember) {
         const secretKey = getRememberSecretKey();
-        const encrypted = encryptRememberToken({ username, password, role: normalizedRole }, secretKey);
-        if (encrypted) {
+        const encrypted = secretKey ? encryptRememberToken({ username, password, role: normalizedRole }, secretKey) : null;
+        if (!encrypted) {
+          // Explicit consent was given but there is no safe place to keep the credentials: say so.
+          rememberResult.error = rememberUnavailableCode();
+        } else {
           const rawToken = crypto.randomBytes(32).toString("base64url");
           const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-          const tokens = loadRememberTokens();
-          tokens[tokenHash] = {
-            tokenHash,
-            encrypted,
-            role: normalizedRole,
-            createdAt: now,
-            lastUsedAt: now,
-            userAgent: req.get("user-agent") || "",
-          };
-          saveRememberTokens(tokens);
-          res.setHeader("Set-Cookie", makeRememberCookie(rawToken, req, 30 * 24 * 3600));
+          const persisted = mutateRememberTokens((tokens) => {
+            tokens[tokenHash] = {
+              tokenHash,
+              encrypted,
+              role: normalizedRole,
+              createdAt: now,
+              lastUsedAt: now,
+              userAgent: req.get("user-agent") || "",
+            };
+          });
+          if (persisted.ok) {
+            session.deviceHash = tokenHash;
+            rememberResult.saved = true;
+            res.setHeader("Set-Cookie", makeRememberCookie(rawToken, req, 30 * 24 * 3600));
+          } else {
+            rememberResult.error = "REMEMBER_STORE_WRITE_FAILED";
+          }
         }
       }
 
-      return res.json({ token, role: normalizedRole, student: record.data.student, students: record.data.students, data: record.data });
+      return res.json({ token, role: normalizedRole, student: record.data.student, students: record.data.students, data: record.data, remember: rememberResult });
     } catch (err) {
       return sendError(res, err, null);
     }
@@ -3079,8 +3681,10 @@ function createApp() {
     }
 
     const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const tokens = loadRememberTokens();
-    const stored = tokens[tokenHash];
+    const dropToken = () => mutateRememberTokens((tokens) => {
+      delete tokens[tokenHash];
+    });
+    const stored = loadRememberTokens()[tokenHash];
     if (!stored) {
       res.setHeader("Set-Cookie", makeClearCookie(req));
       return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Invalid remember token"));
@@ -3089,44 +3693,66 @@ function createApp() {
     const now = Date.now();
     const INACTIVITY_MS = 30 * 24 * 3600 * 1000;
     if (now - (stored.lastUsedAt || 0) > INACTIVITY_MS) {
-      delete tokens[tokenHash];
-      saveRememberTokens(tokens);
+      dropToken();
       res.setHeader("Set-Cookie", makeClearCookie(req));
       return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Remember token expired"));
     }
 
+    // Key unavailable (OS store locked, denied or missing): keep the token for a later attempt,
+    // but never resume without proper decryption.
     const secretKey = getRememberSecretKey();
+    if (!secretKey) {
+      return res.status(503).json(makeErrorPayload("REMEMBER_STORAGE_UNAVAILABLE", "Secure storage for saved sign-in is unavailable."));
+    }
     const creds = decryptRememberToken(stored.encrypted, secretKey);
     if (!creds || !creds.username || !creds.password) {
-      delete tokens[tokenHash];
-      saveRememberTokens(tokens);
+      dropToken();
       res.setHeader("Set-Cookie", makeClearCookie(req));
       return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Invalid remember token payload"));
     }
 
     const normalizedRole = creds.role === "student" ? "student" : "parent";
     const client = new SimeClient(creds.username, creds.password, normalizedRole);
+    const discardClient = () => {
+      client.auth.revoke();
+      client.resetSession();
+    };
     try {
       const loginResult = await client.loginAndParsePortal();
       if (!loginResult) {
-        delete tokens[tokenHash];
-        saveRememberTokens(tokens);
+        discardClient();
+        dropToken();
         res.setHeader("Set-Cookie", makeClearCookie(req));
         return res.status(401).json(makeErrorPayload("PORTAL_LOGIN_REJECTED", "Remembered credentials were rejected"));
       }
 
-      delete tokens[tokenHash];
+      // Commit atomically: only rotate while the token still exists. A logout / forget-device /
+      // parallel resume that ran during the portal login has already revoked it.
       const newRawToken = crypto.randomBytes(32).toString("base64url");
       const newTokenHash = crypto.createHash("sha256").update(newRawToken).digest("hex");
-      tokens[newTokenHash] = {
-        tokenHash: newTokenHash,
-        encrypted: stored.encrypted,
-        role: normalizedRole,
-        createdAt: stored.createdAt || now,
-        lastUsedAt: now,
-        userAgent: req.get("user-agent") || "",
-      };
-      saveRememberTokens(tokens);
+      const rotated = mutateRememberTokens((tokens) => {
+        const current = tokens[tokenHash];
+        if (!current) return false;
+        delete tokens[tokenHash];
+        tokens[newTokenHash] = {
+          tokenHash: newTokenHash,
+          encrypted: current.encrypted,
+          role: normalizedRole,
+          createdAt: current.createdAt || now,
+          lastUsedAt: now,
+          userAgent: req.get("user-agent") || "",
+        };
+        return true;
+      });
+      if (!rotated.result) {
+        discardClient();
+        res.setHeader("Set-Cookie", makeClearCookie(req));
+        return res.status(401).json(makeErrorPayload("APP_SESSION_INVALID", "Remember token was revoked"));
+      }
+      if (!rotated.ok) {
+        discardClient();
+        return res.status(500).json(makeErrorPayload("INTERNAL_ERROR", "Saved sign-in could not be updated."));
+      }
       res.setHeader("Set-Cookie", makeRememberCookie(newRawToken, req, 30 * 24 * 3600));
 
       const { data } = loginResult;
@@ -3141,36 +3767,113 @@ function createApp() {
         studentList: data.students || [],
         cache: new Map(),
         chain: Promise.resolve(),
+        revoked: false,
+        deviceHash: newTokenHash,
       };
       const record = storeStudentSessionState(session, studentId, data);
       const token = crypto.randomBytes(32).toString("base64url");
       sessions.set(token, session);
       return res.json({ token, role: normalizedRole, student: record.data.student, students: record.data.students, data: record.data });
     } catch (err) {
-      delete tokens[tokenHash];
-      saveRememberTokens(tokens);
+      discardClient();
+      dropToken();
       res.setHeader("Set-Cookie", makeClearCookie(req));
       return sendError(res, err, null);
     }
   });
 
-  app.post("/api/auth/forget-device", (req, res) => {
+  // Forget This Device: revoke the saved credentials, every session of this device, and the key
+  // once nothing is left that it protects. A crash recovery marker is persisted before mutating
+  // storage and cleared only after token removal, snapshot purging, and native OS key rotation
+  // have all completed and confirmed success.
+  app.post("/api/auth/forget-device", async (req, res) => {
     if (isCrossOrigin(req)) {
       return res.status(403).json(makeErrorPayload("FORBIDDEN", "Cross-origin request blocked"));
     }
+    const bearer = /^Bearer ([A-Za-z0-9_-]{20,128})$/.exec(req.get("authorization") || "");
+    const bearerToken = bearer ? bearer[1] : null;
     const rawToken = parseCookie(req.headers.cookie, "sime_remember");
-    if (rawToken) {
-      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const activeSession = bearerToken ? sessions.get(bearerToken) : null;
+    const tokenHash = rawToken
+      ? crypto.createHash("sha256").update(rawToken).digest("hex")
+      : (activeSession?.deviceHash || null);
+
+    // 1. Write crash-recovery marker BEFORE mutating persisted tokens or snapshots
+    const markerData = tokenHash ? { tokenHash } : { forgetAll: true };
+    const markerWritten = writeForgetRecoveryMarker(markerData);
+    if (!markerWritten) {
+      return res.status(500).json(makeErrorPayload("RECOVERY_MARKER_FAILED", "Failed to write crash recovery marker"));
+    }
+
+    let persisted = true;
+    if (tokenHash) {
       const tokens = loadRememberTokens();
-      if (tokens[tokenHash]) {
+      const currentToken = tokens[tokenHash];
+      if (currentToken?.encrypted) {
+        const masterKey = getRememberSecretKey();
+        const creds = masterKey ? decryptRememberToken(currentToken.encrypted, masterKey) : null;
+        if (creds?.username) {
+          deleteAccountSnapshots(creds.username);
+        }
+      }
+      persisted = mutateRememberTokens((tokens) => {
         delete tokens[tokenHash];
-        saveRememberTokens(tokens);
+      }).ok;
+    } else {
+      // Align normal request path with forgetAll: clear all saved tokens
+      persisted = mutateRememberTokens((tokens) => {
+        for (const k of Object.keys(tokens)) {
+          delete tokens[k];
+        }
+      }).ok;
+    }
+    for (const [token, session] of sessions) {
+      if (!tokenHash || session.deviceHash === tokenHash) {
+        if (session.client?.auth?.username) {
+          deleteAccountSnapshots(session.client.auth.username);
+        }
+        revokeSession(token, session);
       }
     }
+    if (bearerToken) {
+      const s = sessions.get(bearerToken);
+      if (s?.client?.auth?.username) {
+        deleteAccountSnapshots(s.client.auth.username);
+      }
+      revokeSession(bearerToken, s);
+    }
+
+    let rotationFailed = false;
+    if (persisted && Object.keys(loadRememberTokens()).length === 0) {
+      purgeAllSnapshots();
+      try {
+        await requestRememberKeyRotation();
+      } catch (err) {
+        rotationFailed = true;
+      }
+    }
+
+    if (!persisted) {
+      // Do NOT clear marker: allow recovery on subsequent launch/retry
+      res.setHeader("Set-Cookie", makeClearCookie(req));
+      return res.status(500).json(makeErrorPayload("REVOKE_FAILED", "Saved sign-in could not be removed."));
+    }
+
+    if (rotationFailed) {
+      // Do NOT clear marker: allow recovery on subsequent launch/retry
+      res.setHeader("Set-Cookie", makeClearCookie(req));
+      return res.status(500).json(makeErrorPayload("KEY_ROTATION_FAILED", "OS key rotation could not be confirmed."));
+    }
+
+    // Clear crash-recovery marker once all steps confirmed success
+    clearForgetRecoveryMarker();
+
     res.setHeader("Set-Cookie", makeClearCookie(req));
     return res.json({ ok: true });
   });
 
+  // Logout: end this session immediately and revoke the saved sign-in of this device (existing
+  // behavior; use Forget This Device to also revoke sibling sessions and rotate the key).
   app.post("/api/auth/logout", (req, res) => {
     if (isCrossOrigin(req)) {
       return res.status(403).json(makeErrorPayload("FORBIDDEN", "Cross-origin request blocked"));
@@ -3178,28 +3881,20 @@ function createApp() {
     const m = /^Bearer ([A-Za-z0-9_-]{20,128})$/.exec(req.get("authorization") || "");
     const token = m ? m[1] : null;
     const session = token ? sessions.get(token) : undefined;
-    if (session) {
-      session.cache.clear();
-      for (const k of Object.keys(session.students)) {
-        delete session.students[k];
-      }
-      if (session.client?.studentPages) {
-        session.client.studentPages.clear();
-      }
-    }
-    if (token) {
-      sessions.delete(token);
-    }
     const rawToken = parseCookie(req.headers.cookie, "sime_remember");
+
+    let persisted = true;
     if (rawToken) {
       const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-      const tokens = loadRememberTokens();
-      if (tokens[tokenHash]) {
+      persisted = mutateRememberTokens((tokens) => {
         delete tokens[tokenHash];
-        saveRememberTokens(tokens);
-      }
+      }).ok;
     }
+    revokeSession(token, session);
     res.setHeader("Set-Cookie", makeClearCookie(req));
+    if (!persisted) {
+      return res.status(500).json(makeErrorPayload("REVOKE_FAILED", "Saved sign-in could not be removed."));
+    }
     res.status(204).end();
   });
 
@@ -3224,6 +3919,7 @@ function createApp() {
         }
         try {
           const data = await req.session.client.switchStudent(studentId, { gated: false });
+          assertSessionActive(req.session);
           req.session.defaultStudentId = data.student?.id || studentId;
           const record = storeStudentSessionState(req.session, req.session.defaultStudentId, data);
           if (studentId !== req.session.defaultStudentId) {
@@ -3231,6 +3927,7 @@ function createApp() {
           }
           return { data: record.data, ageSeconds: 0, stale: false };
         } catch (err) {
+          assertSessionActive(req.session);
           if (existing && isUpstreamFailure(err)) {
             req.session.defaultStudentId = studentId;
             return {
@@ -3295,6 +3992,7 @@ function createApp() {
           const data = isSwitching
             ? await req.session.client.switchStudent(canonicalKey, { gated: shouldGate })
             : await req.session.client.fetchStudentPortalData(canonicalKey, { gated: shouldGate, bypassCache: true });
+          assertSessionActive(req.session);
           const at = Date.now();
           req.session.lastSyncAt = at;
           req.session.defaultStudentId = canonicalKey;
@@ -3316,8 +4014,21 @@ function createApp() {
           };
           return { data, ageSeconds: 0, stale: false };
         } catch (err) {
+          assertSessionActive(req.session);
           if (currentHit && isUpstreamFailure(err)) {
             return { data: currentHit.data, ageSeconds: Math.floor((Date.now() - currentHit.at) / 1000), stale: true };
+          }
+          const masterKey = getRememberSecretKey();
+          const snap = masterKey && req.session.client?.auth?.username
+            ? loadSnapshot(req.session.client.auth.username, canonicalKey, masterKey)
+            : null;
+          if (snap && isUpstreamFailure(err)) {
+            return {
+              data: snap.data,
+              ageSeconds: Math.floor((Date.now() - snap.savedAt) / 1000),
+              stale: true,
+              offline: true,
+            };
           }
           throw err;
         }
@@ -3473,7 +4184,7 @@ const app = createApp();
 
 const sweep = setInterval(() => {
   const now = Date.now();
-  for (const [token, s] of sessions) if (now - s.lastUsed > SESSION_IDLE_MS) sessions.delete(token);
+  for (const [token, s] of sessions) if (now - s.lastUsed > SESSION_IDLE_MS) revokeSession(token, s);
   for (const [key, g] of loginGuard) if (g.until <= now && g.rejections === 0) loginGuard.delete(key);
 }, 60_000);
 sweep.unref();
@@ -3558,12 +4269,35 @@ export {
   resolveDataDir,
   getRememberStorePath,
   getRememberKeyPath,
+  applyKeyControlLine,
+  rememberKeyState,
+  wipeRememberKey,
+  revokeSession,
+  mutateRememberTokens,
+  isRememberMeAvailable,
+  getSnapshotDir,
+  deriveSnapshotKey,
+  encryptSnapshot,
+  decryptSnapshot,
+  saveSnapshot,
+  loadSnapshot,
+  deleteStudentSnapshot,
+  deleteAccountSnapshots,
+  purgeAllSnapshots,
+  requestRememberKeyRotation,
+  pendingRotations,
+  writeForgetRecoveryMarker,
+  readForgetRecoveryMarker,
+  clearForgetRecoveryMarker,
+  hasForgetRecoveryMarker,
+  recoverInterruptedForget,
   startServer,
 };
 
 function parseCliOptions(argv = process.argv, env = process.env) {
   const production = isProductionSidecar(argv, env);
   const watchStdin = (Array.isArray(argv) && argv.includes("--watch-stdin")) || env.SIME_WATCH_STDIN === "1";
+  const keyFromStdin = (Array.isArray(argv) && argv.includes("--key-from-stdin")) || env.SIME_KEY_FROM_STDIN === "1";
   let portArg = null;
   let hostArg = null;
   if (Array.isArray(argv)) {
@@ -3578,11 +4312,11 @@ function parseCliOptions(argv = process.argv, env = process.env) {
   const defaultPort = production ? DEFAULT_PROD_PORT : DEFAULT_DEV_PORT;
   const port = rawPort !== undefined && rawPort !== "" ? Number(rawPort) : defaultPort;
   const host = hostArg ?? env.SIME_WEB_HOST ?? "127.0.0.1";
-  return { production, watchStdin, port, host };
+  return { production, watchStdin, keyFromStdin, port, host };
 }
 
 function startServer(options = {}) {
-  const { production, watchStdin, port, host } = { ...parseCliOptions(), ...options };
+  const { production, watchStdin, keyFromStdin, port, host } = { ...parseCliOptions(), ...options };
   if (production && host !== "127.0.0.1") {
     const errPayload = { code: "INVALID_HOST", host: scrubLog(String(host)), message: "Production desktop backend must bind only to 127.0.0.1" };
     console.error(`SIME_SIDECAR_ERROR ${JSON.stringify(errPayload)}`);
@@ -3629,12 +4363,27 @@ function startServer(options = {}) {
 
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
-  if (watchStdin && process.stdin) {
+  if ((watchStdin || keyFromStdin) && process.stdin) {
+    if (keyFromStdin) {
+      rememberKeyState.channel = true;
+    }
     process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    let stdinBuffer = "";
+    process.stdin.on("data", (chunk) => {
+      stdinBuffer += chunk;
+      let idx;
+      while ((idx = stdinBuffer.indexOf("\n")) !== -1) {
+        const line = stdinBuffer.slice(0, idx);
+        stdinBuffer = stdinBuffer.slice(idx + 1);
+        applyKeyControlLine(line);
+      }
+    });
     process.stdin.once("end", shutdown);
     process.stdin.once("close", shutdown);
     process.stdin.once("error", shutdown);
   }
+  recoverInterruptedForget().catch(() => {});
   return server;
 }
 

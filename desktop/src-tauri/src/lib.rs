@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+mod keystore;
+
 #[allow(unused_imports)]
 use serde::Deserialize;
 use std::sync::Mutex;
@@ -21,6 +24,7 @@ const STARTUP_TIMEOUT_SECS: u64 = 15;
 struct SidecarState {
   started: bool,
   child: Option<CommandChild>,
+  keystore_tx: Option<std::sync::mpsc::Sender<keystore::KeystoreJob>>,
 }
 
 #[allow(dead_code)]
@@ -64,6 +68,7 @@ fn shutdown_sidecar(app: &AppHandle) {
       if let Some(child) = guard.child.take() {
         let _ = child.kill();
       }
+      guard.keystore_tx.take();
       guard.started = false;
     }
   }
@@ -98,6 +103,63 @@ fn show_startup_error(app: &AppHandle, code: &str, detail: &str) {
     let _ = window.show();
     let _ = window.set_focus();
   }
+}
+
+#[cfg(not(debug_assertions))]
+const KEYSTORE_WATCHDOG_SECS: u64 = 8;
+
+// Writes one control line to the sidecar's private stdin pipe. Never logged: it may carry the key.
+#[cfg(not(debug_assertions))]
+fn send_sidecar_control(app: &AppHandle, line: &str) {
+  if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
+    if let Ok(mut guard) = state.lock() {
+      if let Some(child) = guard.child.as_mut() {
+        let _ = child.write(line.as_bytes());
+      }
+    }
+  }
+}
+
+// Starts a dedicated, serialized coordinator for OS credential store operations off the main thread.
+// Ensures that startup provisioning, rotation, and revocation execute in strict FIFO order on a single
+// worker thread, preventing race conditions between startup provisioning and Forget This Device rotation.
+#[cfg(not(debug_assertions))]
+fn start_keystore_coordinator(app: &AppHandle) -> std::sync::mpsc::Sender<keystore::KeystoreJob> {
+  let (tx, rx) = std::sync::mpsc::channel::<keystore::KeystoreJob>();
+  let worker_app = app.clone();
+  let provision_resolved = std::sync::Arc::new(Mutex::new(false));
+
+  let watchdog_app = app.clone();
+  let watchdog_resolved = provision_resolved.clone();
+  std::thread::spawn(move || {
+    std::thread::sleep(Duration::from_secs(KEYSTORE_WATCHDOG_SECS));
+    if let Ok(mut done) = watchdog_resolved.lock() {
+      if !*done {
+        *done = true;
+        send_sidecar_control(
+          &watchdog_app,
+          &keystore::format_provision_unavailable_line(1, keystore::KeystoreError::Unavailable),
+        );
+      }
+    }
+  });
+
+  std::thread::spawn(move || {
+    let mut coordinator = keystore::KeystoreCoordinator::new(keystore::OsBackend);
+    while let Ok(job) = rx.recv() {
+      let is_provision = matches!(job, keystore::KeystoreJob::Provision { .. });
+      if let Some(line) = coordinator.handle_job(job, &keystore::os_random_fill) {
+        if is_provision {
+          if let Ok(mut done) = provision_resolved.lock() {
+            *done = true;
+          }
+        }
+        send_sidecar_control(&worker_app, &line);
+      }
+    }
+  });
+
+  tx
 }
 
 fn make_instance_nonce() -> String {
@@ -187,6 +249,7 @@ fn spawn_production_sidecar(app: &AppHandle) {
       .args([
           "--production",
           "--watch-stdin",
+          "--key-from-stdin",
           "--host",
           PRODUCTION_HOST,
           "--port",
@@ -194,6 +257,7 @@ fn spawn_production_sidecar(app: &AppHandle) {
         ])
         .env("SIME_DESKTOP_PRODUCTION", "1")
         .env("SIME_WATCH_STDIN", "1")
+        .env("SIME_KEY_FROM_STDIN", "1")
         .env("SIME_WEB_HOST", PRODUCTION_HOST)
         .env("SIME_WEB_PORT", &port_str)
         .env("SIME_DATA_DIR", app_data_dir.to_string_lossy().as_ref())
@@ -220,10 +284,13 @@ fn spawn_production_sidecar(app: &AppHandle) {
     }
   };
 
+  let keystore_tx = start_keystore_coordinator(app);
+
   if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
     match state.lock() {
       Ok(mut guard) => {
         guard.child = Some(child);
+        guard.keystore_tx = Some(keystore_tx.clone());
       }
       Err(_) => {}
     }
@@ -231,6 +298,9 @@ fn spawn_production_sidecar(app: &AppHandle) {
 
   let handle = app.clone();
   let expected_instance = instance_id.clone();
+
+  // Queue initial provisioning of Remember Me key (seq: 1)
+  let _ = keystore_tx.send(keystore::KeystoreJob::Provision { seq: 1 });
 
   tauri::async_runtime::spawn(async move {
     let timeout_handle = handle.clone();
@@ -255,6 +325,7 @@ fn spawn_production_sidecar(app: &AppHandle) {
     let mut last_error_detail = String::from(
       "Serviciul local Open SIME s-a oprit înainte de finalizarea inițializării.",
     );
+    let mut next_rotate_seq = 2u64;
 
     while let Some(event) = rx.recv().await {
       match event {
@@ -262,6 +333,18 @@ fn spawn_production_sidecar(app: &AppHandle) {
           let text = String::from_utf8_lossy(&bytes);
           for line in text.lines() {
             let trimmed = line.trim();
+            if let Some(req_id) = keystore::parse_rotate_request(trimmed) {
+              let seq = next_rotate_seq;
+              next_rotate_seq += 1;
+              if let Some(state) = handle.try_state::<Mutex<SidecarState>>() {
+                if let Ok(guard) = state.lock() {
+                  if let Some(ref tx) = guard.keystore_tx {
+                    let _ = tx.send(keystore::KeystoreJob::Rotate { req_id, seq });
+                  }
+                }
+              }
+              continue;
+            }
             if let Some(json_str) = trimmed.strip_prefix("SIME_SIDECAR_READY ") {
               if !is_settled.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 match serde_json::from_str::<ReadyPayload>(json_str) {
