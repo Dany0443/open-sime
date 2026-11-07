@@ -1,6 +1,7 @@
 package md.sime.opensime
 
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -60,7 +61,6 @@ import md.sime.opensime.core.portal.SimeSessionExpiredError
 import md.sime.opensime.core.portal.SimeStudentMismatchError
 import md.sime.opensime.feature.absences.AbsencesScreen
 import md.sime.opensime.feature.auth.LoginScreen
-import md.sime.opensime.feature.auth.SignedOutScreen
 import md.sime.opensime.feature.home.HomeScreen
 import md.sime.opensime.feature.homework.HomeworkScreen
 import md.sime.opensime.feature.marks.MarksScreen
@@ -223,6 +223,32 @@ class OpenSimeSessionCoordinator(
 }
 
 
+/**
+ * True when the walkthrough owns the screen: either the user reopened it from Login
+ * (never persisted), or first-launch onboarding is still incomplete.
+ */
+internal fun isWalkthroughRoute(
+    hasActiveRepository: Boolean,
+    hasInjectedRepository: Boolean,
+    walkthroughReopened: Boolean,
+    onboardingCompleted: Boolean,
+): Boolean = (walkthroughReopened && !hasActiveRepository) || (!onboardingCompleted && !hasInjectedRepository)
+
+/**
+ * True when Login owns the screen. With no active repository Login is the default route,
+ * so there is no signed-out fallback left to fall into.
+ */
+internal fun isLoginRoute(
+    hasActiveRepository: Boolean,
+    hasInjectedRepository: Boolean,
+    showLoginScreen: Boolean,
+    walkthroughReopened: Boolean,
+    onboardingCompleted: Boolean,
+): Boolean {
+    if (walkthroughReopened && !hasActiveRepository) return false
+    return showLoginScreen || (!hasActiveRepository && (onboardingCompleted || hasInjectedRepository))
+}
+
 @Composable
 fun OpenSimeApp(
     repository: AgendaRepository? = null,
@@ -241,6 +267,11 @@ fun OpenSimeApp(
     val isRestoringSession = retained.isRestoringSession
     var showLoginScreen by rememberSaveable { mutableStateOf(false) }
     var recoveryLogin by rememberSaveable { mutableStateOf(false) }
+    // Walkthrough reopened from Login. Pure UI navigation: never persisted, never touches session state.
+    var walkthroughReopened by rememberSaveable { mutableStateOf(false) }
+    // The first frame precedes the restore effect below; hold the route until restore has been started
+    // so neither Login nor the restoring screen is shown for the wrong frame.
+    var startupResolved by remember { mutableStateOf(false) }
     val students = remember(activeRepository) { activeRepository?.listStudents().orEmpty() }
 
     var settings by rememberSaveable(stateSaver = OpenSimeSettingsState.Saver) {
@@ -270,6 +301,7 @@ fun OpenSimeApp(
 
     fun handleSignOut() {
         showSettingsDialog = false
+        walkthroughReopened = false
         showLoginScreen = true
         currentDestination = TopLevelDestination.HOME
         isProfileSelected = false
@@ -287,6 +319,7 @@ fun OpenSimeApp(
     LaunchedEffect(Unit) {
         if (repository == null) retained.restore(context, authCoordinator, effectiveVault)
         else retained.recoverPendingLogout(context, authCoordinator, effectiveVault)
+        startupResolved = true
     }
     LaunchedEffect(retained.loginRequired, retained.isLiveAuthenticated) {
         if (retained.loginRequired) showLoginScreen = true
@@ -316,9 +349,22 @@ fun OpenSimeApp(
             val strings = LocalAppStrings.current
             val snapshot = currentSnapshot
 
-        val showOnboarding = !settings.onboardingCompleted && repository == null
+        val walkthroughRoute = isWalkthroughRoute(
+            hasActiveRepository = activeRepository != null,
+            hasInjectedRepository = repository != null,
+            walkthroughReopened = walkthroughReopened,
+            onboardingCompleted = settings.onboardingCompleted,
+        )
+        val loginRoute = isLoginRoute(
+            hasActiveRepository = activeRepository != null,
+            hasInjectedRepository = repository != null,
+            showLoginScreen = showLoginScreen,
+            walkthroughReopened = walkthroughReopened,
+            onboardingCompleted = settings.onboardingCompleted,
+        )
 
         when {
+            !startupResolved && activeRepository == null -> Box(Modifier.fillMaxSize())
             retained.logoutInProgress -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally,
@@ -388,7 +434,7 @@ fun OpenSimeApp(
                 }
             }
 
-            retained.restorationError != null && activeRepository == null && !showLoginScreen -> {
+            retained.restorationError != null && activeRepository == null && !showLoginScreen && !retained.loginRequired -> {
                 Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     ErrorStateCard(title = strings.sessionRestoreFailed,
@@ -400,7 +446,7 @@ fun OpenSimeApp(
                 }
             }
 
-            showLoginScreen -> {
+            loginRoute -> {
                 LoginScreen(
                     isAuthenticating = isAuthenticating,
                     authError = authError,
@@ -408,31 +454,32 @@ fun OpenSimeApp(
                         handleSignIn(username, password, role, rememberMe)
                     },
                     onBack = {
-                        showLoginScreen = false
-                        retained.dismissLogin()
+                        if (activeRepository == null) {
+                            // Login is the root route: nothing sits behind it, so the arrow reopens the walkthrough.
+                            walkthroughReopened = true
+                        } else {
+                            showLoginScreen = false
+                            retained.dismissLogin()
+                        }
                     },
+                    // At the root, system Back leaves the app instead of bouncing Login -> Login.
+                    interceptSystemBack = activeRepository != null,
                     onOpenSettings = { showSettingsDialog = true },
                     showRememberMe = !retained.unknownLogoutCache,
                 )
             }
 
-            showOnboarding -> {
+            walkthroughRoute -> {
+                // Registered before OnboardingScreen's own handler, so page 2 -> page 1 wins first,
+                // then Back from page 1 of a reopened walkthrough returns to Login.
+                if (walkthroughReopened) BackHandler { walkthroughReopened = false }
                 OnboardingScreen(
                     onContinueToSignIn = {
                         updateSettings(settings.copy(onboardingCompleted = true))
+                        walkthroughReopened = false
                         showLoginScreen = true
                     },
                     onOpenSettings = { showSettingsDialog = true },
-                )
-            }
-
-            activeRepository == null -> {
-                SignedOutScreen(
-                    onSignInClick = { showLoginScreen = true },
-                    onOpenSettings = { showSettingsDialog = true },
-                    onViewOnboarding = {
-                        updateSettings(settings.copy(onboardingCompleted = false))
-                    },
                 )
             }
 

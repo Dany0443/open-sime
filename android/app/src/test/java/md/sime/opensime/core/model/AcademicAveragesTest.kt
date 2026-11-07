@@ -58,6 +58,41 @@ class AcademicAveragesTest {
         assertNull(snapshot.resolveGeneralAverage())
     }
 
+    @Test fun provisionalAverageUsesAvailableSubjectsWithoutThesisOrCompleteCoverage() {
+        val oneMark = subject(listOf(mark("a", 8.0)))
+        val twoMarks = subject(listOf(mark("b", 9.0), mark("c", 10.0)))
+            .copy(subject = "B", marks = listOf(mark("b", 9.0), mark("c", 10.0)).map { it.copy(subject = "B") })
+        val snapshot = md.sime.opensime.core.data.SampleAgendaRepository.buildDefaultSampleSnapshots().values.first().copy(
+            subjectSummaries = listOf(oneMark, twoMarks),
+            gradesCoverageComplete = false,
+        )
+
+        val result = snapshot.resolveProvisionalGeneralAverage()
+
+        assertNotNull(result)
+        assertEquals(8.75, result!!.value, 0.0)
+        assertEquals(2, result.includedSubjects)
+        assertTrue(result.isEstimated)
+    }
+
+    @Test fun provisionalAverageExcludesEmptyQualifierAndUnknownSemesterSubjects() {
+        val qualifier = SubjectMarksSummary(
+            subject = "Educație muzicală",
+            teacherName = "",
+            semester = 1,
+            marks = listOf(MarkItem("q", "Educație muzicală", MarkValue.Qualifier(QualifierCode.B), "2026-10-01", 1)),
+            scale = SubjectScale.QUALIFIER,
+        )
+        val unknownMark = mark("unknown", 9.0, semester = 0).copy(subject = "Unknown")
+        val unknown = subject(listOf(unknownMark)).copy(subject = "Unknown", marks = listOf(unknownMark))
+        val snapshot = md.sime.opensime.core.data.SampleAgendaRepository.buildDefaultSampleSnapshots().values.first().copy(
+            subjectSummaries = listOf(qualifier, unknown),
+            gradesCoverageComplete = false,
+        )
+
+        assertNull(snapshot.resolveProvisionalGeneralAverage())
+    }
+
     @Test fun annualMeanUsesSemesterMeansRatherThanPooledMarks() {
         val marks = listOf(mark("a", 7.0), mark("b", 8.0),
             mark("c", 9.0, 2), mark("d", 9.0, 2), mark("e", 9.0, 2))

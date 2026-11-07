@@ -764,7 +764,7 @@ private fun GpaMetricCard(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
-    val gpa = snapshot.resolveGeneralAverage()
+    val gpa = snapshot.resolveProvisionalGeneralAverage()
     val sem1Avg = snapshot.resolveSemesterAverage(1)
     val sem2Avg = snapshot.resolveSemesterAverage(2)
 

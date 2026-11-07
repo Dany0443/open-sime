@@ -19,7 +19,7 @@ import org.junit.Test
 class GradeDisplayDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun unverifiedAveragesAreUnavailableForBothStudentsWhileGradesRemainVisible() {
+    @Test fun provisionalAveragesAreShownForBothStudentsWhileGradesRemainVisible() {
         val students = SampleAgendaRepository.buildDefaultSampleSnapshots().values.toList()
         val snapshot = mutableStateOf(students[0])
         val showMarks = mutableStateOf(false)
@@ -29,13 +29,13 @@ class GradeDisplayDeviceTest {
                 else HomeScreen(snapshot.value, {}, {}, {}, {}, simpleMode = false)
             }
         } }
-        fun checkUnavailable() {
+        fun checkEstimated() {
             compose.onNodeWithTag("home_screen_list").performScrollToNode(hasTestTag("general_average_card"))
-            compose.onNodeWithText(AppStringCatalog.ro.generalAverageUnavailable).assertExists()
+            compose.onNodeWithText(AppStringCatalog.ro.generalAverageEstimated).assertExists()
         }
-        checkUnavailable()
+        checkEstimated()
         compose.runOnIdle { snapshot.value = students[1] }
-        checkUnavailable()
+        checkEstimated()
         compose.runOnIdle { showMarks.value = true }
         compose.onNodeWithText(students[1].subjectSummaries.first().subject).assertExists()
     }

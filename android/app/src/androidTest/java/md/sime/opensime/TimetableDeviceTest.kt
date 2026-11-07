@@ -53,7 +53,7 @@ class TimetableDeviceTest {
         compose.runOnIdle { today.value = monday.plusDays(1) }
         compose.onNodeWithTag("weekday_button_1").assertIsSelected()
         compose.onNodeWithText(strings.noLessonsTitle).assertExists()
-        compose.onNodeWithTag("day_next_button").performClick()
+        compose.onNodeWithTag("weekday_button_2").performClick()
         compose.onNodeWithText(strings.timetableDayUnavailable).assertExists()
         compose.runOnIdle { today.value = monday.plusDays(7) }
         compose.onNodeWithText(strings.formatLongDate(monday.plusDays(2).toString())).assertExists()
@@ -70,7 +70,7 @@ class TimetableDeviceTest {
         val snapshot = sample(0, "Synthetic A")
         fun install(activity: ComponentActivity) = activity.setContent { TimetableContent(snapshot, monday) }
         compose.activityRule.scenario.onActivity(::install)
-        compose.onNodeWithTag("day_next_button").performClick()
+        compose.onNodeWithTag("weekday_button_1").performClick()
         compose.onNodeWithTag("weekday_button_1").assertIsSelected()
         compose.activityRule.scenario.recreate()
         compose.activityRule.scenario.onActivity(::install)

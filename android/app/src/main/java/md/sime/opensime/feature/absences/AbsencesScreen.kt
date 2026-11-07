@@ -1,6 +1,9 @@
 package md.sime.opensime.feature.absences
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -31,6 +34,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -312,12 +319,22 @@ private fun AbsenceSubjectCollapsibleCard(
     val unexcCount = records.count { it.status == AbsenceStatus.UNEXCUSED }
 
     Surface(
-        onClick = onToggleExpand,
         shape = MaterialTheme.shapes.large,
         color = colorScheme.surfaceContainer,
         border = if (highContrast) BorderStroke(1.5.dp, colorScheme.onSurface) else null,
         modifier = Modifier
             .fillMaxWidth()
+            .animateContentSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.Button,
+                onClick = onToggleExpand,
+            )
+            .semantics {
+                role = Role.Button
+                stateDescription = if (expanded) strings.collapseDetails else strings.expandDetails
+            }
             .testTag("abs_subject_card_$subjectName"),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {

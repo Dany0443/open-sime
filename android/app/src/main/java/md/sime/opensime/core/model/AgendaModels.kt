@@ -160,6 +160,7 @@ sealed interface MarkValue {
 data class AverageMetric(
     val value: Double,
     val isEstimated: Boolean,
+    val includedSubjects: Int = 0,
 ) {
     fun formatted(locale: Locale = Locale.forLanguageTag("ro-MD")): String =
         String.format(locale, "%.2f", value)
@@ -251,6 +252,24 @@ data class SubjectMarksSummary(
             ThesisRequirement.UNKNOWN -> return null
         }
         return AverageMetric(result, isEstimated = true)
+    }
+
+    /**
+     * Estimates this subject's current-semester average from known numeric marks.
+     * Official/evidence-gated semester calculations remain separate above.
+     */
+    fun resolveProvisionalSemesterAverage(targetSemester: Int): AverageMetric? {
+        if (scale != SubjectScale.NUMERIC || targetSemester !in 1..2) return null
+        if (marks.any { it.semester !in 1..2 || it.subject != subject }) return null
+        if (marks.map { it.id }.distinct().size != marks.size) return null
+        if (semesterEvidence[targetSemester]?.thesisRequirement == ThesisRequirement.UNKNOWN) return null
+
+        val numeric = marks
+            .filter { it.semester == targetSemester && !it.isThesis }
+            .mapNotNull { (it.value as? MarkValue.Numeric)?.decimalScore }
+            .filter { it.isFinite() && it in 1.0..10.0 }
+        val result = decimalMean(numeric) ?: return null
+        return AverageMetric(result, isEstimated = true, includedSubjects = 1)
     }
 
     fun marksForSemester(targetSemester: Int): List<MarkItem> =
@@ -427,6 +446,20 @@ data class StudentAgendaSnapshot(
         if (subjects.isEmpty()) return null
         val values = subjects.map { it.resolveSemesterAverage(semester)?.value ?: return null }
         return AverageMetric(decimalMean(values) ?: return null, isEstimated = true)
+    }
+
+    /** Current-semester progress metric; it does not claim official finalization. */
+    fun resolveProvisionalGeneralAverage(): AverageMetric? {
+        val semester = student.currentSemester.takeIf { it in 1..2 } ?: return null
+        val values = subjectSummaries
+            .filter { it.scale == SubjectScale.NUMERIC }
+            .mapNotNull { it.resolveProvisionalSemesterAverage(semester)?.value }
+        if (values.isEmpty()) return null
+        return AverageMetric(
+            value = decimalMean(values) ?: return null,
+            isEstimated = true,
+            includedSubjects = values.size,
+        )
     }
 
     /**
