@@ -201,9 +201,12 @@ class OpenSimeUiIntegrationTest {
 
         // Network error
         val networkErr = SimeNetworkError("connection refused")
-        assertEquals("Serverul nu răspunde. Verifică conexiunea.", ro.errorMessageFor(networkErr))
-        assertEquals("Сервер не отвечает. Проверьте подключение.", ru.errorMessageFor(networkErr))
-        assertEquals("Server is not responding. Check your connection.", en.errorMessageFor(networkErr))
+        assertEquals("Nu ne putem conecta la SIME. Verifică internetul și încearcă din nou.", ro.errorMessageFor(networkErr))
+        assertEquals("Не удалось подключиться к SIME. Проверьте интернет и повторите попытку.", ru.errorMessageFor(networkErr))
+        assertEquals("Can't connect to SIME. Check your internet and try again.", en.errorMessageFor(networkErr))
+        assertEquals("Couldn't resolve the SIME address. Try again.", en.errorMessageFor(SimeNetworkError(cause = java.net.UnknownHostException())))
+        assertEquals("Couldn't establish a connection to SIME. Try again.", en.errorMessageFor(SimeNetworkError(cause = java.net.ConnectException())))
+        assertEquals("The connection timed out. Try again.", en.errorMessageFor(SimeNetworkError(cause = java.net.SocketTimeoutException())))
 
         // Rate limit
         val throttled = SimeRateLimitError(waitSeconds = 60)

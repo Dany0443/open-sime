@@ -11,6 +11,10 @@ import md.sime.opensime.core.portal.SimeCredentialRestoreError
 import md.sime.opensime.core.portal.SimeCredentialStorageError
 import md.sime.opensime.core.portal.SimeLoginRejectedError
 import md.sime.opensime.core.portal.SimeNetworkError
+import md.sime.opensime.core.portal.SimeServerError
+import md.sime.opensime.core.portal.SimeMaintenanceError
+import md.sime.opensime.core.portal.SimeParseError
+import md.sime.opensime.core.portal.SimeUnexpectedPageError
 import md.sime.opensime.core.portal.SimePortalError
 import md.sime.opensime.core.portal.SimeRateLimitError
 import md.sime.opensime.core.portal.SimeSessionExpiredError
@@ -266,6 +270,31 @@ data class AppStrings(
     val weekdaysLong: List<String>,
     val weekdaysShort: List<String>,
 ) {
+    val updateLabels get() = when (language) {
+        AppLanguage.RO -> listOf("Actualizări", "Verifică actualizările", "Se verifică…", "Nu există actualizări Android compatibile.", "Verificarea a eșuat. Încearcă mai târziu.", "Actualizare disponibilă", "Versiunea instalată", "Versiune nouă", "Vezi versiunea", "Mai târziu")
+        AppLanguage.RU -> listOf("Обновления", "Проверить обновления", "Проверка…", "Совместимых обновлений Android нет.", "Не удалось проверить обновления. Попробуйте позже.", "Доступно обновление", "Установленная версия", "Новая версия", "Открыть выпуск", "Позже")
+        AppLanguage.EN -> listOf("Updates", "Check for updates", "Checking…", "No compatible Android update found.", "Couldn't check for updates. Try again later.", "Update available", "Installed version", "New version", "View release", "Later")
+    }
+    val subjectTeacherLabel get() = when (language) { AppLanguage.RO -> "Profesor"; AppLanguage.RU -> "Учитель"; AppLanguage.EN -> "Teacher" }
+    val subjectClassLabel get() = when (language) { AppLanguage.RO -> "Clasa"; AppLanguage.RU -> "Класс"; AppLanguage.EN -> "Class" }
+    val subjectOverviewLabel get() = when (language) { AppLanguage.RO -> "Pe scurt"; AppLanguage.RU -> "Кратко"; AppLanguage.EN -> "Overview" }
+    val subjectAverageEstimate get() = when (language) { AppLanguage.RO -> "Estimare"; AppLanguage.RU -> "Оценка"; AppLanguage.EN -> "Estimate" }
+    val subjectAverageUnavailable get() = when (language) { AppLanguage.RO -> "Media estimată nu este disponibilă"; AppLanguage.RU -> "Предварительная оценка недоступна"; AppLanguage.EN -> "Estimated average unavailable" }
+    val subjectNumericMarks get() = when (language) { AppLanguage.RO -> "Note numerice eligibile"; AppLanguage.RU -> "Подходящие числовые оценки"; AppLanguage.EN -> "Eligible numeric marks" }
+    val subjectAbsencesLabel get() = when (language) { AppLanguage.RO -> "Absențe"; AppLanguage.RU -> "Пропуски"; AppLanguage.EN -> "Absences" }
+    val subjectAbsencesUnavailable get() = when (language) { AppLanguage.RO -> "Detaliile absențelor nu sunt disponibile"; AppLanguage.RU -> "Сведения о пропусках недоступны"; AppLanguage.EN -> "Absence details unavailable" }
+    val subjectHomeworkLabel get() = when (language) { AppLanguage.RO -> "Teme"; AppLanguage.RU -> "Домашние задания"; AppLanguage.EN -> "Homework" }
+    val subjectScheduleLabel get() = when (language) { AppLanguage.RO -> "În orar"; AppLanguage.RU -> "В расписании"; AppLanguage.EN -> "Timetable" }
+    val subjectNoRelatedData get() = when (language) { AppLanguage.RO -> "Nu există date asociate."; AppLanguage.RU -> "Нет связанных данных."; AppLanguage.EN -> "No related items." }
+    val subjectDataUnavailable get() = when (language) { AppLanguage.RO -> "Datele nu sunt disponibile până la sincronizare."; AppLanguage.RU -> "Данные недоступны до синхронизации."; AppLanguage.EN -> "Data is unavailable until sync." }
+    val subjectSavedDataStale get() = when (language) { AppLanguage.RO -> "Datele salvate pot fi învechite."; AppLanguage.RU -> "Сохранённые данные могут быть устаревшими."; AppLanguage.EN -> "Saved data may be out of date." }
+    val subjectUnknownStatus get() = when (language) { AppLanguage.RO -> "Statut necunoscut"; AppLanguage.RU -> "Статус неизвестен"; AppLanguage.EN -> "Status unknown" }
+    val subjectAbsExcused get() = when (language) { AppLanguage.RO -> "Motivate"; AppLanguage.RU -> "По уважительной причине"; AppLanguage.EN -> "Excused" }
+    val subjectAbsUnexcused get() = when (language) { AppLanguage.RO -> "Nemotivate"; AppLanguage.RU -> "Без уважительной причины"; AppLanguage.EN -> "Unexcused" }
+    val subjectLessonPeriod get() = when (language) { AppLanguage.RO -> "Ora"; AppLanguage.RU -> "Урок"; AppLanguage.EN -> "Period" }
+    val subjectUnknownPeriod get() = when (language) { AppLanguage.RO -> "Perioadă neidentificată"; AppLanguage.RU -> "Период не определён"; AppLanguage.EN -> "Unidentified period" }
+    val subjectAssessmentDetails get() = when (language) { AppLanguage.RO -> "Detalii evaluare"; AppLanguage.RU -> "Детали оценки"; AppLanguage.EN -> "Assessment details" }
+
     fun marksLabel(simpleMode: Boolean): String = if (simpleMode) tabMarksSimple else tabMarks
     fun timetableLabel(simpleMode: Boolean): String = if (simpleMode) tabTimetableSimple else tabTimetable
     fun absencesLabel(simpleMode: Boolean): String = if (simpleMode) tabAbsencesSimple else tabAbsences
@@ -1090,13 +1119,44 @@ fun AppStrings.errorMessageFor(error: Throwable?): String = when (error) {
     is SimeSessionExpiredError -> errSessionExpired
     is SimeStudentMismatchError, is StudentMismatchException -> errStudentMismatch
     is SimeRateLimitError -> errRateLimited
-    is SimeNetworkError -> errNetwork
+    is SimeNetworkError -> when {
+        generateSequence(error.cause) { it.cause }.any { it is java.net.SocketTimeoutException } -> when (language) {
+            AppLanguage.RO -> "Conexiunea a durat prea mult. Încearcă din nou."
+            AppLanguage.RU -> "Время ожидания истекло. Попробуйте ещё раз."
+            AppLanguage.EN -> "The connection timed out. Try again."
+        }
+        generateSequence(error.cause) { it.cause }.any { it is java.net.UnknownHostException } -> when (language) {
+            AppLanguage.RO -> "Adresa SIME nu a putut fi găsită. Încearcă din nou."
+            AppLanguage.RU -> "Не удалось найти адрес SIME. Попробуйте ещё раз."
+            AppLanguage.EN -> "Couldn't resolve the SIME address. Try again."
+        }
+        generateSequence(error.cause) { it.cause }.any { it is java.net.ConnectException } -> when (language) {
+            AppLanguage.RO -> "Conexiunea la SIME a eșuat. Încearcă din nou."
+            AppLanguage.RU -> "Не удалось соединиться с SIME. Попробуйте ещё раз."
+            AppLanguage.EN -> "Couldn't establish a connection to SIME. Try again."
+        }
+        else -> when (language) {
+            AppLanguage.RO -> "Nu ne putem conecta la SIME. Verifică internetul și încearcă din nou."
+            AppLanguage.RU -> "Не удалось подключиться к SIME. Проверьте интернет и повторите попытку."
+            AppLanguage.EN -> "Can't connect to SIME. Check your internet and try again."
+        }
+    }
+    is SimeServerError, is SimeMaintenanceError -> when (language) {
+        AppLanguage.RO -> "SIME este temporar indisponibil. Încearcă mai târziu."
+        AppLanguage.RU -> "SIME временно недоступен. Попробуйте позже."
+        AppLanguage.EN -> "SIME is temporarily unavailable. Try again later."
+    }
+    is SimeParseError, is SimeUnexpectedPageError -> when (language) {
+        AppLanguage.RO -> "Răspunsul SIME este incomplet sau invalid. Încearcă din nou."
+        AppLanguage.RU -> "Ответ SIME неполный или некорректный. Попробуйте ещё раз."
+        AppLanguage.EN -> "SIME returned an incomplete or invalid response. Try again."
+    }
     is SimeLoginRejectedError -> errInvalidCredentials
     is SimePortalError -> when (error.code) {
         SimeErrorCode.PORTAL_LOGIN_REJECTED -> errInvalidCredentials
         SimeErrorCode.PORTAL_THROTTLED -> errRateLimited
         SimeErrorCode.STUDENT_MISMATCH -> errStudentMismatch
-        else -> error.message ?: errGeneric
+        else -> errGeneric
     }
-    else -> error?.message ?: errGeneric
+    else -> errGeneric
 }

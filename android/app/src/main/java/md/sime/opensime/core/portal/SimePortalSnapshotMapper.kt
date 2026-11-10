@@ -178,7 +178,11 @@ internal object SimePortalSnapshotMapper {
                 subject = r.subject,
                 isoDate = r.date.orEmpty(),
                 semester = r.semester,
-                status = if (r.status == "excused") AbsenceStatus.EXCUSED else AbsenceStatus.UNEXCUSED,
+                status = when (r.status) {
+                    "excused" -> AbsenceStatus.EXCUSED
+                    "unexcused" -> AbsenceStatus.UNEXCUSED
+                    else -> AbsenceStatus.UNKNOWN
+                },
                 periodNumber = r.lessonNumber,
                 periodTime = periodTime,
                 room = r.room,

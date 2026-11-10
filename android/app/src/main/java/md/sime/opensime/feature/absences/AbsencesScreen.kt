@@ -374,10 +374,6 @@ private fun AbsenceSubjectCollapsibleCard(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    StatusChip(
-                        text = strings.formatAbsenceCount(records.size),
-                        tone = ChipTone.NEUTRAL,
-                    )
                     if (unexcCount > 0) {
                         StatusChip(
                             text = strings.absUnexcusedBadgeTemplate.replace("{count}", unexcCount.toString()),
@@ -419,8 +415,6 @@ private fun AbsenceRecordRow(
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val isExcused = record.status == AbsenceStatus.EXCUSED
-
     val metaParts = buildList {
         record.periodNumber?.let { add(strings.formatLessonPeriod(it)) }
         record.periodTime?.takeIf { it.isNotBlank() }?.let { add(it) }
@@ -502,8 +496,16 @@ private fun AbsenceRecordRow(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     StatusChip(
-                        text = if (isExcused) strings.absStatusExcused else strings.absStatusUnexcused,
-                        tone = if (isExcused) ChipTone.SUCCESS else ChipTone.ERROR,
+                        text = when (record.status) {
+                            AbsenceStatus.EXCUSED -> strings.absStatusExcused
+                            AbsenceStatus.UNEXCUSED -> strings.absStatusUnexcused
+                            AbsenceStatus.UNKNOWN -> strings.subjectUnknownStatus
+                        },
+                        tone = when (record.status) {
+                            AbsenceStatus.EXCUSED -> ChipTone.SUCCESS
+                            AbsenceStatus.UNEXCUSED -> ChipTone.ERROR
+                            AbsenceStatus.UNKNOWN -> ChipTone.NEUTRAL
+                        },
                     )
                     if (metaParts.isNotEmpty()) {
                         Text(

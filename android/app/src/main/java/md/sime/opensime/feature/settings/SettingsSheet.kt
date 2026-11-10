@@ -14,6 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -22,6 +24,21 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import android.net.Uri
+import kotlinx.coroutines.launch
+import md.sime.opensime.BuildConfig
+import md.sime.opensime.core.update.GitHubUpdateChecker
+import md.sime.opensime.core.update.UpdateResult
+import md.sime.opensime.core.update.AndroidUpdate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,6 +72,11 @@ fun SettingsDialog(
     val strings = LocalAppStrings.current
     val colorScheme = MaterialTheme.colorScheme
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var result by rememberSaveable(stateSaver = updateResultSaver) { mutableStateOf<UpdateResult>(UpdateResult.Idle) }
+    val labels = strings.updateLabels
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -112,6 +134,21 @@ fun SettingsDialog(
                         .padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
+                    SettingsSection(title = labels[0]) {
+                        Text("${labels[6]}: ${BuildConfig.VERSION_NAME}")
+                        OutlinedButton(onClick = {
+                            checking = true
+                            scope.launch { result = GitHubUpdateChecker.check(BuildConfig.VERSION_NAME.removeSuffix("-debug")); checking = false }
+                        }, enabled = !checking, modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 48.dp)) {
+                            Text(if (checking) labels[2] else labels[1])
+                        }
+                        when (result) {
+                            UpdateResult.NoUpdate -> Text(labels[3])
+                            UpdateResult.Unavailable -> Text(labels[4])
+                            else -> Unit
+                        }
+                    }
+
                     // Section 1: Language (`Limbă`)
                     SettingsSection(title = strings.settingsLangTitle) {
                         SegmentedOptionRow(
@@ -189,7 +226,34 @@ fun SettingsDialog(
             }
         }
     }
+    val update = (result as? UpdateResult.Available)?.update
+    if (update != null) {
+        AlertDialog(onDismissRequest = { result = UpdateResult.Idle }, title = { Text(labels[5]) },
+            text = { Column { Text("${labels[6]}: ${BuildConfig.VERSION_NAME}"); Text("${labels[7]}: ${update.version}"); if (update.notes.isNotBlank()) Text(update.notes) } },
+            confirmButton = { TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl))); result = UpdateResult.Idle }) { Text(labels[8]) } },
+            dismissButton = { TextButton(onClick = { result = UpdateResult.Idle }) { Text(labels[9]) } })
+    }
 }
+
+private val updateResultSaver = listSaver<UpdateResult, String>(
+    save = { result ->
+        when (result) {
+            is UpdateResult.Available -> listOf("available", result.update.version, result.update.releaseUrl, result.update.notes)
+            UpdateResult.NoUpdate -> listOf("none")
+            UpdateResult.Unavailable -> listOf("unavailable")
+            UpdateResult.Idle -> listOf("idle")
+        }
+    },
+    restore = { saved ->
+        when (saved.firstOrNull()) {
+            "available" -> if (saved.size == 4) UpdateResult.Available(AndroidUpdate(saved[1], saved[2], saved[3])) else null
+            "none" -> UpdateResult.NoUpdate
+            "unavailable" -> UpdateResult.Unavailable
+            "idle" -> UpdateResult.Idle
+            else -> null
+        }
+    },
+)
 
 @Composable
 private fun SettingsSection(

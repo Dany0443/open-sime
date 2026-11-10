@@ -72,6 +72,11 @@ class SimeNetworkError(
     cause = cause,
 )
 
+class SimeServerError : SimePortalError(
+    message = "Temporary server error",
+    code = SimeErrorCode.PORTAL_UNEXPECTED_PAGE,
+)
+
 open class SimeAuthError(
     message: String,
     code: SimeErrorCode = SimeErrorCode.PORTAL_UNEXPECTED_PAGE,

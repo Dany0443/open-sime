@@ -272,6 +272,32 @@ data class SubjectMarksSummary(
         return AverageMetric(result, isEstimated = true, includedSubjects = 1)
     }
 
+    /** Estimates a qualifier subject's current-semester result, rounding midpoint ties upward. */
+    fun resolveProvisionalSemesterQualifierAverage(targetSemester: Int): QualifierCode? {
+        if (scale != SubjectScale.QUALIFIER || targetSemester !in 1..2) return null
+        if (marks.any { it.semester !in 1..2 || it.subject != subject }) return null
+        if (marks.map { it.id }.distinct().size != marks.size) return null
+
+        val ranks = marks
+            .filter { it.semester == targetSemester && !it.isThesis }
+            .map { mark ->
+                when ((mark.value as? MarkValue.Qualifier)?.qualifier ?: return null) {
+                    QualifierCode.FB -> 4
+                    QualifierCode.B -> 3
+                    QualifierCode.S -> 2
+                    QualifierCode.I -> 1
+                }
+            }
+        if (ranks.isEmpty()) return null
+
+        return when (ranks.average().roundToInt()) {
+            4 -> QualifierCode.FB
+            3 -> QualifierCode.B
+            2 -> QualifierCode.S
+            else -> QualifierCode.I
+        }
+    }
+
     fun marksForSemester(targetSemester: Int): List<MarkItem> =
         marks.filter { it.semester == targetSemester }.sortedBy { it.isoDate }
 
@@ -338,6 +364,7 @@ data class LessonItem(
 enum class AbsenceStatus {
     EXCUSED,
     UNEXCUSED,
+    UNKNOWN,
 }
 
 data class AbsenceItem(
@@ -478,7 +505,7 @@ data class StudentAgendaSnapshot(
         }
         val excused = explicitSummary?.excusedCount ?: semRecords.count { it.status == AbsenceStatus.EXCUSED }
         val unexcused = explicitSummary?.unexcusedCount ?: semRecords.count { it.status == AbsenceStatus.UNEXCUSED }
-        val total = explicitSummary?.totalCount ?: (excused + unexcused)
+        val total = explicitSummary?.totalCount ?: semRecords.size
         return SemesterAbsenceBlock(
             semester = semester,
             totalCount = total,

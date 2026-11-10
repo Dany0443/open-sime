@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,16 +31,29 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import kotlinx.coroutines.delay
 import md.sime.opensime.core.designsystem.BandChip
 import md.sime.opensime.core.designsystem.ChipTone
 import md.sime.opensime.core.designsystem.CookieDecorationShape
@@ -141,6 +155,7 @@ fun HomeScreen(
                                 snapshot = snapshot,
                                 strings = strings,
                                 onNavigateToHomework = onNavigateToHomework,
+                                reduceMotion = reduceMotion,
                             )
                         }
                     }
@@ -180,6 +195,7 @@ fun HomeScreen(
                         snapshot = snapshot,
                         strings = strings,
                         onNavigateToHomework = onNavigateToHomework,
+                        reduceMotion = reduceMotion,
                     )
                 }
             }
@@ -1147,6 +1163,7 @@ private fun HomeHomeworkPreviewCard(
     snapshot: StudentAgendaSnapshot,
     strings: AppStrings,
     onNavigateToHomework: () -> Unit,
+    reduceMotion: Boolean,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
@@ -1202,6 +1219,7 @@ private fun HomeHomeworkPreviewCard(
                             strings = strings,
                             compact = true,
                             onClick = onNavigateToHomework,
+                            reduceMotion = reduceMotion,
                         )
                     }
                 }
@@ -1222,6 +1240,7 @@ fun HomeworkTaskRow(
     compact: Boolean,
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    reduceMotion: Boolean = false,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val dueDate = runCatching { LocalDate.parse(task.dueIsoDate) }.getOrNull()
@@ -1255,20 +1274,21 @@ fun HomeworkTaskRow(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            FlowRow(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = task.subject.ifBlank { strings.discipline },
-                    style = MaterialTheme.typography.titleSmallEmphasized,
-                    color = colorScheme.onSurface,
+                HomeworkSubjectTitle(
+                    subject = task.subject.ifBlank { strings.discipline },
+                    reduceMotion = reduceMotion,
+                    modifier = Modifier.weight(1f),
                 )
                 if (dueLabel.isNotBlank()) {
                     StatusChip(
                         text = dueLabel,
                         tone = dueTone,
+                        modifier = Modifier.padding(start = 8.dp),
                     )
                 }
             }
@@ -1282,5 +1302,63 @@ fun HomeworkTaskRow(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun HomeworkSubjectTitle(
+    subject: String,
+    reduceMotion: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val offset = remember(subject) { Animatable(0f) }
+    var overflowPx by remember(subject) { mutableIntStateOf(0) }
+
+    BoxWithConstraints(modifier = modifier.clipToBounds()) {
+        val viewportWidthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
+
+        LaunchedEffect(overflowPx, reduceMotion) {
+            offset.snapTo(0f)
+            if (overflowPx > 0 && !reduceMotion) {
+                val travelMillis = (overflowPx / 28f * 1_000f).toInt().coerceIn(2_500, 8_000)
+                while (true) {
+                    delay(900)
+                    offset.animateTo(
+                        targetValue = -overflowPx.toFloat(),
+                        animationSpec = tween(travelMillis, easing = LinearEasing),
+                    )
+                    delay(1_200)
+                    offset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(travelMillis, easing = LinearEasing),
+                    )
+                    delay(900)
+                }
+            }
+        }
+
+        Text(
+            text = subject,
+            style = MaterialTheme.typography.titleSmallEmphasized,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            softWrap = false,
+            overflow = if (reduceMotion) TextOverflow.Ellipsis else TextOverflow.Clip,
+            modifier = Modifier
+                .then(
+                    if (reduceMotion) {
+                        Modifier.fillMaxWidth()
+                    } else {
+                        Modifier
+                            .wrapContentWidth(unbounded = true, align = Alignment.Start)
+                            .graphicsLayer { translationX = offset.value }
+                    },
+                )
+                .semantics { contentDescription = subject },
+            onTextLayout = { layout ->
+                val nextOverflow = (layout.size.width - viewportWidthPx).coerceAtLeast(0)
+                if (overflowPx != nextOverflow) overflowPx = nextOverflow
+            },
+        )
     }
 }

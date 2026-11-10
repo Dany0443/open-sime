@@ -135,10 +135,10 @@ jobs:
           ANDROID_VER: ${{ steps.version-info.outputs.android_version }}
         run: |
           mkdir -p release-dist/android
-          APK_NAME="Open-SIME-v${ANDROID_VER}.apk"
+          APK_NAME="Open-Sime-Android-v${ANDROID_VER}.apk"
           AAB_NAME="Open-SIME-v${ANDROID_VER}.aab"
 
-          cp android/app/build/outputs/apk/release/app-release.apk "release-dist/android/${APK_NAME}"
+          cp "android/app/build/outputs/apk/release/${APK_NAME}" "release-dist/android/${APK_NAME}"
           cp android/app/build/outputs/bundle/release/app-release.aab "release-dist/android/${AAB_NAME}"
 
           cd release-dist/android
@@ -164,7 +164,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          APK_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.apk"
+          APK_FILE="release-dist/android/Open-Sime-Android-v${ANDROID_VER}.apk"
           AAB_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.aab"
           SUMS_FILE="release-dist/android/checksums-android.txt"
 
@@ -243,7 +243,7 @@ jobs:
           RELEASE_URL: ${{ steps.create-draft-release.outputs.release_url }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          APK_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.apk"
+          APK_FILE="release-dist/android/Open-Sime-Android-v${ANDROID_VER}.apk"
           AAB_FILE="release-dist/android/Open-SIME-v${ANDROID_VER}.aab"
           SUMS_FILE="release-dist/android/checksums-android.txt"
 
@@ -270,7 +270,7 @@ jobs:
             echo "| **Draft Release URL** | [View Draft Release on GitHub](${RELEASE_URL}) |"
             echo ""
             echo "### Attached Release Assets"
-            echo "- **\`Open-SIME-v${ANDROID_VER}.apk\`** — ${APK_SIZE} bytes (direct sideload package)"
+            echo "- **\`Open-Sime-Android-v${ANDROID_VER}.apk\`** — ${APK_SIZE} bytes (direct sideload package)"
             echo "- **\`Open-SIME-v${ANDROID_VER}.aab\`** — ${AAB_SIZE} bytes (Android App Bundle)"
             echo "- **\`checksums-android.txt\`** — ${SUMS_SIZE} bytes (SHA-256 checksums)"
             echo ""

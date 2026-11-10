@@ -356,6 +356,7 @@ class SimeHttpTransport(
             403 -> throw SimeForbiddenError("HTTP 403 de la agenda.sime.md")
             404 -> throw SimeNotFoundError("HTTP 404 de la agenda.sime.md")
             401, 440 -> throw SimeSessionExpiredError("HTTP $status de la agenda.sime.md")
+            in 500..599 -> throw SimeServerError()
             else -> throw SimeNetworkError("HTTP $status de la agenda.sime.md")
         }
     }

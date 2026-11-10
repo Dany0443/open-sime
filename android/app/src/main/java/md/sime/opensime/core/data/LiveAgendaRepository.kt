@@ -12,6 +12,8 @@ import md.sime.opensime.core.model.StudentProfile
 import md.sime.opensime.core.portal.ParsedStudentProfile
 import md.sime.opensime.core.portal.SimeAuthCoordinator
 import md.sime.opensime.core.portal.SimeNetworkError
+import md.sime.opensime.core.portal.SimeServerError
+import md.sime.opensime.core.portal.SimeMaintenanceError
 import md.sime.opensime.core.portal.SimePortalClient
 import md.sime.opensime.core.portal.SimeRateLimitError
 import md.sime.opensime.core.portal.SimeStudentMismatchError
@@ -207,7 +209,7 @@ class LiveAgendaRepository(
     }
 
     private fun isUpstreamTransientFailure(err: Throwable): Boolean =
-        err is SimeRateLimitError || err is SimeNetworkError
+        err is SimeRateLimitError || err is SimeNetworkError || err is SimeServerError || err is SimeMaintenanceError
 
     private fun ParsedStudentProfile.toDomainProfile(): StudentProfile {
         val canonicalKey = client.session.canonicalStudentKey(id).ifEmpty { SimeStudentParser.studentKey(id) }

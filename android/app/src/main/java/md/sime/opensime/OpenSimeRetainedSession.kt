@@ -441,9 +441,6 @@ class OpenSimeRetainedSession(
                 result.fold(onSuccess = { currentSnapshot = it; loadError = null },
                     onFailure = { loadError = it; currentSnapshot = currentSnapshot?.copy(stale = true) })
             } catch (cancel: CancellationException) {
-                if (generation == sessionGeneration && repository === source && dataJob === job) {
-                    loadError = SimeNetworkError("Data loading cancelled")
-                }
                 throw cancel
             } finally {
                 if (generation == sessionGeneration && dataJob === job) isLoading = false

@@ -518,20 +518,6 @@ fun OpenSimeApp(
                             Text(strings.logoutUnknownCacheDesc, modifier = Modifier.padding(16.dp))
                         }
                     }
-                    if (activeRepository is md.sime.opensime.core.data.CachedAgendaRepository || snapshot?.stale == true) {
-                        Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()
-                            .testTag("session_cache_notice")) {
-                            Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(if (isRestoringSession) strings.cachedSessionRestoring else strings.cachedSessionNotice,
-                                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                                TextButton(onClick = { retryData() }, enabled = !isRestoringSession && !isLoading,
-                                    modifier = Modifier.sizeIn(minHeight = 48.dp).testTag("session_retry_btn")) {
-                                    Text(strings.actionRetry)
-                                }
-                            }
-                        }
-                    }
                     Box(Modifier.weight(1f)) {
                     val err = loadError
                     when {

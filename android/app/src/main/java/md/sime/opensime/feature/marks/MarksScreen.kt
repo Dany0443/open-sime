@@ -2,6 +2,7 @@ package md.sime.opensime.feature.marks
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -37,6 +42,9 @@ import md.sime.opensime.core.model.MarkItem
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.core.model.SubjectMarksSummary
 import md.sime.opensime.core.model.SubjectScale
+import md.sime.opensime.feature.subjects.SubjectDetailsKey
+import md.sime.opensime.feature.subjects.SubjectDetailsSheet
+import md.sime.opensime.feature.subjects.subjectDetailsFor
 
 /**
  * Port of `renderMarks()` (`#view-marks`) from `web/public/app.js` and `web/public/style.css`.
@@ -50,6 +58,7 @@ fun MarksScreen(
 ) {
     val strings = LocalAppStrings.current
     val density = LocalDensity.current
+    var selectedSubject by remember(snapshot.studentId.value) { mutableStateOf<String?>(null) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val showWideTable = maxWidth >= 840.dp && density.fontScale < 1.35f
@@ -73,6 +82,7 @@ fun MarksScreen(
                     MarksTableSurface(
                         subjects = snapshot.subjectSummaries,
                         strings = strings,
+                        onSubjectClick = { selectedSubject = it },
                     )
                 }
             } else {
@@ -83,9 +93,14 @@ fun MarksScreen(
                     SubjectMarksCard(
                         summary = summary,
                         strings = strings,
+                        onClick = { selectedSubject = summary.subject },
                     )
                 }
             }
+        }
+        val details = selectedSubject?.let { subjectDetailsFor(snapshot, SubjectDetailsKey(snapshot.studentId, it)) }
+        if (details != null) {
+            SubjectDetailsSheet(details = details, onDismiss = { selectedSubject = null })
         }
     }
 }
@@ -95,6 +110,7 @@ fun MarksScreen(
 private fun SubjectMarksCard(
     summary: SubjectMarksSummary,
     strings: AppStrings,
+    onClick: () -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
@@ -103,6 +119,7 @@ private fun SubjectMarksCard(
     val unknownMarks = summary.marks.filter { it.semester !in 1..2 }
 
     Surface(
+        onClick = onClick,
         shape = MaterialTheme.shapes.extraLarge,
         color = colorScheme.surfaceContainerLow,
         border = if (highContrast) BorderStroke(2.dp, colorScheme.onSurface) else null,
@@ -217,6 +234,7 @@ private fun MarkGroupSection(
 private fun MarksTableSurface(
     subjects: List<SubjectMarksSummary>,
     strings: AppStrings,
+    onSubjectClick: (String) -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     Surface(
@@ -267,6 +285,8 @@ private fun MarksTableSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(rowBg)
+                        .clickable { onSubjectClick(subject.subject) }
+                        .testTag("subject_table_row_${subject.subject}")
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically,

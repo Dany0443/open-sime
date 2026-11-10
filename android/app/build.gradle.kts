@@ -46,8 +46,8 @@ android {
         applicationId = "md.sime.opensime"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -67,9 +67,11 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            manifestPlaceholders["appLabel"] = "Open SIME (debug)"
             isMinifyEnabled = false
         }
         release {
+            manifestPlaceholders["appLabel"] = "Open SIME"
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -105,6 +107,14 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("Open-Sime-Android-v${output.versionName.get()}.apk")
         }
     }
 }
