@@ -1171,14 +1171,14 @@ test("Tauri 2 Desktop: configuration, sidecar externalBin, scripts, capabilities
   assert.equal(tauriConf.build.frontendDist, "../dist-tauri");
   assert.equal(tauriConf.app.windows[0].title, "Open SIME");
   assert.equal(tauriConf.app.windows[0].label, "main");
-  assert.equal(tauriConf.app.windows[0].visible, true);
+  assert.equal(tauriConf.app.windows[0].visible, false, "Window starts hidden to prevent cold-start white flash");
   assert.ok(tauriConf.app.windows[0].width >= 800);
   assert.ok(tauriConf.app.windows[0].height >= 600);
   assert.equal(tauriConf.bundle.active, true);
   assert.deepEqual(tauriConf.bundle.externalBin, ["binaries/open-sime-server"]);
   assert.equal(
     tauriConf.app?.security?.csp,
-    "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; script-src 'self'"
+    "default-src 'self'; connect-src 'self' http://127.0.0.1:17321 http://127.0.0.1:3000 ipc: http://ipc.localhost; style-src 'self'; img-src 'self' data:; font-src 'self'; script-src 'self'"
   );
 
   const cap = JSON.parse(fs.readFileSync(path.join(desktopRoot, "src-tauri/capabilities/default.json"), "utf8"));

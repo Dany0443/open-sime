@@ -1,10 +1,14 @@
+#[allow(dead_code)]
+mod keystore;
+
 #[allow(unused_imports)]
 use serde::Deserialize;
 use std::sync::Mutex;
 #[allow(unused_imports)]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::window::Color;
 #[allow(unused_imports)]
-use tauri::{AppHandle, Manager, RunEvent, Url, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, Theme, Url, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 #[allow(unused_imports)]
 use tauri_plugin_shell::process::CommandEvent;
@@ -20,6 +24,7 @@ const STARTUP_TIMEOUT_SECS: u64 = 15;
 struct SidecarState {
   started: bool,
   child: Option<CommandChild>,
+  keystore_tx: Option<std::sync::mpsc::Sender<keystore::KeystoreJob>>,
 }
 
 #[allow(dead_code)]
@@ -39,12 +44,31 @@ struct ErrorPayload {
   message: Option<String>,
 }
 
+// Native window/webview background matching `dist-tauri/loader.css` (`--bg`), so the window
+// never flashes white before the first page paints. Falls back to light when the theme is unknown.
+fn startup_background_rgb(theme: Option<Theme>) -> (u8, u8, u8) {
+  match theme {
+    Some(Theme::Dark) => (0x10, 0x14, 0x1a),
+    _ => (0xf8, 0xf9, 0xff),
+  }
+}
+
+fn show_main_window_without_flash(app: &AppHandle) {
+  if let Some(window) = app.get_webview_window("main") {
+    let (r, g, b) = startup_background_rgb(window.theme().ok());
+    let _ = window.set_background_color(Some(Color(r, g, b, 255)));
+    let _ = window.show();
+    let _ = window.set_focus();
+  }
+}
+
 fn shutdown_sidecar(app: &AppHandle) {
   if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
     if let Ok(mut guard) = state.lock() {
       if let Some(child) = guard.child.take() {
         let _ = child.kill();
       }
+      guard.keystore_tx.take();
       guard.started = false;
     }
   }
@@ -79,6 +103,63 @@ fn show_startup_error(app: &AppHandle, code: &str, detail: &str) {
     let _ = window.show();
     let _ = window.set_focus();
   }
+}
+
+#[cfg(not(debug_assertions))]
+const KEYSTORE_WATCHDOG_SECS: u64 = 8;
+
+// Writes one control line to the sidecar's private stdin pipe. Never logged: it may carry the key.
+#[cfg(not(debug_assertions))]
+fn send_sidecar_control(app: &AppHandle, line: &str) {
+  if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
+    if let Ok(mut guard) = state.lock() {
+      if let Some(child) = guard.child.as_mut() {
+        let _ = child.write(line.as_bytes());
+      }
+    }
+  }
+}
+
+// Starts a dedicated, serialized coordinator for OS credential store operations off the main thread.
+// Ensures that startup provisioning, rotation, and revocation execute in strict FIFO order on a single
+// worker thread, preventing race conditions between startup provisioning and Forget This Device rotation.
+#[cfg(not(debug_assertions))]
+fn start_keystore_coordinator(app: &AppHandle) -> std::sync::mpsc::Sender<keystore::KeystoreJob> {
+  let (tx, rx) = std::sync::mpsc::channel::<keystore::KeystoreJob>();
+  let worker_app = app.clone();
+  let provision_resolved = std::sync::Arc::new(Mutex::new(false));
+
+  let watchdog_app = app.clone();
+  let watchdog_resolved = provision_resolved.clone();
+  std::thread::spawn(move || {
+    std::thread::sleep(Duration::from_secs(KEYSTORE_WATCHDOG_SECS));
+    if let Ok(mut done) = watchdog_resolved.lock() {
+      if !*done {
+        *done = true;
+        send_sidecar_control(
+          &watchdog_app,
+          &keystore::format_provision_unavailable_line(1, keystore::KeystoreError::Unavailable),
+        );
+      }
+    }
+  });
+
+  std::thread::spawn(move || {
+    let mut coordinator = keystore::KeystoreCoordinator::new(keystore::OsBackend);
+    while let Ok(job) = rx.recv() {
+      let is_provision = matches!(job, keystore::KeystoreJob::Provision { .. });
+      if let Some(line) = coordinator.handle_job(job, &keystore::os_random_fill) {
+        if is_provision {
+          if let Ok(mut done) = provision_resolved.lock() {
+            *done = true;
+          }
+        }
+        send_sidecar_control(&worker_app, &line);
+      }
+    }
+  });
+
+  tx
 }
 
 fn make_instance_nonce() -> String {
@@ -168,6 +249,7 @@ fn spawn_production_sidecar(app: &AppHandle) {
       .args([
           "--production",
           "--watch-stdin",
+          "--key-from-stdin",
           "--host",
           PRODUCTION_HOST,
           "--port",
@@ -175,6 +257,7 @@ fn spawn_production_sidecar(app: &AppHandle) {
         ])
         .env("SIME_DESKTOP_PRODUCTION", "1")
         .env("SIME_WATCH_STDIN", "1")
+        .env("SIME_KEY_FROM_STDIN", "1")
         .env("SIME_WEB_HOST", PRODUCTION_HOST)
         .env("SIME_WEB_PORT", &port_str)
         .env("SIME_DATA_DIR", app_data_dir.to_string_lossy().as_ref())
@@ -201,10 +284,13 @@ fn spawn_production_sidecar(app: &AppHandle) {
     }
   };
 
+  let keystore_tx = start_keystore_coordinator(app);
+
   if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
     match state.lock() {
       Ok(mut guard) => {
         guard.child = Some(child);
+        guard.keystore_tx = Some(keystore_tx.clone());
       }
       Err(_) => {}
     }
@@ -212,6 +298,9 @@ fn spawn_production_sidecar(app: &AppHandle) {
 
   let handle = app.clone();
   let expected_instance = instance_id.clone();
+
+  // Queue initial provisioning of Remember Me key (seq: 1)
+  let _ = keystore_tx.send(keystore::KeystoreJob::Provision { seq: 1 });
 
   tauri::async_runtime::spawn(async move {
     let timeout_handle = handle.clone();
@@ -236,6 +325,7 @@ fn spawn_production_sidecar(app: &AppHandle) {
     let mut last_error_detail = String::from(
       "Serviciul local Open SIME s-a oprit înainte de finalizarea inițializării.",
     );
+    let mut next_rotate_seq = 2u64;
 
     while let Some(event) = rx.recv().await {
       match event {
@@ -243,6 +333,18 @@ fn spawn_production_sidecar(app: &AppHandle) {
           let text = String::from_utf8_lossy(&bytes);
           for line in text.lines() {
             let trimmed = line.trim();
+            if let Some(req_id) = keystore::parse_rotate_request(trimmed) {
+              let seq = next_rotate_seq;
+              next_rotate_seq += 1;
+              if let Some(state) = handle.try_state::<Mutex<SidecarState>>() {
+                if let Ok(guard) = state.lock() {
+                  if let Some(ref tx) = guard.keystore_tx {
+                    let _ = tx.send(keystore::KeystoreJob::Rotate { req_id, seq });
+                  }
+                }
+              }
+              continue;
+            }
             if let Some(json_str) = trimmed.strip_prefix("SIME_SIDECAR_READY ") {
               if !is_settled.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 match serde_json::from_str::<ReadyPayload>(json_str) {
@@ -408,6 +510,9 @@ pub fn run() {
     .plugin(tauri_plugin_shell::init())
     .manage(Mutex::new(SidecarState::default()))
     .setup(|app| {
+      // The window is created hidden (tauri.conf.json); paint its background before showing it.
+      show_main_window_without_flash(app.handle());
+
       #[cfg(debug_assertions)]
       {
         let _ = (
@@ -419,10 +524,6 @@ pub fn run() {
           build_show_startup_error_script as fn(&str, &str) -> String,
           make_instance_nonce as fn() -> String,
         );
-        if let Some(window) = app.get_webview_window("main") {
-          let _ = window.show();
-          let _ = window.set_focus();
-        }
       }
 
       #[cfg(not(debug_assertions))]
@@ -452,6 +553,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn test_startup_background_matches_loader_theme() {
+    assert_eq!(startup_background_rgb(Some(Theme::Dark)), (0x10, 0x14, 0x1a));
+    assert_eq!(startup_background_rgb(Some(Theme::Light)), (0xf8, 0xf9, 0xff));
+    assert_eq!(startup_background_rgb(None), (0xf8, 0xf9, 0xff));
+  }
 
   #[test]
   fn test_build_show_startup_error_script_escapes() {
