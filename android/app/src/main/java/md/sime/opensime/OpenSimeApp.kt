@@ -64,6 +64,8 @@ import md.sime.opensime.feature.home.HomeGradePreview
 import md.sime.opensime.core.designsystem.PageEntranceScope
 import md.sime.opensime.feature.home.HomeScreen
 import md.sime.opensime.feature.homework.HomeworkScreen
+import md.sime.opensime.feature.subjects.SubjectDetailsKey
+import md.sime.opensime.feature.subjects.subjectDetailsKeyForMark
 import md.sime.opensime.feature.marks.MarksScreen
 import md.sime.opensime.feature.onboarding.OnboardingScreen
 import md.sime.opensime.feature.profile.ProfileScreen
@@ -290,6 +292,9 @@ fun OpenSimeApp(
     val loadError = retained.loadError
     val isLoading = retained.isLoading
 
+    var requestedGradeSubject by remember(retained.sessionGeneration, selectedStudentIdValue) {
+        mutableStateOf<SubjectDetailsKey?>(null)
+    }
     var currentDestination by rememberSaveable { mutableStateOf(TopLevelDestination.HOME) }
     var isProfileSelected by rememberSaveable { mutableStateOf(false) }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
@@ -488,10 +493,11 @@ fun OpenSimeApp(
                     currentDestination = currentDestination,
                     isProfileSelected = isProfileSelected,
                     onSelectDestination = { dest ->
+                        requestedGradeSubject = null
                         isProfileSelected = false
                         currentDestination = dest
                     },
-                    onSelectProfile = { isProfileSelected = true },
+                    onSelectProfile = { requestedGradeSubject = null; isProfileSelected = true },
                     onOpenSettings = { showSettingsDialog = true },
                     availableStudents = students,
                     selectedStudentId = StudentId(selectedStudentIdValue),
@@ -597,6 +603,13 @@ fun OpenSimeApp(
                                     refreshError = loadError?.let { strings.errorMessageFor(it) },
                                     reduceMotion = settings.reduceMotion,
                                     onNavigateToMarks = {
+                                        requestedGradeSubject = null
+                                        isProfileSelected = false
+                                        currentDestination = TopLevelDestination.MARKS
+                                    },
+                                    onOpenGrade = { mark ->
+                                        requestedGradeSubject = if (snapshot.studentId.value == retained.selectedStudentIdValue)
+                                            subjectDetailsKeyForMark(snapshot, mark) else null
                                         isProfileSelected = false
                                         currentDestination = TopLevelDestination.MARKS
                                     },
@@ -615,7 +628,9 @@ fun OpenSimeApp(
                                     simpleMode = settings.simpleMode,
                                 )
 
-                                TopLevelDestination.MARKS -> MarksScreen(snapshot = snapshot)
+                                TopLevelDestination.MARKS -> MarksScreen(snapshot = snapshot,
+                                    requestedSubject = requestedGradeSubject,
+                                    onSubjectRequestHandled = { requestedGradeSubject = null })
                                 TopLevelDestination.TIMETABLE -> TimetableScreen(snapshot = snapshot)
                                 TopLevelDestination.ABSENCES -> AbsencesScreen(snapshot = snapshot)
                                 TopLevelDestination.HOMEWORK -> HomeworkScreen(snapshot = snapshot)

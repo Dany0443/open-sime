@@ -18,6 +18,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SubjectDetailsTest {
+    @Test fun homeMarkRoutesOnlyToAnExactUniqueSubjectForItsStudent() {
+        val recent = mark("home-a")
+        val own = snapshot().copy(recentMarks = listOf(recent))
+        val key = SubjectDetailsKey(studentA, "Matematica")
+        assertEquals(key, subjectDetailsKeyForMark(own, recent))
+        assertNull(subjectDetailsKeyForMark(own, recent.copy(id = "other-student-mark")))
+        assertNull(subjectDetailsFor(own.copy(student = own.student.copy(id = studentB)), key))
+        assertNull(subjectDetailsKeyForMark(own.copy(subjectSummaries = own.subjectSummaries + own.subjectSummaries), recent))
+        val unmatched = recent.copy(subject = "matematica")
+        assertNull(subjectDetailsKeyForMark(own.copy(recentMarks = listOf(unmatched)), unmatched))
+    }
+
     private val studentA = StudentId("synthetic-student-a")
     private val studentB = StudentId("synthetic-student-b")
     private val base = SampleAgendaRepository.buildDefaultSampleSnapshots().values.first()

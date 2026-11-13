@@ -13,6 +13,13 @@ import md.sime.opensime.core.model.StudentId
 
 data class SubjectDetailsKey(val studentId: StudentId, val subjectLabel: String)
 
+/** Exact subject identity from a mark in this student's current Home snapshot. */
+fun subjectDetailsKeyForMark(snapshot: StudentAgendaSnapshot, mark: MarkItem): SubjectDetailsKey? {
+    if (snapshot.recentMarks.none { it == mark } || mark.subject.isBlank()) return null
+    val key = SubjectDetailsKey(snapshot.studentId, mark.subject)
+    return key.takeIf { subjectDetailsFor(snapshot, it) != null }
+}
+
 data class SubjectAbsenceCounts(val excused: Int, val unexcused: Int)
 
 data class SubjectDetailsData(

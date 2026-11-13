@@ -20,6 +20,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,10 +57,18 @@ import md.sime.opensime.feature.subjects.subjectDetailsFor
 fun MarksScreen(
     snapshot: StudentAgendaSnapshot,
     modifier: Modifier = Modifier,
+    requestedSubject: SubjectDetailsKey? = null,
+    onSubjectRequestHandled: () -> Unit = {},
 ) {
     val strings = LocalAppStrings.current
     val density = LocalDensity.current
     var selectedSubject by remember(snapshot.studentId.value) { mutableStateOf<String?>(null) }
+    LaunchedEffect(requestedSubject, snapshot.studentId) {
+        requestedSubject?.let { key ->
+            if (subjectDetailsFor(snapshot, key) != null) selectedSubject = key.subjectLabel
+            onSubjectRequestHandled()
+        }
+    }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val showWideTable = maxWidth >= 840.dp && density.fontScale < 1.35f

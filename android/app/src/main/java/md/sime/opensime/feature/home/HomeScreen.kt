@@ -102,6 +102,7 @@ fun HomeScreen(
     gradeSnapshot: StudentAgendaSnapshot? = null,
     averageAlreadyPresented: Boolean = false,
     onAveragePresented: () -> Unit = {},
+    onOpenGrade: (MarkItem) -> Unit = { onNavigateToMarks() },
 ) {
     val strings = LocalAppStrings.current
     val density = LocalDensity.current
@@ -147,6 +148,7 @@ fun HomeScreen(
                         onAveragePresented = onAveragePresented,
                         reduceMotion = reduceMotion,
                         onNavigateToMarks = onNavigateToMarks,
+                        onOpenGrade = onOpenGrade,
                         onNavigateToAbsences = onNavigateToAbsences,
                     )
                 }
@@ -173,6 +175,7 @@ fun HomeScreen(
                                 snapshot = snapshot,
                                 strings = strings,
                                 onNavigateToMarks = onNavigateToMarks,
+                                onOpenGrade = onOpenGrade,
                             )
                             HomeHomeworkPreviewCard(
                                 snapshot = snapshot,
@@ -208,6 +211,7 @@ fun HomeScreen(
                         onAveragePresented = onAveragePresented,
                         reduceMotion = reduceMotion,
                         onNavigateToMarks = onNavigateToMarks,
+                        onOpenGrade = onOpenGrade,
                         onNavigateToAbsences = onNavigateToAbsences,
                     )
                 }
@@ -218,6 +222,7 @@ fun HomeScreen(
                         snapshot = snapshot,
                         strings = strings,
                         onNavigateToMarks = onNavigateToMarks,
+                        onOpenGrade = onOpenGrade,
                     )
                     }
                 }
@@ -731,6 +736,7 @@ private fun HomeMetricsSection(
     onAveragePresented: () -> Unit,
     reduceMotion: Boolean,
     onNavigateToMarks: () -> Unit,
+    onOpenGrade: (MarkItem) -> Unit,
     onNavigateToAbsences: () -> Unit,
 ) {
     val averageSnapshot = gradeSnapshot?.takeIf { it.studentId == snapshot.studentId && readyHomeAverage(it) != null }
@@ -763,7 +769,7 @@ private fun HomeMetricsSection(
             LastGradeMetricCard(
                 snapshot = snapshot,
                 strings = strings,
-                onClick = onNavigateToMarks,
+                onClick = { snapshot.recentMarks.firstOrNull()?.let(onOpenGrade) ?: onNavigateToMarks() },
                 modifier = Modifier.weight(1f).pageEntrance(2),
             )
         }
@@ -791,7 +797,7 @@ private fun HomeMetricsSection(
             LastGradeMetricCard(
                 snapshot = snapshot,
                 strings = strings,
-                onClick = onNavigateToMarks,
+                onClick = { snapshot.recentMarks.firstOrNull()?.let(onOpenGrade) ?: onNavigateToMarks() },
                 modifier = Modifier.fillMaxWidth().pageEntrance(2),
             )
         }
@@ -823,7 +829,7 @@ private fun HomeMetricsSection(
                 LastGradeMetricCard(
                     snapshot = snapshot,
                     strings = strings,
-                    onClick = onNavigateToMarks,
+                    onClick = { snapshot.recentMarks.firstOrNull()?.let(onOpenGrade) ?: onNavigateToMarks() },
                     modifier = Modifier.weight(1f).pageEntrance(2),
                 )
             }
@@ -1149,6 +1155,7 @@ private fun HomeRecentMarksCard(
     snapshot: StudentAgendaSnapshot,
     strings: AppStrings,
     onNavigateToMarks: () -> Unit,
+    onOpenGrade: (MarkItem) -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
@@ -1201,7 +1208,7 @@ private fun HomeRecentMarksCard(
                         RecentMarkRow(
                             mark = mark,
                             strings = strings,
-                            onClick = onNavigateToMarks,
+                            onClick = { onOpenGrade(mark) },
                         )
                     }
                 }
