@@ -13,6 +13,7 @@ data class AndroidUpdate(val version: String, val releaseUrl: String, val notes:
 sealed interface UpdateResult {
     data object Idle : UpdateResult
     data class Available(val update: AndroidUpdate) : UpdateResult
+    data object UpToDate : UpdateResult
     data object NoUpdate : UpdateResult
     data object Unavailable : UpdateResult
 }
@@ -65,6 +66,7 @@ object GitHubUpdateChecker {
         require(installedVersion.length <= 64 && versionPattern.matches(installedVersion))
         val releases = JSONArray(body)
         val updates = mutableListOf<AndroidUpdate>()
+        var compatibleReleaseFound = false
         for (i in 0 until releases.length()) {
             val release = releases.getJSONObject(i)
             if (release.optBoolean("draft", true) || release.optBoolean("prerelease", true)) continue
@@ -80,9 +82,10 @@ object GitHubUpdateChecker {
                 val match = assetName.matchEntire(asset.optString("name")) ?: continue
                 val version = match.groupValues[1]
                 if (version.length > 64) continue
+                compatibleReleaseFound = true
                 if (compareVersions(version, installedVersion) > 0) updates += AndroidUpdate(version, url, release.optString("body").take(500))
             }
         }
-        updates.maxWithOrNull { a, b -> compareVersions(a.version, b.version) }?.let(UpdateResult::Available) ?: UpdateResult.NoUpdate
+        updates.maxWithOrNull { a, b -> compareVersions(a.version, b.version) }?.let(UpdateResult::Available) ?: if (compatibleReleaseFound) UpdateResult.UpToDate else UpdateResult.NoUpdate
     } catch (_: Exception) { UpdateResult.Unavailable }
 }

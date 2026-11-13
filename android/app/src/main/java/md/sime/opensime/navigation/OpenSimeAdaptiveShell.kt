@@ -69,7 +69,6 @@ fun OpenSimeAdaptiveShell(
     onSelectDestination: (TopLevelDestination) -> Unit,
     onSelectProfile: () -> Unit,
     onOpenSettings: () -> Unit,
-    onToggleTheme: () -> Unit,
     availableStudents: List<StudentProfile>,
     selectedStudentId: StudentId,
     onSelectStudent: (StudentId) -> Unit,
@@ -81,7 +80,6 @@ fun OpenSimeAdaptiveShell(
     content: @Composable () -> Unit,
 ) {
     val strings = LocalAppStrings.current
-    val semantic = LocalOpenSimeSemanticColors.current
     val pageTitle = if (isProfileSelected) {
         strings.profilePageTitle(simpleMode)
     } else {
@@ -112,9 +110,6 @@ fun OpenSimeAdaptiveShell(
                             activeStudentName = activeStudent?.fullName ?: strings.studentLabel,
                             profileLabel = strings.profilePageTitle(simpleMode),
                             settingsLabel = strings.actionSettings,
-                            themeToggleLabel = if (semantic.isDark) strings.themeToLight else strings.themeToDark,
-                            isDark = semantic.isDark,
-                            onToggleTheme = onToggleTheme,
                             onSelectProfile = onSelectProfile,
                             onOpenSettings = onOpenSettings,
                             availableStudents = availableStudents,
@@ -203,9 +198,6 @@ fun OpenSimeAdaptiveShell(
                                 activeStudentName = activeStudent?.fullName ?: strings.studentLabel,
                                 profileLabel = strings.profilePageTitle(simpleMode),
                                 settingsLabel = strings.actionSettings,
-                                themeToggleLabel = if (semantic.isDark) strings.themeToLight else strings.themeToDark,
-                                isDark = semantic.isDark,
-                                onToggleTheme = onToggleTheme,
                                 onSelectProfile = onSelectProfile,
                                 onOpenSettings = onOpenSettings,
                                 availableStudents = availableStudents,
@@ -491,9 +483,6 @@ private fun OpenSimeHeader(
     activeStudentName: String,
     profileLabel: String,
     settingsLabel: String,
-    themeToggleLabel: String,
-    isDark: Boolean,
-    onToggleTheme: () -> Unit,
     onSelectProfile: () -> Unit,
     onOpenSettings: () -> Unit,
     availableStudents: List<StudentProfile>,
@@ -581,19 +570,6 @@ private fun OpenSimeHeader(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
-                        onClick = onToggleTheme,
-                        modifier = Modifier
-                            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                            .testTag("topbar_action_theme"),
-                    ) {
-                        Icon(
-                            imageVector = if (isDark) OpenSimeIcons.LightMode else OpenSimeIcons.DarkMode,
-                            contentDescription = themeToggleLabel,
-                            tint = colorScheme.onSurfaceVariant,
-                        )
-                    }
-
                     if (showCompactActions) {
                         IconButton(
                             onClick = onOpenSettings,

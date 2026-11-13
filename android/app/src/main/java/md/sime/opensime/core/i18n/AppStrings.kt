@@ -275,6 +275,11 @@ data class AppStrings(
         AppLanguage.RU -> listOf("Обновления", "Проверить обновления", "Проверка…", "Совместимых обновлений Android нет.", "Не удалось проверить обновления. Попробуйте позже.", "Доступно обновление", "Установленная версия", "Новая версия", "Открыть выпуск", "Позже")
         AppLanguage.EN -> listOf("Updates", "Check for updates", "Checking…", "No compatible Android update found.", "Couldn't check for updates. Try again later.", "Update available", "Installed version", "New version", "View release", "Later")
     }
+    val updateLatestInstalled get() = when (language) {
+        AppLanguage.RO -> "Ai cea mai recentă versiune instalată."
+        AppLanguage.RU -> "У вас установлена последняя версия."
+        AppLanguage.EN -> "You have the latest version installed."
+    }
     val subjectTeacherLabel get() = when (language) { AppLanguage.RO -> "Profesor"; AppLanguage.RU -> "Учитель"; AppLanguage.EN -> "Teacher" }
     val subjectClassLabel get() = when (language) { AppLanguage.RO -> "Clasa"; AppLanguage.RU -> "Класс"; AppLanguage.EN -> "Class" }
     val subjectOverviewLabel get() = when (language) { AppLanguage.RO -> "Pe scurt"; AppLanguage.RU -> "Кратко"; AppLanguage.EN -> "Overview" }

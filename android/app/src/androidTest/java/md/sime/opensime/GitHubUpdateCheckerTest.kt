@@ -14,9 +14,15 @@ class GitHubUpdateCheckerTest {
     private fun check(body: String) = GitHubUpdateChecker.parse(body, "1.3.0")
     @Test fun excludesMissingOrUnrelatedAssets() {
         assertEquals(UpdateResult.NoUpdate, check("[]"))
-        listOf("desktop.exe", "Open-Sime-Android-v1.3.apk.bad", "Open-Sime-Android-v1.bad.apk", "Open-Sime-Android-v1.3.1-debug.apk", "Open-Sime-Android-v1.3.0.apk", "Open-Sime-Android-v1.2.9.apk").forEach {
+        listOf("desktop.exe", "Open-Sime-Android-v1.3.apk.bad", "Open-Sime-Android-v1.bad.apk", "Open-Sime-Android-v1.3.1-debug.apk").forEach {
             assertEquals(UpdateResult.NoUpdate, check("[${release(it)}]"))
         }
+    }
+    @Test fun distinguishesCurrentAndroidVersionFromMissingAndroidAssets() {
+        listOf("Open-Sime-Android-v1.3.0.apk", "Open-Sime-Android-v1.2.9.apk").forEach {
+            assertEquals(UpdateResult.UpToDate, check("[${release(it)}]"))
+        }
+        assertEquals(UpdateResult.NoUpdate, check("[${release("desktop.exe")}]"))
     }
     @Test fun validatesReleaseAndSelectsNewestAndroidCode() {
         val newer = release("Open-Sime-Android-v1.10.0.apk")

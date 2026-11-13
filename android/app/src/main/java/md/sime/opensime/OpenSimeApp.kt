@@ -3,7 +3,6 @@ package md.sime.opensime
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +46,6 @@ import md.sime.opensime.core.designsystem.CookieAvatar
 import md.sime.opensime.core.designsystem.ErrorStateCard
 import md.sime.opensime.core.designsystem.OpenSimeSettingsState
 import md.sime.opensime.core.designsystem.OpenSimeTheme
-import md.sime.opensime.core.designsystem.ThemeMode
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.i18n.errorMessageFor
 import md.sime.opensime.core.model.AccountRole
@@ -334,12 +332,6 @@ fun OpenSimeApp(
         }
     }
 
-    val systemDark = isSystemInDarkTheme()
-    val effectiveDark = when (settings.themeMode) {
-        ThemeMode.SYSTEM -> systemDark
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-    }
 
     OpenSimeTheme(settings = settings) {
         Surface(
@@ -497,10 +489,6 @@ fun OpenSimeApp(
                     },
                     onSelectProfile = { isProfileSelected = true },
                     onOpenSettings = { showSettingsDialog = true },
-                    onToggleTheme = {
-                        val nextMode = if (effectiveDark) ThemeMode.LIGHT else ThemeMode.DARK
-                        updateSettings(settings.copy(themeMode = nextMode))
-                    },
                     availableStudents = students,
                     selectedStudentId = StudentId(selectedStudentIdValue),
                     onSelectStudent = { newId ->

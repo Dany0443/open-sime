@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -64,6 +66,26 @@ class SettingsAccessibilityTest {
                     .getString("text_size", null))
             }
         } finally { fixture.close() }
+    }
+
+    @Test fun updateCheckShowsProgressThenCurrentVersionWithoutNetwork() {
+        val pending = kotlinx.coroutines.CompletableDeferred<md.sime.opensime.core.update.UpdateResult>()
+        var requests = 0
+        val settings = OpenSimeSettingsState(language = AppLanguage.EN, reduceMotion = false)
+        compose.activityRule.scenario.onActivity { it.setContent {
+            OpenSimeTheme(settings) {
+                SettingsDialog(settings, {}, {}, checkUpdates = { requests++; pending.await() })
+            }
+        } }
+        compose.onNodeWithTag("settings_check_updates").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_check_updates").assertIsNotEnabled()
+        compose.onNodeWithTag("settings_update_status").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(1, requests)
+            pending.complete(md.sime.opensime.core.update.UpdateResult.UpToDate)
+        }
+        compose.onNodeWithText("You have the latest version installed.").assertIsDisplayed()
+        compose.onNodeWithTag("settings_update_status").assertDoesNotExist()
     }
 
     @Test fun preferencesSurviveProcessRestartWithLegacyTextSize() {

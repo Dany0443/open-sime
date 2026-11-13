@@ -1,5 +1,17 @@
 package md.sime.opensime.feature.settings
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.snap
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +74,7 @@ import md.sime.opensime.core.i18n.LocalAppStrings
  * Port of `#settings-dialog` from `web/index.html` and `web/public/style.css:3230-3318`.
  * Contains language, theme and accessibility settings.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SettingsDialog(
     settings: OpenSimeSettingsState,
@@ -68,6 +82,9 @@ fun SettingsDialog(
     onDismiss: () -> Unit,
     isLoggedIn: Boolean = false,
     onLogout: (() -> Unit)? = null,
+    checkUpdates: suspend () -> UpdateResult = {
+        GitHubUpdateChecker.check(BuildConfig.VERSION_NAME.removeSuffix("-debug"))
+    },
 ) {
     val strings = LocalAppStrings.current
     val colorScheme = MaterialTheme.colorScheme
@@ -136,16 +153,39 @@ fun SettingsDialog(
                 ) {
                     SettingsSection(title = labels[0]) {
                         Text("${labels[6]}: ${BuildConfig.VERSION_NAME}")
-                        OutlinedButton(onClick = {
-                            checking = true
-                            scope.launch { result = GitHubUpdateChecker.check(BuildConfig.VERSION_NAME.removeSuffix("-debug")); checking = false }
-                        }, enabled = !checking, modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 48.dp)) {
-                            Text(if (checking) labels[2] else labels[1])
+                        val buttonLabel = when {
+                            checking -> labels[2]
+                            result == UpdateResult.UpToDate -> strings.updateLatestInstalled
+                            result == UpdateResult.NoUpdate -> labels[3]
+                            result == UpdateResult.Unavailable -> labels[4]
+                            result is UpdateResult.Available -> labels[5]
+                            else -> labels[1]
                         }
-                        when (result) {
-                            UpdateResult.NoUpdate -> Text(labels[3])
-                            UpdateResult.Unavailable -> Text(labels[4])
-                            else -> Unit
+                        val effects = if (settings.reduceMotion) snap<Float>() else MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+                        FilledTonalButton(onClick = check@{
+                            if (checking) return@check
+                            result = UpdateResult.Idle
+                            checking = true
+                            scope.launch {
+                                try { result = checkUpdates() }
+                                finally { checking = false }
+                            }
+                        }, enabled = !checking, modifier = Modifier.fillMaxWidth().sizeIn(minHeight = 56.dp)
+                            .testTag("settings_check_updates")
+                            .semantics { liveRegion = LiveRegionMode.Polite }) {
+                            AnimatedContent(targetState = buttonLabel,
+                                transitionSpec = {
+                                    (fadeIn(effects) togetherWith fadeOut(effects))
+                                        .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
+                                }, label = "update_button_content") { label ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    if (label == labels[2] && !settings.reduceMotion) LoadingIndicator(Modifier.size(24.dp))
+                                    else if (label == strings.updateLatestInstalled) Icon(OpenSimeIcons.CheckCircle,
+                                        contentDescription = null, modifier = Modifier.size(24.dp))
+                                    Text(label, modifier = Modifier.weight(1f, fill = false), textAlign = TextAlign.Center)
+                                }
+                            }
                         }
                     }
 
@@ -239,6 +279,7 @@ private val updateResultSaver = listSaver<UpdateResult, String>(
     save = { result ->
         when (result) {
             is UpdateResult.Available -> listOf("available", result.update.version, result.update.releaseUrl, result.update.notes)
+            UpdateResult.UpToDate -> listOf("current")
             UpdateResult.NoUpdate -> listOf("none")
             UpdateResult.Unavailable -> listOf("unavailable")
             UpdateResult.Idle -> listOf("idle")
@@ -247,6 +288,7 @@ private val updateResultSaver = listSaver<UpdateResult, String>(
     restore = { saved ->
         when (saved.firstOrNull()) {
             "available" -> if (saved.size == 4) UpdateResult.Available(AndroidUpdate(saved[1], saved[2], saved[3])) else null
+            "current" -> UpdateResult.UpToDate
             "none" -> UpdateResult.NoUpdate
             "unavailable" -> UpdateResult.Unavailable
             "idle" -> UpdateResult.Idle
