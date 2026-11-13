@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +36,7 @@ import md.sime.opensime.core.designsystem.EmptyStateCard
 import md.sime.opensime.core.designsystem.LocalOpenSimeSemanticColors
 import md.sime.opensime.core.designsystem.ScoreBadge
 import md.sime.opensime.core.designsystem.ScoreBadgeSize
+import md.sime.opensime.core.designsystem.pageEntrance
 import md.sime.opensime.core.i18n.AppStrings
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.model.MarkItem
@@ -73,6 +74,7 @@ fun MarksScreen(
             if (snapshot.subjectSummaries.isEmpty()) {
                 item(key = "empty_disciplines") {
                     EmptyStateCard(
+                        modifier = Modifier.pageEntrance(0),
                         title = strings.noDisciplinesTitle,
                         subtitle = strings.noDisciplinesSub,
                     )
@@ -86,11 +88,12 @@ fun MarksScreen(
                     )
                 }
             } else {
-                items(
+                itemsIndexed(
                     items = snapshot.subjectSummaries,
-                    key = { it.subject },
-                ) { summary ->
+                    key = { _, summary -> summary.subject },
+                ) { index, summary ->
                     SubjectMarksCard(
+                        entranceIndex = index,
                         summary = summary,
                         strings = strings,
                         onClick = { selectedSubject = summary.subject },
@@ -108,6 +111,7 @@ fun MarksScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SubjectMarksCard(
+    entranceIndex: Int,
     summary: SubjectMarksSummary,
     strings: AppStrings,
     onClick: () -> Unit,
@@ -124,6 +128,7 @@ private fun SubjectMarksCard(
         color = colorScheme.surfaceContainerLow,
         border = if (highContrast) BorderStroke(2.dp, colorScheme.onSurface) else null,
         modifier = Modifier
+            .pageEntrance(entranceIndex)
             .fillMaxWidth()
             .testTag("subject_card_${summary.subject}"),
     ) {
@@ -132,7 +137,7 @@ private fun SubjectMarksCard(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Header (`.subject-title-row` + `.subject-teacher`)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(modifier = Modifier.pageEntrance(entranceIndex, 0), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.Center,
@@ -157,6 +162,7 @@ private fun SubjectMarksCard(
             if (sem1Marks.isEmpty() && sem2Marks.isEmpty() && unknownMarks.isEmpty()) {
                 Text(
                     text = strings.emptyMarkText(summary.scale),
+                    modifier = Modifier.pageEntrance(entranceIndex, 1),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colorScheme.onSurfaceVariant,
                 )
@@ -165,6 +171,8 @@ private fun SubjectMarksCard(
                     if (sem1Marks.isNotEmpty()) {
                         MarkGroupSection(
                             title = strings.semester1,
+                            entranceIndex = entranceIndex,
+                            detailOffset = 1,
                             marks = sem1Marks,
                             strings = strings,
                         )
@@ -172,12 +180,15 @@ private fun SubjectMarksCard(
                     if (sem2Marks.isNotEmpty()) {
                         MarkGroupSection(
                             title = strings.semester2,
+                            entranceIndex = entranceIndex,
+                            detailOffset = sem1Marks.size + 2,
                             marks = sem2Marks,
                             strings = strings,
                         )
                     }
                     if (unknownMarks.isNotEmpty()) {
-                        MarkGroupSection(title = strings.unknownSemesterMarks, marks = unknownMarks, strings = strings)
+                        MarkGroupSection(title = strings.unknownSemesterMarks, marks = unknownMarks, strings = strings,
+                            entranceIndex = entranceIndex, detailOffset = sem1Marks.size + sem2Marks.size + 3)
                     }
                 }
             }
@@ -191,11 +202,14 @@ private fun MarkGroupSection(
     title: String,
     marks: List<MarkItem>,
     strings: AppStrings,
+    entranceIndex: Int,
+    detailOffset: Int,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = title,
+            modifier = Modifier.pageEntrance(entranceIndex, detailOffset),
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = FontWeight.Bold,
             ),
@@ -205,8 +219,9 @@ private fun MarkGroupSection(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            marks.forEach { mk ->
+            marks.forEachIndexed { index, mk ->
                 Column(
+                    modifier = Modifier.pageEntrance(entranceIndex, detailOffset + index + 1),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
@@ -250,6 +265,7 @@ private fun MarksTableSurface(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .pageEntrance(0)
                     .background(colorScheme.surfaceContainerHigh)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -284,6 +300,7 @@ private fun MarksTableSurface(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .pageEntrance(idx + 1)
                         .background(rowBg)
                         .clickable { onSubjectClick(subject.subject) }
                         .testTag("subject_table_row_${subject.subject}")
@@ -292,7 +309,7 @@ private fun MarksTableSurface(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(
-                        modifier = Modifier.weight(1.2f),
+                        modifier = Modifier.weight(1.2f).pageEntrance(idx + 1, 0),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         FlowRow(
@@ -314,18 +331,23 @@ private fun MarksTableSurface(
                             )
                         }
                         if (unknown.isNotEmpty()) {
-                            MarkGroupSection(title = strings.unknownSemesterMarks, marks = unknown, strings = strings)
+                            MarkGroupSection(title = strings.unknownSemesterMarks, marks = unknown, strings = strings,
+                                entranceIndex = idx + 1, detailOffset = 1)
                         }
                     }
 
                     BoxMarksCell(
                         marks = sem1,
+                        entranceIndex = idx + 1,
+                        detailOffset = 1,
                         emptyText = strings.emptyMarkText(subject.scale),
                         modifier = Modifier.weight(1.4f),
                     )
 
                     BoxMarksCell(
                         marks = sem2,
+                        entranceIndex = idx + 1,
+                        detailOffset = sem1.size + 2,
                         emptyText = strings.emptyMarkText(subject.scale),
                         modifier = Modifier.weight(1.4f),
                     )
@@ -338,6 +360,8 @@ private fun MarksTableSurface(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BoxMarksCell(
+    entranceIndex: Int,
+    detailOffset: Int,
     marks: List<MarkItem>,
     emptyText: String,
     modifier: Modifier = Modifier,
@@ -355,8 +379,9 @@ private fun BoxMarksCell(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            marks.forEach { mk ->
-                ScoreBadge(mark = mk, size = ScoreBadgeSize.MEDIUM)
+            marks.forEachIndexed { index, mk ->
+                ScoreBadge(mark = mk, size = ScoreBadgeSize.MEDIUM,
+                    modifier = Modifier.pageEntrance(entranceIndex, detailOffset + index))
             }
         }
     }

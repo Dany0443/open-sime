@@ -59,6 +59,7 @@ import md.sime.opensime.core.portal.SimeSessionExpiredError
 import md.sime.opensime.core.portal.SimeStudentMismatchError
 import md.sime.opensime.feature.absences.AbsencesScreen
 import md.sime.opensime.feature.auth.LoginScreen
+import md.sime.opensime.core.designsystem.PageEntranceScope
 import md.sime.opensime.feature.home.HomeScreen
 import md.sime.opensime.feature.homework.HomeworkScreen
 import md.sime.opensime.feature.marks.MarksScreen
@@ -567,6 +568,7 @@ fun OpenSimeApp(
                     @Composable
                     fun RenderActiveScreen(target: Pair<TopLevelDestination, Boolean>) {
                         val (destination, showProfile) = target
+                        PageEntranceScope(snapshot.studentId.value, settings.reduceMotion) {
                         if (showProfile) {
                             ProfileScreen(
                                 snapshot = snapshot,
@@ -608,6 +610,7 @@ fun OpenSimeApp(
                         }
                     }
 
+                    }
                     if (settings.reduceMotion) {
                         RenderActiveScreen(navState)
                     } else {

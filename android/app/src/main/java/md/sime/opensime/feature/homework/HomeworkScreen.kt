@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import md.sime.opensime.core.designsystem.EmptyStateCard
+import md.sime.opensime.core.designsystem.pageEntrance
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.model.StudentAgendaSnapshot
 import md.sime.opensime.feature.home.HomeworkTaskRow
@@ -47,6 +48,7 @@ fun HomeworkScreen(
         if (groupedByDue.isEmpty()) {
             item(key = "empty_homework") {
                 EmptyStateCard(
+                        modifier = Modifier.pageEntrance(0),
                     title = strings.noHomeworkTitle,
                     subtitle = strings.noHomeworkListSub,
                 )
@@ -62,6 +64,7 @@ fun HomeworkScreen(
                     strings.noDueDate
                 }
 
+                val firstTaskIndex = groupedByDue.takeWhile { it.key != dueIso }.sumOf { it.value.size }
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -71,15 +74,16 @@ fun HomeworkScreen(
                             fontWeight = FontWeight.Bold,
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 4.dp),
+                        modifier = Modifier.pageEntrance(firstTaskIndex).padding(horizontal = 4.dp),
                     )
 
-                    tasks.forEach { task ->
+                    tasks.forEachIndexed { taskIndex, task ->
                         HomeworkTaskRow(
                             task = task,
                             referenceIsoDate = snapshot.referenceIsoDate,
                             strings = strings,
                             compact = false,
+                            modifier = Modifier.pageEntrance(firstTaskIndex + taskIndex),
                         )
                     }
                 }

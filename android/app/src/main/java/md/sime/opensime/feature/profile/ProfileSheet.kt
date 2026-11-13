@@ -36,6 +36,7 @@ import md.sime.opensime.core.designsystem.EmptyStateCard
 import md.sime.opensime.core.designsystem.LocalOpenSimeSemanticColors
 import md.sime.opensime.core.designsystem.OpenSimeIcons
 import md.sime.opensime.core.designsystem.StatusChip
+import md.sime.opensime.core.designsystem.pageEntrance
 import md.sime.opensime.core.i18n.AppLanguage
 import md.sime.opensime.core.i18n.AppStrings
 import md.sime.opensime.core.i18n.LocalAppStrings
@@ -86,6 +87,7 @@ fun ProfileScreen(
                     border = if (highContrast) BorderStroke(2.dp, colorScheme.onSurface) else null,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .pageEntrance(0)
                         .testTag("profile_hero_card"),
                 ) {
                     FlowRow(
@@ -218,6 +220,7 @@ fun ProfileScreen(
             if (snapshot.teachers.isEmpty()) {
                 item(key = "teachers_empty") {
                     EmptyStateCard(
+                        modifier = Modifier.pageEntrance(0),
                         title = strings.noTeachersTitle,
                         subtitle = strings.noTeachersSub,
                     )
@@ -235,7 +238,7 @@ fun ProfileScreen(
                                 teacher = teacher,
                                 toneIndex = rowIdx * 2 + colIdx + 1,
                                 classMasterLabel = strings.classMasterBadge,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).pageEntrance(rowIdx * 2 + colIdx + 1),
                             )
                         }
                         if (rowTeachers.size == 1) {
@@ -249,7 +252,7 @@ fun ProfileScreen(
                         teacher = snapshot.teachers[idx],
                         toneIndex = idx + 1,
                         classMasterLabel = strings.classMasterBadge,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().pageEntrance(idx + 1),
                     )
                 }
             }

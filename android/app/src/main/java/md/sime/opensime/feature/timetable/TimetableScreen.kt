@@ -83,6 +83,8 @@ import kotlinx.coroutines.launch
 import md.sime.opensime.core.designsystem.EmptyStateCard
 import md.sime.opensime.core.designsystem.LocalOpenSimeSemanticColors
 import md.sime.opensime.core.designsystem.OpenSimeIcons
+import md.sime.opensime.core.designsystem.pageEntrance
+import md.sime.opensime.core.designsystem.PageEntranceItem
 import md.sime.opensime.core.i18n.AppStrings
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.model.LessonItem
@@ -198,11 +200,11 @@ internal fun TimetableContent(snapshot: StudentAgendaSnapshot, today: LocalDate,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(key = "day_switch") {
-            DayRail(selectedDate, today, { selection = it.toString() }, strings)
+            PageEntranceItem(0) { DayRail(selectedDate, today, { selection = it.toString() }, strings) }
         }
         item(key = "day_heading") {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxWidth().pageEntrance(1).padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -222,19 +224,21 @@ internal fun TimetableContent(snapshot: StudentAgendaSnapshot, today: LocalDate,
         if (lessons == null) {
             item(key = "unknown_lessons") {
                 Box(Modifier.padding(horizontal = 16.dp)) {
-                    EmptyStateCard(title = strings.timetableDayUnavailable, subtitle = strings.timetableDayUnavailableDesc)
+                    EmptyStateCard(modifier = Modifier.pageEntrance(0), title = strings.timetableDayUnavailable, subtitle = strings.timetableDayUnavailableDesc)
                 }
             }
         } else if (lessons.isEmpty()) {
             item(key = "empty_lessons") {
                 Box(Modifier.padding(horizontal = 16.dp)) {
-                    EmptyStateCard(title = strings.noLessonsTitle, subtitle = strings.noLessonsSub)
+                    EmptyStateCard(modifier = Modifier.pageEntrance(0), title = strings.noLessonsTitle, subtitle = strings.noLessonsSub)
                 }
             }
         } else {
             item(key = "day_lessons") {
                 Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    lessons.forEach { TimetableLessonCard(it, simpleMode, strings) }
+                    lessons.forEachIndexed { index, lesson ->
+                        PageEntranceItem(index + 2) { TimetableLessonCard(lesson, simpleMode, strings) }
+                    }
                 }
             }
         }

@@ -48,6 +48,8 @@ import md.sime.opensime.core.designsystem.LocalOpenSimeSemanticColors
 import md.sime.opensime.core.designsystem.OpenSimeIcons
 import md.sime.opensime.core.designsystem.SegmentedOptionRow
 import md.sime.opensime.core.designsystem.StatusChip
+import md.sime.opensime.core.designsystem.pageEntrance
+import md.sime.opensime.core.designsystem.PageEntranceItem
 import md.sime.opensime.core.i18n.AppStrings
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.model.AbsenceItem
@@ -91,26 +93,30 @@ fun AbsencesScreen(
         ) {
             // `#abs-toggle`
             item(key = "abs_toggle") {
-                SegmentedOptionRow(
-                    options = listOf(
-                        1 to strings.semester1,
-                        2 to strings.semester2,
-                    ),
-                    selectedOption = selectedSemester,
-                    onSelectOption = { selectedSemester = it },
-                    testTagPrefix = "abs_sem_toggle",
-                )
+                PageEntranceItem(0) {
+                    SegmentedOptionRow(
+                        options = listOf(
+                            1 to strings.semester1,
+                            2 to strings.semester2,
+                        ),
+                        selectedOption = selectedSemester,
+                        onSelectOption = { selectedSemester = it },
+                        testTagPrefix = "abs_sem_toggle",
+                    )
+                }
             }
 
             // `#abs-stats` (`.stat-row`)
             item(key = "abs_stats") {
-                AbsenceStatRow(
-                    total = semBlock.totalCount,
-                    excused = semBlock.excusedCount,
-                    unexcused = semBlock.unexcusedCount,
-                    stackVertically = stackStats,
-                    strings = strings,
-                )
+                PageEntranceItem(1) {
+                    AbsenceStatRow(
+                        total = semBlock.totalCount,
+                        excused = semBlock.excusedCount,
+                        unexcused = semBlock.unexcusedCount,
+                        stackVertically = stackStats,
+                        strings = strings,
+                    )
+                }
             }
 
             // `#abs-list`
@@ -118,11 +124,13 @@ fun AbsencesScreen(
                 item(key = "abs_empty") {
                     if (semBlock.totalCount > 0) {
                         EmptyStateCard(
+                        modifier = Modifier.pageEntrance(0),
                             title = strings.absencesNoDetailsTitle,
                             subtitle = strings.absencesNoDetailsSubTemplate.replace("{total}", semBlock.totalCount.toString()),
                         )
                     } else {
                         EmptyStateCard(
+                        modifier = Modifier.pageEntrance(0),
                             title = strings.noAbsencesTitle,
                             subtitle = strings.noAbsencesSubTemplate.replace("{sem}", selectedSemester.toString()),
                         )
@@ -140,17 +148,19 @@ fun AbsencesScreen(
                                 modifier = Modifier.padding(horizontal = 4.dp),
                             )
 
-                            bySubject.forEach { (subjectName, records) ->
+                            bySubject.forEachIndexed { index, (subjectName, records) ->
                                 val isExpanded = expandedSubjects[subjectName] ?: false
-                                AbsenceSubjectCollapsibleCard(
-                                    subjectName = subjectName,
-                                    records = records,
-                                    expanded = isExpanded,
-                                    onToggleExpand = {
-                                        expandedSubjects[subjectName] = !isExpanded
-                                    },
-                                    strings = strings,
-                                )
+                                PageEntranceItem(index + 2) {
+                                    AbsenceSubjectCollapsibleCard(
+                                        subjectName = subjectName,
+                                        records = records,
+                                        expanded = isExpanded,
+                                        onToggleExpand = {
+                                            expandedSubjects[subjectName] = !isExpanded
+                                        },
+                                        strings = strings,
+                                    )
+                                }
                             }
                         }
                     }
@@ -166,11 +176,13 @@ fun AbsencesScreen(
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
                         )
 
-                        semBlock.records.forEach { record ->
-                            AbsenceRecordRow(
-                                record = record,
-                                strings = strings,
-                            )
+                        semBlock.records.forEachIndexed { index, record ->
+                            PageEntranceItem(bySubject.size + index + 2) {
+                                AbsenceRecordRow(
+                                    record = record,
+                                    strings = strings,
+                                )
+                            }
                         }
                     }
                 }

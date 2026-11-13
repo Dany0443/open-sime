@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.espresso.Espresso.pressBack
 import androidx.compose.ui.unit.Density
 import md.sime.opensime.core.data.SampleAgendaRepository
+import md.sime.opensime.core.designsystem.PageEntranceScope
 import md.sime.opensime.core.designsystem.OpenSimeTheme
 import md.sime.opensime.core.designsystem.OpenSimeSettingsState
 import md.sime.opensime.core.designsystem.ThemeMode
@@ -24,13 +25,18 @@ class SubjectDetailsDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test fun openingDismissalStudentSwitchAndLogoutCloseTheSheet() {
-        val students = SampleAgendaRepository.buildDefaultSampleSnapshots().values.toList()
+        val students = SampleAgendaRepository.buildDefaultSampleSnapshots().values.toMutableList()
+        // The scroll test needs both semesters regardless of the default sample distribution.
+        val firstSubject = students[0].subjectSummaries.first()
+        students[0] = students[0].copy(subjectSummaries = listOf(firstSubject.copy(
+            marks = firstSubject.marks + firstSubject.marks.first().copy(id = "synthetic-semester2", semester = 2),
+        )) + students[0].subjectSummaries.drop(1))
         val snapshot = mutableStateOf(students[0])
         val signedIn = mutableStateOf(true)
         val subject = students[0].subjectSummaries.first().subject
         compose.activityRule.scenario.onActivity { it.setContent {
             OpenSimeTheme {
-                if (signedIn.value) MarksScreen(snapshot.value)
+                if (signedIn.value) PageEntranceScope(snapshot.value.studentId.value, false) { MarksScreen(snapshot.value) }
             }
         } }
 
@@ -64,7 +70,7 @@ class SubjectDetailsDeviceTest {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density = density.density * 0.4f)) {
                 OpenSimeTheme(settings = OpenSimeSettingsState(themeMode = ThemeMode.DARK)) {
-                    MarksScreen(snapshot)
+                    PageEntranceScope(snapshot.studentId.value, false) { MarksScreen(snapshot) }
                 }
             }
         } }
@@ -82,7 +88,7 @@ class SubjectDetailsDeviceTest {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density = density.density, fontScale = 1.5f)) {
                 OpenSimeTheme(settings = OpenSimeSettingsState(themeMode = ThemeMode.LIGHT)) {
-                    MarksScreen(snapshot)
+                    PageEntranceScope(snapshot.studentId.value, false) { MarksScreen(snapshot) }
                 }
             }
         } }
