@@ -186,7 +186,7 @@ test("Android Release Workflow: .github/workflows/android-release.yml validation
   assert.ok(content.includes("assembleRelease bundleRelease"), "Android release must build assembleRelease and bundleRelease");
 
   // Staged release artifacts and checksum manifest
-  assert.ok(content.includes("Open-SIME-v${ANDROID_VER}.apk"), "Android release must stage versioned Open-SIME-v${ANDROID_VER}.apk");
+  assert.ok(content.includes("Open-Sime-Android-v${ANDROID_VER}.apk"), "Android release must stage versioned Open-Sime-Android-v${ANDROID_VER}.apk");
   assert.ok(content.includes("Open-SIME-v${ANDROID_VER}.aab"), "Android release must stage versioned Open-SIME-v${ANDROID_VER}.aab");
   assert.ok(content.includes("checksums-android.txt"), "Android release must generate checksums-android.txt");
 
