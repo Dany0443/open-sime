@@ -354,6 +354,27 @@ class LiveAgendaRepositoryTest {
     }
 
     @Test
+    fun `incomplete refresh retains complete cached grades and later refresh recovers`() = runBlocking {
+        var complete = true
+        val now = AtomicLong(10_000L)
+        val client = createMockClient { createMockSnapshot(it.value, "10A").copy(gradesCoverageComplete = complete) }
+        val repo = LiveAgendaRepository(client, nowMillis = now::get)
+        val id = StudentId("id_101")
+        val initial = repo.reconcileStudent(id)
+        complete = false
+        now.set(20_000L)
+        try {
+            repo.reconcileStudent(id)
+            fail("Expected incomplete grade coverage to fail")
+        } catch (_: md.sime.opensime.core.portal.SimeParseError) {
+            assertEquals(initial, repo.cachedSnapshotFor(id))
+        }
+        complete = true
+        now.set(30_000L)
+        assertEquals(30_000L, repo.reconcileStudent(id).successfulSyncMillis["grades"])
+    }
+
+    @Test
     fun `authoritative snapshot is restored after repository recreation without a duplicate fetch`() = runBlocking {
         val directory = Files.createTempDirectory("open-sime-snapshots").toFile()
         try {

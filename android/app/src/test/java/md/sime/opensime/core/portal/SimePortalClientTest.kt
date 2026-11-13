@@ -22,6 +22,44 @@ import java.util.concurrent.atomic.AtomicInteger
 class SimePortalClientTest {
 
     @Test(timeout = 10_000)
+    fun `completed grades are available before delayed calendar without publishing full snapshot`() = runBlocking {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val client = createTwoStudentClient(onAjax = { request ->
+            if (request.bodyBytes?.toString(Charsets.UTF_8)?.contains("x01=GET") == true) {
+                entered.complete(Unit)
+                release.await()
+                jsonResponse(calendarWeekJson)
+            } else htmlResponse(reportSem1Html)
+        })
+        val full = async { client.fetchStudentSnapshot(StudentId("id_101"), forceRefresh = true) }
+        entered.await()
+        val gradeResult = checkNotNull(client.completedGrades.value)
+        assertEquals(StudentId("id_101"), gradeResult.snapshot.studentId)
+        assertNotNull(gradeResult.snapshot.successfulSyncMillis["grades"])
+        assertNull(gradeResult.snapshot.successfulSyncMillis["timetable"])
+        assertFalse(full.isCompleted)
+        release.complete(Unit)
+        assertEquals(StudentId("id_101"), full.await().studentId)
+    }
+
+    @Test(timeout = 10_000)
+    fun `cancelled grade request cannot publish a completed grade result`() = runBlocking {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val client = createTwoStudentClient(beforeRequest = {
+            entered.complete(Unit)
+            release.await()
+        })
+        val request = async { client.fetchStudentSnapshot(StudentId("id_101"), forceRefresh = true) }
+        entered.await()
+        request.cancel()
+        release.complete(Unit)
+        request.join()
+        assertNull(client.completedGrades.value)
+    }
+
+    @Test(timeout = 10_000)
     fun `logout invalidates delayed grades absences and timetable requests`() = runBlocking {
         for (kind in listOf("grades", "absences", "timetable")) {
             val entered = kotlinx.coroutines.CompletableDeferred<Unit>()

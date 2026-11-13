@@ -1,5 +1,7 @@
 package md.sime.opensime.feature.home
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,8 +35,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +67,7 @@ import md.sime.opensime.core.designsystem.OpenSimeIcons
 import md.sime.opensime.core.designsystem.ScoreBadge
 import md.sime.opensime.core.designsystem.ScoreBadgeSize
 import md.sime.opensime.core.designsystem.StatusChip
+import md.sime.opensime.core.designsystem.pageEntrance
 import md.sime.opensime.core.i18n.AppStrings
 import md.sime.opensime.core.i18n.LocalAppStrings
 import md.sime.opensime.core.model.HomeworkItem
@@ -70,6 +75,8 @@ import md.sime.opensime.core.model.LessonItem
 import md.sime.opensime.core.model.LessonStatus
 import md.sime.opensime.core.model.MarkItem
 import md.sime.opensime.core.model.StudentAgendaSnapshot
+import md.sime.opensime.core.model.SubjectScale
+import md.sime.opensime.core.model.AverageMetric
 import md.sime.opensime.core.model.parseHmToMinutes
 import java.time.Clock
 import java.time.ZoneId
@@ -92,9 +99,20 @@ fun HomeScreen(
     onRefresh: () -> Unit = {},
     refreshError: String? = null,
     reduceMotion: Boolean = false,
+    gradeSnapshot: StudentAgendaSnapshot? = null,
+    averageAlreadyPresented: Boolean = false,
+    onAveragePresented: () -> Unit = {},
 ) {
     val strings = LocalAppStrings.current
     val density = LocalDensity.current
+    var entranceStage by rememberSaveable(snapshot.studentId.value) { mutableIntStateOf(0) }
+    LaunchedEffect(snapshot.studentId, reduceMotion) {
+        if (reduceMotion) entranceStage = 4
+        else while (entranceStage < 4) {
+            entranceStage++
+            delay(70)
+        }
+    }
 
     HomeRefreshBox(isRefreshing, onRefresh, reduceMotion, modifier) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -124,11 +142,16 @@ fun HomeScreen(
                         simpleMode = simpleMode,
                         availableWidthDp = maxWidth.value,
                         fontScale = density.fontScale,
+                        gradeSnapshot = gradeSnapshot,
+                        averageAlreadyPresented = averageAlreadyPresented,
+                        onAveragePresented = onAveragePresented,
+                        reduceMotion = reduceMotion,
                         onNavigateToMarks = onNavigateToMarks,
                         onNavigateToAbsences = onNavigateToAbsences,
                     )
                 }
                 item(key = "home_wide_columns") {
+                    HomeEntrance(entranceStage > 1, reduceMotion) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -159,15 +182,18 @@ fun HomeScreen(
                             )
                         }
                     }
+                    }
                 }
             } else {
                 item(key = "home_live") {
+                    HomeEntrance(entranceStage > 0, reduceMotion) {
                     HomeLiveLessonsCard(
                         snapshot = snapshot,
                         strings = strings,
                         simpleMode = simpleMode,
                         onNavigateToTimetable = onNavigateToTimetable,
                     )
+                    }
                 }
 
                 item(key = "home_metrics") {
@@ -177,32 +203,52 @@ fun HomeScreen(
                         simpleMode = simpleMode,
                         availableWidthDp = maxWidth.value,
                         fontScale = density.fontScale,
+                        gradeSnapshot = gradeSnapshot,
+                        averageAlreadyPresented = averageAlreadyPresented,
+                        onAveragePresented = onAveragePresented,
+                        reduceMotion = reduceMotion,
                         onNavigateToMarks = onNavigateToMarks,
                         onNavigateToAbsences = onNavigateToAbsences,
                     )
                 }
 
                 item(key = "home_marks") {
+                    HomeEntrance(entranceStage > 2, reduceMotion) {
                     HomeRecentMarksCard(
                         snapshot = snapshot,
                         strings = strings,
                         onNavigateToMarks = onNavigateToMarks,
                     )
+                    }
                 }
 
                 item(key = "home_homework") {
+                    HomeEntrance(entranceStage > 3, reduceMotion) {
                     HomeHomeworkPreviewCard(
                         snapshot = snapshot,
                         strings = strings,
                         onNavigateToHomework = onNavigateToHomework,
                         reduceMotion = reduceMotion,
                     )
+                    }
                 }
             }
         }
     }
 }
+}
 
+@Composable
+private fun HomeEntrance(visible: Boolean, reduceMotion: Boolean, content: @Composable () -> Unit) {
+    val progress by animateFloatAsState(
+        targetValue = if (visible || reduceMotion) 1f else 0f,
+        animationSpec = if (reduceMotion) snap() else MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "home_entrance",
+    )
+    Box(Modifier.graphicsLayer {
+        alpha = progress.coerceIn(0f, 1f)
+        translationY = (1f - progress.coerceIn(0f, 1f)) * 12.dp.toPx()
+    }) { content() }
 }
 
 /**
@@ -680,9 +726,16 @@ private fun HomeMetricsSection(
     simpleMode: Boolean,
     availableWidthDp: Float,
     fontScale: Float,
+    gradeSnapshot: StudentAgendaSnapshot?,
+    averageAlreadyPresented: Boolean,
+    onAveragePresented: () -> Unit,
+    reduceMotion: Boolean,
     onNavigateToMarks: () -> Unit,
     onNavigateToAbsences: () -> Unit,
 ) {
+    val averageSnapshot = gradeSnapshot?.takeIf { it.studentId == snapshot.studentId && readyHomeAverage(it) != null }
+        ?: snapshot
+    val average = readyHomeAverage(averageSnapshot)
     val isThreeCol = availableWidthDp >= 600f && fontScale < 1.35f
     val stackAllSingleColumn = availableWidthDp < 380f || fontScale >= 1.35f
 
@@ -691,10 +744,13 @@ private fun HomeMetricsSection(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            GpaMetricCard(
-                snapshot = snapshot,
+            if (average != null) GpaMetricCard(
+                snapshot = averageSnapshot,
                 strings = strings,
                 simpleMode = simpleMode,
+                reduceMotion = reduceMotion,
+                alreadyPresented = averageAlreadyPresented,
+                onPresented = onAveragePresented,
                 onClick = onNavigateToMarks,
                 modifier = Modifier.weight(1.3f),
             )
@@ -702,13 +758,13 @@ private fun HomeMetricsSection(
                 snapshot = snapshot,
                 strings = strings,
                 onClick = onNavigateToAbsences,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).pageEntrance(1),
             )
             LastGradeMetricCard(
                 snapshot = snapshot,
                 strings = strings,
                 onClick = onNavigateToMarks,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).pageEntrance(2),
             )
         }
     } else if (stackAllSingleColumn) {
@@ -716,10 +772,13 @@ private fun HomeMetricsSection(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            GpaMetricCard(
-                snapshot = snapshot,
+            if (average != null) GpaMetricCard(
+                snapshot = averageSnapshot,
                 strings = strings,
                 simpleMode = simpleMode,
+                reduceMotion = reduceMotion,
+                alreadyPresented = averageAlreadyPresented,
+                onPresented = onAveragePresented,
                 onClick = onNavigateToMarks,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -727,13 +786,13 @@ private fun HomeMetricsSection(
                 snapshot = snapshot,
                 strings = strings,
                 onClick = onNavigateToAbsences,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().pageEntrance(1),
             )
             LastGradeMetricCard(
                 snapshot = snapshot,
                 strings = strings,
                 onClick = onNavigateToMarks,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().pageEntrance(2),
             )
         }
     } else {
@@ -741,10 +800,13 @@ private fun HomeMetricsSection(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            GpaMetricCard(
-                snapshot = snapshot,
+            if (average != null) GpaMetricCard(
+                snapshot = averageSnapshot,
                 strings = strings,
                 simpleMode = simpleMode,
+                reduceMotion = reduceMotion,
+                alreadyPresented = averageAlreadyPresented,
+                onPresented = onAveragePresented,
                 onClick = onNavigateToMarks,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -756,17 +818,38 @@ private fun HomeMetricsSection(
                     snapshot = snapshot,
                     strings = strings,
                     onClick = onNavigateToAbsences,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).pageEntrance(1),
                 )
                 LastGradeMetricCard(
                     snapshot = snapshot,
                     strings = strings,
                     onClick = onNavigateToMarks,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).pageEntrance(2),
                 )
             }
         }
     }
+}
+
+/** Uses completed available-grade transactions; does not claim exhaustive portal coverage. */
+internal fun readyHomeAverage(snapshot: StudentAgendaSnapshot): AverageMetric? {
+    if (!snapshot.gradesCoverageComplete && snapshot.successfulSyncMillis["grades"] == null) return null
+    val semester = snapshot.student.currentSemester.takeIf { it in 1..2 } ?: return null
+    val subjects = snapshot.subjectSummaries.filter { it.scale == SubjectScale.NUMERIC }
+    if (subjects.isEmpty() || subjects.any { subject ->
+            subject.marks.any { it.semester !in 1..2 || it.subject != subject.subject } ||
+                subject.marks.map { it.id }.distinct().size != subject.marks.size ||
+                subject.semesterEvidence[semester]?.thesisRequirement == md.sime.opensime.core.model.ThesisRequirement.UNKNOWN
+        }) return null
+    return snapshot.resolveProvisionalGeneralAverage()
+}
+
+@Composable
+internal fun HomeGradePreview(snapshot: StudentAgendaSnapshot, reduceMotion: Boolean,
+    alreadyPresented: Boolean, onPresented: () -> Unit, onClick: () -> Unit) {
+    GpaMetricCard(snapshot, LocalAppStrings.current, simpleMode = false, reduceMotion = reduceMotion,
+        alreadyPresented = alreadyPresented, onPresented = onPresented,
+        onClick = onClick, modifier = Modifier.fillMaxWidth().padding(16.dp))
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -775,12 +858,22 @@ private fun GpaMetricCard(
     snapshot: StudentAgendaSnapshot,
     strings: AppStrings,
     simpleMode: Boolean,
+    reduceMotion: Boolean,
+    alreadyPresented: Boolean,
+    onPresented: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val highContrast = LocalOpenSimeSemanticColors.current.highContrast
-    val gpa = snapshot.resolveProvisionalGeneralAverage()
+    val gpa = readyHomeAverage(snapshot) ?: return
+    var entered by remember(snapshot.studentId) { mutableStateOf(alreadyPresented) }
+    LaunchedEffect(snapshot.studentId) { entered = true; onPresented() }
+    val progress by animateFloatAsState(
+        targetValue = if (entered || reduceMotion) 1f else 0f,
+        animationSpec = if (reduceMotion) snap() else MaterialTheme.motionScheme.fastEffectsSpec(),
+        label = "average_card_entrance",
+    )
     val sem1Avg = snapshot.resolveSemesterAverage(1)
     val sem2Avg = snapshot.resolveSemesterAverage(2)
 
@@ -796,6 +889,12 @@ private fun GpaMetricCard(
         contentColor = colorScheme.onPrimaryContainer,
         border = if (highContrast) BorderStroke(2.dp, colorScheme.onSurface) else null,
         modifier = modifier
+            .graphicsLayer {
+                alpha = progress.coerceIn(0f, 1f)
+                translationY = (1f - progress.coerceIn(0f, 1f)) * 16.dp.toPx()
+                scaleX = 0.96f + 0.04f * progress
+                scaleY = 0.96f + 0.04f * progress
+            }
             .sizeIn(minHeight = 152.dp)
             .testTag("general_average_card"),
     ) {
@@ -815,14 +914,14 @@ private fun GpaMetricCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = if (gpa == null) strings.generalAverageUnavailable else strings.generalAverageEstimated,
+                    text = strings.generalAverage,
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontWeight = FontWeight.Bold,
                     ),
                 )
 
                 Text(
-                    text = strings.formatAverage(gpa?.value),
+                    text = strings.formatAverage(gpa.value),
                     style = MaterialTheme.typography.displaySmallEmphasized.copy(
                         fontSize = 46.sp,
                         lineHeight = 50.sp,
@@ -833,9 +932,7 @@ private fun GpaMetricCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (gpa != null) {
-                        BandChip(averageValue = gpa.value)
-                    }
+                    BandChip(averageValue = gpa.value)
                     if (sem1Avg != null) {
                         StatusChip(
                             text = strings.sem1ShortTemplate.replace("{avg}", strings.formatAverage(sem1Avg.value)),

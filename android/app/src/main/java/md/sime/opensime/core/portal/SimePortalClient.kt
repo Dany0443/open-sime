@@ -1,6 +1,8 @@
 package md.sime.opensime.core.portal
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -49,6 +51,10 @@ open class SimePortalClient(
     private val todayProvider: () -> String = ChisinauTime::todayChisinau,
     private val reloginAction: (suspend () -> Unit)? = null,
 ) {
+    internal data class CompletedGrades(val snapshot: StudentAgendaSnapshot, val generation: Long)
+    private val _completedGrades = MutableStateFlow<CompletedGrades?>(null)
+    internal val completedGrades = _completedGrades.asStateFlow()
+
     val requestMutex: Mutex
         get() = session.sessionLock
 
@@ -466,6 +472,22 @@ open class SimePortalClient(
         )
         currentCoroutineContext().ensureActive()
 
+        val gradeGeneration = session.sessionGeneration
+        val gradePage = enrichPortalPageInternal(page, canonicalKey, requireComplete = true)
+        val gradeSnapshot = SimePortalParser.toStudentAgendaSnapshot(
+            portalPage = gradePage,
+            referenceIsoDate = todayProvider(),
+            referenceTimeHm = ChisinauTime.chisinauHm(nowMillis()),
+            expectedStudentId = targetStudentId,
+        ).verifyStudentOwnership(targetStudentId)
+        currentCoroutineContext().ensureActive()
+        if (session.sessionGeneration != gradeGeneration || session.currentStudentKey != canonicalKey) {
+            throw CancellationException("Session changed during grade load")
+        }
+        _completedGrades.value = CompletedGrades(
+            gradeSnapshot.copy(successfulSyncMillis = mapOf("grades" to nowMillis())), gradeGeneration,
+        )
+
         val doc = SimeDomHelpers.parseHtml(page.html)
         var extraCalendar: List<ParsedCalendarEntry> = emptyList()
         var verifiedCalendarStart: String? = null
@@ -494,7 +516,20 @@ open class SimePortalClient(
             }
         }
 
-        val enrichedPage = enrichPortalPageInternal(page, canonicalKey, extraCalendar, requireComplete = forceRefresh)
+        // Preserve calendar-derived absence records without replaying either semester report.
+        val enrichedPage = if (verifiedCalendarStart != null) {
+            val calendarPage = SimePortalParser.parseFullPortal(page.html, todayProvider(), extraCalendar = extraCalendar)
+            gradePage.copy(
+                absenceSummary = calendarPage.absenceSummary,
+                absente = calendarPage.absente,
+                absences = calendarPage.absences,
+                teachers = SimeCalendarAndTeachersParser.buildTeachers(
+                    entries = if (embeddedCal.isNotEmpty()) embeddedCal else extraCalendar,
+                    metadata = gradePage.metadata,
+                    catalogSubjects = gradePage.catalog.subjects,
+                ),
+            )
+        } else gradePage
         val allCalendar = if (verifiedCalendarStart != null) extraCalendar else embeddedCal
         val finalTeachers = if (enrichedPage.teachers.isNotEmpty()) {
             enrichedPage.teachers

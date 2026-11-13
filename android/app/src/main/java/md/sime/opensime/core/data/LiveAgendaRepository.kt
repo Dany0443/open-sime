@@ -12,6 +12,7 @@ import md.sime.opensime.core.model.StudentProfile
 import md.sime.opensime.core.portal.ParsedStudentProfile
 import md.sime.opensime.core.portal.SimeAuthCoordinator
 import md.sime.opensime.core.portal.SimeNetworkError
+import md.sime.opensime.core.portal.SimeParseError
 import md.sime.opensime.core.portal.SimeServerError
 import md.sime.opensime.core.portal.SimeMaintenanceError
 import md.sime.opensime.core.portal.SimePortalClient
@@ -130,6 +131,10 @@ class LiveAgendaRepository(
             )
             synchronized(cacheLock) {
                 if (loggedOut || generation != client.session.sessionGeneration) throw CancellationException("Session changed")
+                val previous = snapshotCache[id]?.takeIf { it.sessionGeneration == generation }?.snapshot
+                if (previous?.gradesCoverageComplete == true && !verified.gradesCoverageComplete) {
+                    throw SimeParseError("Grade coverage is incomplete")
+                }
                 snapshotCache[id] = CachedSnapshot(verified, completedAt, generation)
                 // Logout invalidates under this same lock before deleting account files.
                 runCatching { snapshotStore?.write(verified) }

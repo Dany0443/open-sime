@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.collect
 import md.sime.opensime.core.data.*
 import md.sime.opensime.core.designsystem.OpenSimeSettingsState
 import md.sime.opensime.core.model.*
@@ -54,6 +55,8 @@ class OpenSimeRetainedSession(
     var loginRequired by mutableStateOf(false)
         private set
     var currentSnapshot by mutableStateOf<StudentAgendaSnapshot?>(null)
+        private set
+    internal var completedGradeSnapshot by mutableStateOf<StudentAgendaSnapshot?>(null)
         private set
     var selectedStudentIdValue by mutableStateOf("")
         private set
@@ -211,6 +214,7 @@ class OpenSimeRetainedSession(
                     dataCoordinator?.clear()
                     dataCoordinator = null
                     repository = null
+                    completedGradeSnapshot = null
                     currentSnapshot = null
                     selectedStudentIdValue = ""
                     isLiveAuthenticated = false
@@ -243,6 +247,7 @@ class OpenSimeRetainedSession(
         dataCoordinator?.clear()
         dataCoordinator = null
         repository = null
+        completedGradeSnapshot = null
         currentSnapshot = null
         isLiveAuthenticated = false
         isRestoringSession = false
@@ -406,6 +411,7 @@ class OpenSimeRetainedSession(
         val selected = selectedStudentIdValue.takeIf { previousAccount == accountStore.accountStorageId &&
             session.students.any { student -> student.id.value == it } } ?: session.initialStudent.id.value
         snapshotStore = accountStore
+        completedGradeSnapshot = null
         repository = LiveAgendaRepository(SimePortalClient(coordinator.session), coordinator, snapshotStore = accountStore)
         isLiveAuthenticated = true
         restorationError = null
@@ -422,6 +428,7 @@ class OpenSimeRetainedSession(
         dataJob?.cancel()
         val current = dataCoordinator?.takeIf { it.currentRepository === source }
             ?: OpenSimeSessionCoordinator(source).also { dataCoordinator = it }
+        if (selectedStudentIdValue != studentId.value) completedGradeSnapshot = null
         selectedStudentIdValue = studentId.value
         currentSnapshot = current.cachedSnapshotFor(studentId) ?: currentSnapshot?.takeIf { it.studentId == studentId }
         loadError = null
@@ -429,6 +436,18 @@ class OpenSimeRetainedSession(
         val generation = sessionGeneration
         dataJob = launchSessionWork {
             val job = currentCoroutineContext()[Job]
+            val client = (source as? LiveAgendaRepository)?.client
+            val gradeJob = client?.let {
+                CoroutineScope(currentCoroutineContext()).launch {
+                    it.completedGrades.collect { result ->
+                        if (result != null && generation == sessionGeneration && dataJob === job &&
+                            repository === source && selectedStudentIdValue == studentId.value &&
+                            result.generation == it.session.sessionGeneration && result.snapshot.studentId == studentId) {
+                            completedGradeSnapshot = result.snapshot.verifyStudentOwnership(studentId)
+                        }
+                    }
+                }
+            }
             try {
                 val disk = if (source is LiveAgendaRepository) withContext(Dispatchers.IO) { source.cachedSnapshotFor(studentId) } else null
                 ensureCurrent(generation)
@@ -438,11 +457,12 @@ class OpenSimeRetainedSession(
                     forceRefresh || (source is LiveAgendaRepository && current.cachedSnapshotFor(studentId) == null))
                 ensureCurrent(generation)
                 if (selectedStudentIdValue != studentId.value || repository !== source || dataJob !== job) return@launchSessionWork
-                result.fold(onSuccess = { currentSnapshot = it; loadError = null },
+                result.fold(onSuccess = { currentSnapshot = it; completedGradeSnapshot = null; loadError = null },
                     onFailure = { loadError = it; currentSnapshot = currentSnapshot?.copy(stale = true) })
             } catch (cancel: CancellationException) {
                 throw cancel
             } finally {
+                gradeJob?.cancel()
                 if (generation == sessionGeneration && dataJob === job) isLoading = false
             }
         }
@@ -468,6 +488,7 @@ class OpenSimeRetainedSession(
         } ?: snapshotStore ?: pendingSnapshotStore
         dataCoordinator?.clear()
         dataCoordinator = null
+        completedGradeSnapshot = null
         currentSnapshot = null
         selectedStudentIdValue = ""
         loadError = null

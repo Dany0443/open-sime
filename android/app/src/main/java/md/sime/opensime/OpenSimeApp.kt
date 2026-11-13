@@ -59,6 +59,8 @@ import md.sime.opensime.core.portal.SimeSessionExpiredError
 import md.sime.opensime.core.portal.SimeStudentMismatchError
 import md.sime.opensime.feature.absences.AbsencesScreen
 import md.sime.opensime.feature.auth.LoginScreen
+import md.sime.opensime.feature.home.readyHomeAverage
+import md.sime.opensime.feature.home.HomeGradePreview
 import md.sime.opensime.core.designsystem.PageEntranceScope
 import md.sime.opensime.feature.home.HomeScreen
 import md.sime.opensime.feature.homework.HomeworkScreen
@@ -283,6 +285,7 @@ fun OpenSimeApp(
     }
 
     val selectedStudentIdValue = retained.selectedStudentIdValue
+    var averageCardPresented by remember(retained.sessionGeneration, retained.selectedStudentIdValue) { mutableStateOf(false) }
     val currentSnapshot = retained.currentSnapshot
     val loadError = retained.loadError
     val isLoading = retained.isLoading
@@ -553,6 +556,13 @@ fun OpenSimeApp(
                             }
                         }
 
+                        snapshot == null && retained.completedGradeSnapshot?.let { readyHomeAverage(it) } != null && currentDestination == TopLevelDestination.HOME -> {
+                            retained.completedGradeSnapshot?.takeIf { it.studentId.value == selectedStudentIdValue }?.let {
+                                HomeGradePreview(it, settings.reduceMotion, averageCardPresented,
+                                    onPresented = { averageCardPresented = true },
+                                    onClick = { currentDestination = TopLevelDestination.MARKS })
+                            }
+                        }
                         snapshot == null -> {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -579,6 +589,9 @@ fun OpenSimeApp(
                             when (destination) {
                                 TopLevelDestination.HOME -> HomeScreen(
                                     snapshot = snapshot,
+                                    gradeSnapshot = retained.completedGradeSnapshot?.takeIf { it.studentId == snapshot.studentId },
+                                    averageAlreadyPresented = averageCardPresented,
+                                    onAveragePresented = { averageCardPresented = true },
                                     isRefreshing = isLoading || isRestoringSession,
                                     onRefresh = { if (!isLoading && !isRestoringSession) retryData() },
                                     refreshError = loadError?.let { strings.errorMessageFor(it) },
