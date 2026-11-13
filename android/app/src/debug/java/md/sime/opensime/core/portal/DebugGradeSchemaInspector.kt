@@ -42,6 +42,56 @@ class DebugSchemaApplication : Application() {
  * Output exists only in memory and contains fixed field names and enum values.
  */
 object DebugGradeSchemaInspector {
+    internal data class ReportStructure(
+        val tablePresent: Boolean,
+        val parsedRows: Int,
+        val subjectColumnPresent: Boolean,
+        val evaluationColumnPresent: Boolean,
+        val paginationHint: Boolean,
+        val alternateEvaluationHeaderHint: Boolean,
+        val datedSpanHint: Boolean,
+        val nextLinkHint: Boolean,
+        val nextLinkNotMarkedDisabledHint: Boolean,
+        val paginationControlHint: Boolean,
+        val paginationControlNotMarkedDisabledHint: Boolean,
+        val allSubjectRowsHaveEvaluationCell: Boolean,
+        val duplicateSubjectRowHint: Boolean,
+        val paginationRangeTextHint: Boolean,
+    )
+
+    internal fun inspectStructure(root: Element): ReportStructure {
+        val cells = root.select("td[headers]")
+        val headers = cells.flatMap {
+            it.attr("headers").uppercase(Locale.ROOT).split(Regex("\\s+"))
+        }.toSet()
+        val nextLinks = root.select("a[rel~=next]")
+        val paginationControls = root.select("[class*=pagination] button, [class*=pagination] a")
+        val subjectRows = root.select("tr").filter { row ->
+            row.select("td[headers]").any { SimeDomHelpers.headerHas(it, listOf("DISCIPLINA", "DISCIPLINE", "MATERIA", "OBIECT")) }
+        }
+        val parsedRows = SimePortalParser.parseSemesterReportFromRoot(root).size
+        return ReportStructure(
+            tablePresent = root.getElementsByTag("table").isNotEmpty(),
+            parsedRows = parsedRows,
+            subjectColumnPresent = cells.any { SimeDomHelpers.headerHas(it, listOf("DISCIPLINA", "DISCIPLINE", "MATERIA", "OBIECT")) },
+            evaluationColumnPresent = cells.any { SimeDomHelpers.headerHas(it, listOf("LISTA_EVALUATION", "EVALUATION", "NOTE", "MARKS")) },
+            paginationHint = root.select("[class*=pagination], a[rel=next]").isNotEmpty(),
+            alternateEvaluationHeaderHint = headers.any { it in setOf("EVALUATION", "NOTE", "MARKS", "LISTA_EVALUATION_1", "LISTA_EVALUATION_2") },
+            datedSpanHint = root.select("td span[title]").isNotEmpty(),
+            nextLinkHint = nextLinks.isNotEmpty(),
+            nextLinkNotMarkedDisabledHint = nextLinks.any { !it.hasAttr("disabled") && !it.attr("aria-disabled").equals("true", ignoreCase = true) && !it.hasClass("disabled") && !it.hasClass("is-disabled") },
+            paginationControlHint = paginationControls.isNotEmpty(),
+            paginationControlNotMarkedDisabledHint = paginationControls.any { !it.hasAttr("disabled") && !it.attr("aria-disabled").equals("true", ignoreCase = true) && !it.hasClass("disabled") && !it.hasClass("is-disabled") },
+            allSubjectRowsHaveEvaluationCell = subjectRows.isNotEmpty() && subjectRows.all { row ->
+                row.select("td[headers]").any { SimeDomHelpers.headerHas(it, listOf("LISTA_EVALUATION", "EVALUATION", "NOTE", "MARKS")) }
+            },
+            duplicateSubjectRowHint = subjectRows.size > parsedRows,
+            paginationRangeTextHint = root.select("[class*=pagination]").any {
+                it.text().trim().matches(Regex("[0-9]+\\s*[-–]\\s*[0-9]+\\s*(?:of|din|из)\\s*[0-9]+", RegexOption.IGNORE_CASE))
+            },
+        )
+    }
+
     private enum class ValueType { UNKNOWN, EMPTY, NUMERIC, NON_NUMERIC, MIXED }
     private data class Observation(
         var dashboard: Boolean = false,
@@ -57,6 +107,8 @@ object DebugGradeSchemaInspector {
         var annualAverage: Boolean = false,
         var semesterType: ValueType = ValueType.UNKNOWN,
         var annualType: ValueType = ValueType.UNKNOWN,
+        var semester1Structure: ReportStructure? = null,
+        var semester2Structure: ReportStructure? = null,
     )
 
     private var directory: File? = null
@@ -201,6 +253,13 @@ object DebugGradeSchemaInspector {
         return try {
             val observation = Observation(dashboard = true)
             observe(observation, html)
+            val doc = Jsoup.parse(html)
+            SimePortalParser.REGIONS.forEach { region ->
+                SimePortalParser.findSemesterScope(doc, region)?.let { scope ->
+                    if (region.semester == 1) observation.semester1Structure = inspectStructure(scope)
+                    else if (region.semester == 2) observation.semester2Structure = inspectStructure(scope)
+                }
+            }
             sequence += 1
             activeToken = sequence
             active = observation
@@ -220,6 +279,8 @@ object DebugGradeSchemaInspector {
         try {
             if (semester == 1) observation.report1 = true else observation.report2 = true
             observe(observation, html)
+            val structure = inspectStructure(Jsoup.parse(html))
+            if (semester == 1) observation.semester1Structure = structure else observation.semester2Structure = structure
         } catch (_: Exception) {
             active = null
             activeToken = 0L
@@ -280,6 +341,29 @@ object DebugGradeSchemaInspector {
         appendLine("annual_average_column=${o.annualAverage}")
         appendLine("semester_average_type=${o.semesterType.name.lowercase(Locale.ROOT)}")
         appendLine("annual_average_type=${o.annualType.name.lowercase(Locale.ROOT)}")
+        fun appendStructure(prefix: String, report: ReportStructure?) {
+            appendLine("${prefix}_observed=${report != null}")
+            appendLine("${prefix}_table_present=${report?.tablePresent ?: "unknown"}")
+            appendLine("${prefix}_parsed_rows=${report?.parsedRows ?: "unknown"}")
+            appendLine("${prefix}_subject_column=${report?.subjectColumnPresent ?: "unknown"}")
+            appendLine("${prefix}_evaluation_column=${report?.evaluationColumnPresent ?: "unknown"}")
+            appendLine("${prefix}_pagination_hint_unverified=${report?.paginationHint ?: "unknown"}")
+            appendLine("${prefix}_alternate_evaluation_header_hint_unverified=${report?.alternateEvaluationHeaderHint ?: "unknown"}")
+            appendLine("${prefix}_dated_span_hint_unverified=${report?.datedSpanHint ?: "unknown"}")
+            appendLine("${prefix}_next_link_hint_unverified=${report?.nextLinkHint ?: "unknown"}")
+            appendLine("${prefix}_next_link_not_marked_disabled_hint_unverified=${report?.nextLinkNotMarkedDisabledHint ?: "unknown"}")
+            appendLine("${prefix}_pagination_control_hint_unverified=${report?.paginationControlHint ?: "unknown"}")
+            appendLine("${prefix}_pagination_control_not_marked_disabled_hint_unverified=${report?.paginationControlNotMarkedDisabledHint ?: "unknown"}")
+            appendLine("${prefix}_all_subject_rows_have_evaluation_cell_unverified=${report?.allSubjectRowsHaveEvaluationCell ?: "unknown"}")
+            appendLine("${prefix}_duplicate_subject_row_hint_unverified=${report?.duplicateSubjectRowHint ?: "unknown"}")
+            appendLine("${prefix}_pagination_range_text_hint_unverified=${report?.paginationRangeTextHint ?: "unknown"}")
+            appendLine("${prefix}_empty_state=unknown")
+            appendLine("${prefix}_declared_total=unknown")
+            appendLine("${prefix}_all_pages=unknown")
+            appendLine("${prefix}_complete=unknown")
+        }
+        appendStructure("semester_1", o.semester1Structure)
+        appendStructure("semester_2", o.semester2Structure)
         appendLine("completeness=unknown")
         appendLine("finalization=unknown")
         appendLine("deduplication=unknown")

@@ -283,13 +283,22 @@ class DebugGradeSchemaInspectorTest {
         assertFalse(output.contains("12.10.2026"))
         assertFalse(output.contains("Profesor"))
         assertTrue(output.lines().filter(String::isNotEmpty).all {
-            it.matches(Regex("[a-z0-9_]+=(true|false|unknown|empty|numeric|non_numeric|mixed)"))
+            it.matches(Regex("[a-z0-9_]+=(true|false|unknown|empty|numeric|non_numeric|mixed)")) ||
+                it.matches(Regex("semester_[12]_parsed_rows=[0-9]+"))
         })
         assertEquals(setOf(
             "dashboard_observed", "report_semester_1_observed", "report_semester_2_observed",
             "semester_1_region", "semester_2_region", "subject_column", "evaluation_column",
             "thesis_column", "thesis_marker", "semester_average_column", "annual_average_column",
             "semester_average_type", "annual_average_type", "completeness", "finalization", "deduplication",
+            "semester_1_observed", "semester_1_table_present", "semester_1_parsed_rows", "semester_1_subject_column", "semester_1_evaluation_column", "semester_1_pagination_hint_unverified", "semester_1_empty_state", "semester_1_declared_total", "semester_1_all_pages", "semester_1_complete",
+            "semester_2_observed", "semester_2_table_present", "semester_2_parsed_rows", "semester_2_subject_column", "semester_2_evaluation_column", "semester_2_pagination_hint_unverified", "semester_2_empty_state", "semester_2_declared_total", "semester_2_all_pages", "semester_2_complete",
+            "semester_1_alternate_evaluation_header_hint_unverified", "semester_1_dated_span_hint_unverified", "semester_1_next_link_hint_unverified", "semester_1_next_link_not_marked_disabled_hint_unverified",
+            "semester_2_alternate_evaluation_header_hint_unverified", "semester_2_dated_span_hint_unverified", "semester_2_next_link_hint_unverified", "semester_2_next_link_not_marked_disabled_hint_unverified",
+            "semester_1_pagination_control_hint_unverified", "semester_1_pagination_control_not_marked_disabled_hint_unverified",
+            "semester_2_pagination_control_hint_unverified", "semester_2_pagination_control_not_marked_disabled_hint_unverified",
+            "semester_1_all_subject_rows_have_evaluation_cell_unverified", "semester_1_duplicate_subject_row_hint_unverified", "semester_1_pagination_range_text_hint_unverified",
+            "semester_2_all_subject_rows_have_evaluation_cell_unverified", "semester_2_duplicate_subject_row_hint_unverified", "semester_2_pagination_range_text_hint_unverified",
         ), output.lines().filter(String::isNotEmpty).map { it.substringBefore('=') }.toSet())
         assertTrue(output.contains("evaluation_column=true"))
         assertTrue(output.contains("thesis_column=true"))

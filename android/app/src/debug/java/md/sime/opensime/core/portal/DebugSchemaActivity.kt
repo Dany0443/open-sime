@@ -62,7 +62,6 @@ object DebugInspectionBridge {
         val retained: OpenSimeRetainedSession,
         val auth: SimeAuthCoordinator,
         val student: String,
-        val displayName: String,
         val sessionGeneration: Long,
         val retainedGeneration: Long,
         val revision: Long,
@@ -78,8 +77,8 @@ object DebugInspectionBridge {
         val selected = retained.selectedStudentIdValue
         val key = session.canonicalStudentKey(selected)
         if (selected.isBlank() || key.isEmpty() || key != session.currentStudentKey) return null
-        val name = session.listStudents().firstOrNull { it.id == key }?.fullName?.takeIf(String::isNotBlank) ?: return null
-        return Selection(retained, auth, key, name, session.sessionGeneration, retained.sessionGeneration, revision)
+        if (session.listStudents().none { it.id == key }) return null
+        return Selection(retained, auth, key, session.sessionGeneration, retained.sessionGeneration, revision)
     }
 
     @Synchronized internal fun valid(selection: Selection): Boolean {
@@ -120,12 +119,23 @@ private fun labels(language: AppLanguage): Labels = when (language) {
     AppLanguage.EN -> Labels("Debug structure inspection", "Selected student", "Confirm one structural inspection. This is not normal synchronization. At most three requests are allowed.", "Confirm inspection", "Close", "The session or selected student is not ready. Sign in and select a student first.", "Inspection in progress…", "Inspection complete", "The inspection could not be completed.", "The inspection expired.", "Select this student")
 }
 
+// Fixed categories only: exception messages and portal responses may contain private data.
+internal fun debugInspectionFailureCategory(error: Throwable): String = when (error) {
+    is SimeAuthError -> "session"
+    is SimeStudentMismatchError -> "ownership"
+    is SimeNetworkError -> "network"
+    is SimeRateLimitError -> "rate_limit"
+    is SimeServerError, is SimeMaintenanceError -> "server"
+    is CancellationException -> "cancelled_or_guard"
+    else -> "other"
+}
+
 private sealed interface ScreenState {
     data object Select : ScreenState
     data object Confirm : ScreenState
     data object Running : ScreenState
     data object Unavailable : ScreenState
-    data object Failed : ScreenState
+    class Failed(val stage: String, val category: String) : ScreenState
     data object Expired : ScreenState
     class Complete(val summary: String) : ScreenState
 }
@@ -147,14 +157,16 @@ class DebugSchemaActivity : ComponentActivity() {
                         Text(text.title, style = MaterialTheme.typography.headlineSmall)
                         when (val current = screen) {
                             ScreenState.Select -> {
-                                Text("${text.selected}: ${selection!!.displayName}", modifier = Modifier.testTag("debug_inspection_selected"))
+                                checkNotNull(selection)
+                                Text(text.selected, modifier = Modifier.testTag("debug_inspection_selected"))
                                 Button(onClick = {
                                     screen = try { DebugInspectionBridge.confirmStudent(selection); ScreenState.Confirm }
                                     catch (_: CancellationException) { ScreenState.Unavailable }
                                 }, modifier = Modifier.testTag("debug_inspection_select")) { Text(text.select) }
                             }
                             ScreenState.Confirm -> {
-                                Text("${text.selected}: ${selection!!.displayName}", modifier = Modifier.testTag("debug_inspection_selected"))
+                                checkNotNull(selection)
+                                Text(text.selected, modifier = Modifier.testTag("debug_inspection_selected"))
                                 Text(text.description)
                                 Button(onClick = {
                                     if (screen !== ScreenState.Confirm) return@Button
@@ -163,16 +175,20 @@ class DebugSchemaActivity : ComponentActivity() {
                                     } else {
                                         screen = ScreenState.Running
                                         scope.launch {
+                                            var stage = "authorization"
                                             try {
                                                 val summary = DebugInspectionBridge.confirm(selection) {
                                                     val repository = selection.retained.repository as? LiveAgendaRepository
                                                         ?: throw CancellationException("Session unavailable")
                                                     withContext(Dispatchers.IO) {
                                                         val session = selection.auth.session
+                                                        stage = "student_page"
                                                         val page = session.sessionLock.withLock {
                                                             session.loadStudentPage(selection.student, assertCurrent = true)
                                                         }
+                                                        stage = "reports_or_parsing"
                                                         repository.client.enrichPortalPage(page, selection.student)
+                                                        stage = "verification"
                                                     }
                                                 }
                                                 screen = ScreenState.Complete(summary)
@@ -180,11 +196,11 @@ class DebugSchemaActivity : ComponentActivity() {
                                                 screen = ScreenState.Expired
                                             } catch (_: DebugInspectionExpired) {
                                                 screen = ScreenState.Expired
-                                            } catch (_: CancellationException) {
+                                            } catch (error: CancellationException) {
                                                 currentCoroutineContext().ensureActive()
-                                                screen = ScreenState.Failed
-                                            } catch (_: Exception) {
-                                                screen = ScreenState.Failed
+                                                screen = ScreenState.Failed(stage, debugInspectionFailureCategory(error))
+                                            } catch (error: Exception) {
+                                                screen = ScreenState.Failed(stage, debugInspectionFailureCategory(error))
                                             }
                                         }
                                     }
@@ -192,7 +208,7 @@ class DebugSchemaActivity : ComponentActivity() {
                             }
                             ScreenState.Running -> Text(text.running, modifier = Modifier.testTag("debug_inspection_status"))
                             ScreenState.Unavailable -> Text(text.unavailable, modifier = Modifier.testTag("debug_inspection_status"))
-                            ScreenState.Failed -> Text(text.failed, modifier = Modifier.testTag("debug_inspection_status"))
+                            is ScreenState.Failed -> Text("${text.failed}\nstage=${current.stage}\ncategory=${current.category}", modifier = Modifier.testTag("debug_inspection_status"))
                             ScreenState.Expired -> Text(text.expired, modifier = Modifier.testTag("debug_inspection_status"))
                             is ScreenState.Complete -> { Text(text.complete); Text(current.summary, modifier = Modifier.testTag("debug_inspection_summary")) }
                         }

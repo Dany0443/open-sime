@@ -39,6 +39,13 @@ class DebugInspectionAuthorizationTest {
         }
     }
 
+    @Test fun failureCategoriesNeverIncludeExceptionText() {
+        assertEquals("network", debugInspectionFailureCategory(SimeNetworkError("private synthetic data")))
+        assertEquals("session", debugInspectionFailureCategory(SimeSessionExpiredError()))
+        assertEquals("cancelled_or_guard", debugInspectionFailureCategory(CancellationException("private synthetic data")))
+        assertEquals("other", debugInspectionFailureCategory(IllegalStateException("private synthetic data")))
+    }
+
     @Test fun openingRequiresLiveSessionAndExplicitSelectionWithoutNetwork() {
         val f = Fixture()
         f.setLive(false)
@@ -50,7 +57,7 @@ class DebugInspectionAuthorizationTest {
         assertNull(DebugInspectionBridge.capture())
         f.setSelected("id_101")
         val selection = checkNotNull(DebugInspectionBridge.capture())
-        assertEquals("Synthetic Student", selection.displayName)
+        assertEquals("id_101", selection.student)
         assertEquals(0, f.requests)
     }
 
