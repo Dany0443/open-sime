@@ -87,5 +87,13 @@
         }
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "UPDATE_PUBKEY_PLACEHOLDER_REPLACE_AT_RELEASE_TIME",
+      "endpoints": [
+        "https://github.com/Dany0443/open-sime/releases/download/desktop-latest/latest.json"
+      ]
+    }
   }
 }

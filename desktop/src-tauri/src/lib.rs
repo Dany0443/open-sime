@@ -15,10 +15,38 @@ use tauri_plugin_shell::process::CommandEvent;
 #[allow(unused_imports)]
 use tauri_plugin_shell::ShellExt;
 
+// Signed in-app updates run only in release builds (see `start_update_phase`).
+#[cfg(not(debug_assertions))]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(debug_assertions))]
+use std::sync::Arc;
+#[cfg(not(debug_assertions))]
+use std::time::Instant;
+#[cfg(not(debug_assertions))]
+use tauri::webview::PageLoadEvent;
+#[cfg(not(debug_assertions))]
+use tauri_plugin_updater::UpdaterExt;
+
 const SIDECAR_NAME: &str = "binaries/open-sime-server";
 const PRODUCTION_HOST: &str = "127.0.0.1";
 const PRODUCTION_PORT: u16 = 17321;
 const STARTUP_TIMEOUT_SECS: u64 = 15;
+
+// The update check must never hold startup hostage: after this deadline the
+// sidecar starts and the app opens normally, whatever the endpoint is doing.
+#[cfg(not(debug_assertions))]
+const UPDATE_CHECK_TIMEOUT_SECS: u64 = 5;
+// A download that stops making progress for this long is abandoned and startup
+// continues. Installing is skipped once this fires, so a late download can
+// never swap the binary under a running app.
+#[cfg(not(debug_assertions))]
+const UPDATE_STALL_TIMEOUT_SECS: u64 = 60;
+#[cfg(not(debug_assertions))]
+const UPDATE_PROGRESS_INTERVAL_MS: u64 = 100;
+// Safety net for the update phase: if the loader page never reports a finished
+// load, startup must still happen.
+#[cfg(not(debug_assertions))]
+const STARTUP_FALLBACK_SECS: u64 = 10;
 
 #[derive(Default)]
 struct SidecarState {
@@ -83,6 +111,31 @@ pub fn build_show_startup_error_script(code: &str, detail: &str) -> String {
   format!(
     "if (window.__showSimeError) {{ window.__showSimeError({}, {}); }}",
     safe_code, safe_detail
+  )
+}
+
+// JSON-escapes a value for inline script use. Mirrors
+// `build_show_startup_error_script`: `</` is broken up so the HTML parser can
+// never see a closing script tag.
+fn escape_js_json(value: &str) -> String {
+  serde_json::to_string(value)
+    .unwrap_or_else(|_| "\"\"".to_string())
+    .replace("</", "<\\/")
+}
+
+/// Builds a script that calls one method of `window.__simeUpdate` on the loader
+/// page. Only fixed method names are allowed and the arguments are numbers, so
+/// no user-controlled text can reach the script.
+pub fn build_update_script(method: &str, received: u64, total: Option<u64>) -> String {
+  const ALLOWED: [&str; 5] = ["checking", "progress", "installing", "hide", "fail"];
+  if !ALLOWED.contains(&method) {
+    return "if (window.__simeUpdate) { window.__simeUpdate.fail(); }".to_string();
+  }
+  format!(
+    "if (window.__simeUpdate) {{ window.__simeUpdate[{}]({}, {}); }}",
+    escape_js_json(method),
+    received,
+    total.unwrap_or(0)
   )
 }
 
@@ -427,6 +480,161 @@ fn spawn_production_sidecar(app: &AppHandle) {
   });
 }
 
+#[cfg(not(debug_assertions))]
+fn emit_update(app: &AppHandle, script: String) {
+  if let Some(window) = app.get_webview_window("main") {
+    let _ = window.eval(&script);
+  }
+}
+
+#[cfg(not(debug_assertions))]
+static UPDATE_PHASE_STARTED: AtomicBool = AtomicBool::new(false);
+
+// Starts the one and only update attempt for this launch. Runs after the loader
+// page finished loading and before the sidecar starts, so nothing holds the
+// port or the install files while an update is applied. Every failure path ends
+// in `spawn_production_sidecar`, so a broken updater cannot block startup.
+#[cfg(not(debug_assertions))]
+fn start_update_phase(app: &AppHandle) {
+  // The page load hook also fires for the app itself once the sidecar is up;
+  // only the first (loader) load may start an update attempt.
+  if UPDATE_PHASE_STARTED.swap(true, Ordering::SeqCst) {
+    return;
+  }
+
+  #[cfg(target_os = "linux")]
+  if app.env().appimage.is_none() {
+    // Only an AppImage can be replaced in place. Deb, rpm and unpacked builds
+    // have no safe self-update path, so they keep starting normally.
+    spawn_production_sidecar(app);
+    return;
+  }
+
+  emit_update(app, build_update_script("checking", 0, None));
+
+  let resolved = Arc::new(AtomicBool::new(false));
+
+  // Check deadline: whatever happens upstream, the app opens after 5 seconds.
+  {
+    let app = app.clone();
+    let resolved = resolved.clone();
+    std::thread::spawn(move || {
+      std::thread::sleep(Duration::from_secs(UPDATE_CHECK_TIMEOUT_SECS));
+      if !resolved.swap(true, Ordering::SeqCst) {
+        emit_update(&app, build_update_script("fail", 0, None));
+        spawn_production_sidecar(&app);
+      }
+    });
+  }
+
+  let app = app.clone();
+  std::thread::spawn(move || {
+    let check = match app.updater() {
+      Ok(updater) => tauri::async_runtime::block_on(updater.check()),
+      Err(err) => Err(err),
+    };
+    match check {
+      Ok(Some(update)) => {
+        if resolved.swap(true, Ordering::SeqCst) {
+          return; // The check deadline already started the app.
+        }
+        run_update(&app, update);
+      }
+      _ => {
+        if !resolved.swap(true, Ordering::SeqCst) {
+          emit_update(&app, build_update_script("fail", 0, None));
+          spawn_production_sidecar(&app);
+        }
+      }
+    }
+  });
+}
+
+// Downloads, verifies and installs the update. Signatures are checked by the
+// plugin against the embedded public key, so a corrupted or wrongly signed
+// package never installs and startup simply continues.
+#[cfg(not(debug_assertions))]
+fn run_update(app: &AppHandle, update: tauri_plugin_updater::Update) {
+  let activity = Arc::new(Mutex::new(Instant::now()));
+  let aborted = Arc::new(AtomicBool::new(false));
+
+  {
+    let app = app.clone();
+    let activity = activity.clone();
+    let aborted = aborted.clone();
+    std::thread::spawn(move || loop {
+      std::thread::sleep(Duration::from_secs(2));
+      if aborted.load(Ordering::SeqCst) {
+        return;
+      }
+      let idle = activity.lock().map(|last| last.elapsed()).unwrap_or_default();
+      if idle >= Duration::from_secs(UPDATE_STALL_TIMEOUT_SECS)
+        && !aborted.swap(true, Ordering::SeqCst)
+      {
+        emit_update(&app, build_update_script("fail", 0, None));
+        spawn_production_sidecar(&app);
+        return;
+      }
+    });
+  }
+
+  let mut downloaded: u64 = 0;
+  let mut last_emit = Instant::now();
+  let chunk_app = app.clone();
+  let chunk_activity = activity.clone();
+  let on_chunk = move |chunk_len: usize, total: Option<u64>| {
+    downloaded = downloaded.saturating_add(chunk_len as u64);
+    if let Ok(mut last) = chunk_activity.lock() {
+      *last = Instant::now();
+    }
+    if last_emit.elapsed() >= Duration::from_millis(UPDATE_PROGRESS_INTERVAL_MS) {
+      last_emit = Instant::now();
+      emit_update(
+        &chunk_app,
+        build_update_script("progress", downloaded, total),
+      );
+    }
+  };
+
+  let finish_app = app.clone();
+  let on_finish = move || {
+    emit_update(&finish_app, build_update_script("installing", 0, None));
+  };
+
+  let result = tauri::async_runtime::block_on(update.download(on_chunk, on_finish));
+  if aborted.load(Ordering::SeqCst) {
+    return; // The stall deadline already started the app; drop the download.
+  }
+
+  match result {
+    Ok(bytes) => {
+      if aborted.swap(true, Ordering::SeqCst) {
+        return;
+      }
+      match update.install(bytes) {
+        Ok(()) => {
+          // Windows: the plugin launches the NSIS installer and exits the app.
+          // macOS and Linux: relaunch to run the freshly installed build.
+          #[cfg(not(windows))]
+          app.restart();
+          #[cfg(windows)]
+          aborted.store(true, Ordering::SeqCst);
+        }
+        Err(_) => {
+          emit_update(app, build_update_script("fail", 0, None));
+          spawn_production_sidecar(app);
+        }
+      }
+    }
+    Err(_) => {
+      if !aborted.swap(true, Ordering::SeqCst) {
+        emit_update(app, build_update_script("fail", 0, None));
+        spawn_production_sidecar(app);
+      }
+    }
+  }
+}
+
 #[cfg(windows)]
 fn assign_to_app_job_object() {
   use std::ffi::c_void;
@@ -508,6 +716,7 @@ pub fn run() {
 
   let app = tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .manage(Mutex::new(SidecarState::default()))
     .setup(|app| {
       // The window is created hidden (tauri.conf.json); paint its background before showing it.
@@ -528,10 +737,29 @@ pub fn run() {
 
       #[cfg(not(debug_assertions))]
       {
-        spawn_production_sidecar(app.handle());
+        // The sidecar now starts from the page load hook, after the update
+        // attempt. If that hook never fires, start it anyway so a broken loader
+        // page cannot leave the window empty forever.
+        let handle = app.handle().clone();
+        std::thread::spawn(move || {
+          std::thread::sleep(Duration::from_secs(STARTUP_FALLBACK_SECS));
+          if !UPDATE_PHASE_STARTED.load(Ordering::SeqCst) {
+            spawn_production_sidecar(&handle);
+          }
+        });
       }
 
       Ok(())
+    })
+    .on_page_load(|webview, payload| {
+      // The update phase starts only once the loader page is actually loaded,
+      // so its progress bar exists before the first `eval` runs.
+      #[cfg(not(debug_assertions))]
+      if payload.event() == PageLoadEvent::Finished {
+        start_update_phase(webview.app_handle());
+      }
+      #[cfg(debug_assertions)]
+      let _ = (webview, payload);
     })
     .on_window_event(|window, event| {
       if window.label() == "main" {
@@ -592,5 +820,42 @@ mod tests {
     let script = build_show_startup_error_script("INJECT", "</script><script>alert('xss')</script>");
     assert!(!script.contains("</script>"));
     assert!(!script.to_lowercase().contains("</script>"));
+  }
+
+  #[test]
+  fn test_build_update_script_calls_allowed_methods() {
+    for method in ["checking", "progress", "installing", "hide", "fail"] {
+      let script = build_update_script(method, 0, None);
+      assert!(script.starts_with("if (window.__simeUpdate) {"), "{}", script);
+      assert!(
+        script.contains(&format!(r#"window.__simeUpdate["{}"](0, 0)"#, method)),
+        "{}",
+        script
+      );
+    }
+
+    let script = build_update_script("progress", 1234, Some(5678));
+    assert!(script.contains(r#"window.__simeUpdate["progress"](1234, 5678)"#));
+
+    let script = build_update_script("progress", 42, None);
+    assert!(script.contains(r#"window.__simeUpdate["progress"](42, 0)"#));
+  }
+
+  #[test]
+  fn test_build_update_script_rejects_unknown_method() {
+    let script = build_update_script(r#"fail"];alert(1);["x"#, 0, None);
+    assert_eq!(script, "if (window.__simeUpdate) { window.__simeUpdate.fail(); }");
+    assert!(!script.contains("alert"));
+  }
+
+  #[test]
+  fn test_escape_js_json_breaks_closing_script_tag() {
+    let escaped = escape_js_json("</script><script>alert('x')</script>");
+    assert!(!escaped.contains("</"));
+    assert!(!escaped.to_lowercase().contains("</script"));
+    assert!(escaped.contains(r#"<\/script>"#));
+
+    // Non-ASCII text stays readable instead of being \u-escaped.
+    assert_eq!(escape_js_json("școală"), "\"școală\"");
   }
 }
