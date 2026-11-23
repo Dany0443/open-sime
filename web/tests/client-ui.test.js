@@ -7,7 +7,7 @@ import vm from "node:vm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function loadClientContext({ desktop = false } = {}) {
+function loadClientContext({ desktop = false, compactMarks = false } = {}) {
   const stringsCode = fs.readFileSync(path.join(__dirname, "../public/strings.js"), "utf8");
   const appCode = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
 
@@ -191,13 +191,18 @@ function loadClientContext({ desktop = false } = {}) {
 
   const sandbox = {
     document: doc,
+    mediaQueries: new Map(),
     doc,
     elements,
     fetch: (...args) => (sandbox.mockFetch ? sandbox.mockFetch(...args) : Promise.reject(new Error("fetch not mocked: " + args[0]))),
     window: {
       location: { hash: "" },
       ...(desktop ? { __TAURI_INTERNALS__: {} } : {}),
-      matchMedia: (q) => ({ matches: q.includes("dark"), addEventListener: () => {} }),
+      matchMedia: (q) => {
+        const media = {matches: q.includes("dark") || (compactMarks && q === "(max-width: 839px)"), addEventListener(_event, callback) { this.change = callback; }};
+        sandbox.mediaQueries.set(q, media);
+        return media;
+      },
       addEventListener: () => {},
       setTimeout: () => 1,
       clearTimeout: () => {},
@@ -1672,4 +1677,56 @@ test("Desktop timetable: failed cold overview shows unavailable instead of endle
   ctx.mockFetch = () => Promise.reject(new Error('Controlled cold startup failure'));
   await vm.runInContext('refresh({background: true})', ctx);
   assert.ok(ctx.elements.get('home-live').textContent.includes(ctx.getString('schedule_failed')));
+});
+
+test("Desktop rendering: Home does not build hidden grade views; navigation renders fresh data", () => {
+  const ctx = desktopTimetableContext();
+  vm.runInContext(`state.tab = "home"; state.data = {student: {id: "A"}, catalog: {subjects: [{subject: "Disciplina A", semesters: [{semester: 1, marks: [{value: 8}]}]}]}}; render();`, ctx);
+  assert.equal(ctx.elements.get("marks-list")?.children.length || 0, 0, "Home must not construct the hidden grades view");
+  ctx.setTab("marks");
+  assert.match(ctx.elements.get("marks-list").textContent, /Disciplina A/i);
+  vm.runInContext(`state.seq++; state.studentKey = "B"; setData({studentKey: "B", student: {id: "B"}, catalog: {subjects: [{subject: "Disciplina B", semesters: [{semester: 1, marks: [{value: 5}]}]}]}}); render();`, ctx);
+  assert.match(ctx.elements.get("marks-list").textContent, /Disciplina B/i);
+  assert.ok(!ctx.elements.get("marks-list").textContent.includes("Disciplina A"));
+});
+
+test("Desktop rendering: background ticks do not replace hidden Home or timetable content", () => {
+  const ctx = desktopTimetableContext();
+  vm.runInContext('state.tab = "marks"; state.today = todayIso();', ctx);
+  const live = ctx.doc.getElementById("home-live");
+  const sentinel = ctx.doc.createElement("span");
+  live.replaceChildren(sentinel);
+  vm.runInContext('tick()', ctx);
+  assert.equal(live.children[0], sentinel);
+});
+
+
+test("Desktop rendering: grades build only the visible responsive layout and adapt on resize", () => {
+  for (const compactMarks of [false, true]) {
+    const ctx = loadClientContext({desktop: true, compactMarks});
+    vm.runInContext(`state.tab = "marks"; state.data = {student: {id: "A"}, catalog: {subjects: [{subject: "Disciplina", semesters: [{semester: 1, marks: [{value: 8}]}]}]}}; renderMarks();`, ctx);
+    let surfaces = ctx.elements.get("marks-list").children;
+    assert.equal(surfaces[0].querySelector("tbody").children.length, compactMarks ? 0 : 1);
+    assert.equal(surfaces[1].children.length, compactMarks ? 1 : 0);
+    const media = ctx.mediaQueries.get("(max-width: 839px)");
+    media.matches = !compactMarks;
+    media.change();
+    surfaces = ctx.elements.get("marks-list").children;
+    assert.equal(surfaces[0].querySelector("tbody").children.length, compactMarks ? 1 : 0);
+    assert.equal(surfaces[1].children.length, compactMarks ? 0 : 1);
+  }
+});
+
+test("Desktop rendering: hidden documents defer periodic visual work until visible", () => {
+  const ctx = desktopTimetableContext();
+  vm.runInContext('state.tab = "home"; state.today = todayIso();', ctx);
+  const live = ctx.doc.getElementById("home-live");
+  const sentinel = ctx.doc.createElement("span");
+  live.replaceChildren(sentinel);
+  ctx.doc.hidden = true;
+  vm.runInContext('tick()', ctx);
+  assert.equal(live.children[0], sentinel);
+  ctx.doc.hidden = false;
+  vm.runInContext('tick()', ctx);
+  assert.notEqual(live.children[0], sentinel);
 });

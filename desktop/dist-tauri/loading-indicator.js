@@ -92,7 +92,8 @@
   }
 
   function frame(now) {
-    if (stopped) return;
+    frameId = 0;
+    if (stopped || document.hidden) return;
     const step = Math.floor(now / MORPH_INTERVAL_MS);
     const t = (now % MORPH_INTERVAL_MS) / MORPH_INTERVAL_MS;
     const mix = springEase(t);
@@ -105,7 +106,8 @@
 
   function start() {
     window.cancelAnimationFrame(frameId);
-    if (stopped) return;
+    frameId = 0;
+    if (stopped || document.hidden) return;
     resize();
     readColor();
     if (reduceMotionQuery && reduceMotionQuery.matches) {
@@ -121,6 +123,12 @@
     if (holder) holder.hidden = true;
   }
 
+  document.addEventListener("visibilitychange", start);
+  window.addEventListener("pagehide", () => {
+    window.cancelAnimationFrame(frameId);
+    frameId = 0;
+  });
+  window.addEventListener("pageshow", start);
   window.addEventListener("resize", start);
   if (reduceMotionQuery && reduceMotionQuery.addEventListener) {
     reduceMotionQuery.addEventListener("change", start);

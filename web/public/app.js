@@ -1390,6 +1390,11 @@ function subjectCard(s) {
   );
 }
 
+const marksCompactQuery = window.matchMedia("(max-width: 839px)");
+marksCompactQuery.addEventListener("change", () => {
+  if (isDesktop() && state.tab === "marks") renderMarks();
+});
+
 function marksCell(content, cls) { return h("td", { class: cls || "" }, content); }
 function renderMarks() {
   const summary = $("marks-summary");
@@ -1420,7 +1425,7 @@ function renderMarks() {
     )
   );
 
-  const rows = m.subjects.map((subject) => {
+  const rows = isDesktop() && marksCompactQuery.matches ? [] : m.subjects.map((subject) => {
     const groups = markGroups(subject);
     const sem = (n) => groups.find((g) => g.semester === n);
     const scale = subject.scale || getSubjectScale(subject.subject || subject.discipline);
@@ -1466,7 +1471,7 @@ function renderMarks() {
   const cardsSurface = h(
     "div",
     { class: "marks-cards-surface" },
-    m.subjects.map(subjectCard)
+    !isDesktop() || marksCompactQuery.matches ? m.subjects.map(subjectCard) : []
   );
 
   setChildren(list, tableSurface, cardsSurface);
@@ -2137,8 +2142,22 @@ function applyLocalization() {
   }
 }
 
+function renderActiveView() {
+  if (state.tab === "home") renderHome();
+  else if (state.tab === "marks") renderMarks();
+  else if (state.tab === "timetable") { buildDaySwitch(); renderLessons(); }
+  else if (state.tab === "absences") { buildAbsToggle(); renderAbsences(); }
+  else if (state.tab === "homework") renderHomework();
+  else if (state.tab === "profile") renderProfile();
+}
+
 function render() {
   renderStudents();
+  if (isDesktop()) {
+    renderActiveView();
+    renderHeaderState();
+    return;
+  }
   renderHome();
   renderMarks();
   buildDaySwitch();
@@ -2151,6 +2170,7 @@ function render() {
 }
 
 function tick() {
+  if (isDesktop() && document.hidden) return;
   const today = todayIso();
   if (state.today && today !== state.today) {
     state.today = today;
@@ -2167,7 +2187,7 @@ function tick() {
   state.today = today;
   renderHeaderState();
   if (!state.token || !state.data) return;
-  renderLive();
+  if (!isDesktop() || state.tab === "home") renderLive();
   if (state.tab === "timetable") renderLessons();
 }
 
@@ -2272,7 +2292,7 @@ async function loadDesktopSchedule(day, { force = false } = {}) {
   const record = { data: previous?.data, status: "loading" };
   desktopSchedules.set(key, record);
   const repaint = () => {
-    renderLive();
+    if (state.tab === "home") renderLive();
     if (state.tab === "timetable") renderLessons();
   };
   repaint();
@@ -2490,7 +2510,8 @@ function setTab(id) {
   const title = getTabTitle(tab);
   $("page-title").textContent = title;
   document.title = title + " - Open SIME";
-  if (tab.id === "timetable") renderLessons();
+  if (isDesktop()) renderActiveView();
+  else if (tab.id === "timetable") renderLessons();
   window.scrollTo(0, 0);
   if (state.token) {
     if (isDesktop()) loadTabData("home");

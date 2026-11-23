@@ -96,6 +96,7 @@
 
   const colors = { track: "#dee0ff", active: "#00105c" };
   let size = { width: 0, height: 0 };
+  let pixelRatio = 0;
   let frameId = 0;
   let visible = false;
   let ratio = null;
@@ -112,6 +113,7 @@
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
+    pixelRatio = dpr;
     const width = Math.max(1, Math.round((canvas.clientWidth || 0) * dpr));
     const height = Math.max(1, Math.round((canvas.clientHeight || 0) * dpr));
     if (canvas.width !== width || canvas.height !== height) {
@@ -122,9 +124,8 @@
   }
 
   function draw() {
-    resize();
+    if (!visible || document.hidden) return;
     ctx.clearRect(0, 0, size.width, size.height);
-    if (!visible) return;
 
     const geometry = barGeometry(size.width, size.height);
     const centerY = size.height / 2;
@@ -172,8 +173,9 @@
 
   function frame(now) {
     frameId = 0;
-    if (!visible) return;
+    if (!visible || document.hidden) return;
     clock = now;
+    if (pixelRatio !== (window.devicePixelRatio || 1)) resize();
     draw();
     frameId = window.requestAnimationFrame(frame);
   }
@@ -181,7 +183,8 @@
   function startAnimation() {
     window.cancelAnimationFrame(frameId);
     frameId = 0;
-    if (!visible) return;
+    if (!visible || document.hidden) return;
+    resize();
     draw();
     if (reduceMotionQuery && reduceMotionQuery.matches) return; // static drawing only
     frameId = window.requestAnimationFrame(frame);
@@ -232,10 +235,17 @@
   }
 
   window.addEventListener("resize", () => {
-    if (!visible) return;
+    if (!visible || document.hidden) return;
+    resize();
     readColors();
-    if (reduceMotionQuery && reduceMotionQuery.matches) draw();
+    draw();
   });
+  document.addEventListener("visibilitychange", startAnimation);
+  window.addEventListener("pagehide", stopAnimation);
+  window.addEventListener("pageshow", startAnimation);
+  if (reduceMotionQuery && reduceMotionQuery.addEventListener) {
+    reduceMotionQuery.addEventListener("change", startAnimation);
+  }
   if (darkQuery && darkQuery.addEventListener) {
     darkQuery.addEventListener("change", () => {
       readColors();

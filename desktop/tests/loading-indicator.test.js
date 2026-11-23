@@ -25,12 +25,15 @@ function createDom() {
   const holder = { hidden: false };
   const card = { hidden: true, classList: { add() {} } };
   const elements = { "loading-canvas": canvas, "loading-indicator": holder, "status-card": card };
+  const documentEvents = {};
+  const windowEvents = {};
   const window = {
     location: { search: "" },
     devicePixelRatio: 1,
     matchMedia: () => ({ matches: false, addEventListener() {} }),
-    addEventListener() {},
-    requestAnimationFrame() {
+    addEventListener(event, callback) { windowEvents[event] = callback; },
+    requestAnimationFrame(callback) {
+      calls.lastFrame = callback;
       calls.frames += 1;
       return calls.frames;
     },
@@ -39,6 +42,8 @@ function createDom() {
     },
   };
   const document = {
+    hidden: false,
+    addEventListener(event, callback) { documentEvents[event] = callback; },
     getElementById: (id) => elements[id] || null,
     documentElement: {},
   };
@@ -48,7 +53,7 @@ function createDom() {
     URLSearchParams,
     getComputedStyle: () => ({ getPropertyValue: () => " #00105c " }),
   });
-  return { context, window, canvas, holder, card, calls };
+  return { context, window, document, documentEvents, windowEvents, canvas, holder, card, calls };
 }
 
 test("Startup Screen: old server-starting text is gone and the shape indicator replaces it", () => {
@@ -79,4 +84,23 @@ test("Startup Screen: reduced motion draws a single static frame", () => {
   vm.runInContext(read("loading-indicator.js"), context);
   assert.equal(calls.frames, 0, "No animation loop under reduced motion");
   assert.equal(calls.fill, 1, "One static shape must be drawn");
+});
+
+
+test("Startup Screen: hidden documents pause the shape and resume without duplicate loops", () => {
+  const dom = createDom();
+  vm.runInContext(read("loading-indicator.js"), dom.context);
+  dom.document.hidden = true;
+  dom.documentEvents.visibilitychange?.();
+  const frames = dom.calls.frames;
+  const fills = dom.calls.fill;
+  dom.calls.lastFrame(16);
+  assert.equal(dom.calls.frames, frames);
+  assert.equal(dom.calls.fill, fills);
+  dom.document.hidden = false;
+  dom.documentEvents.visibilitychange();
+  assert.equal(dom.calls.frames, frames + 1);
+  dom.window.__simeLoadingIndicator.stop();
+  dom.documentEvents.visibilitychange();
+  assert.equal(dom.calls.frames, frames + 1, "A stopped indicator must stay stopped");
 });

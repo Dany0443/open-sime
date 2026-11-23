@@ -19,6 +19,7 @@ function createDom({ language = "ro", reducedMotion = false, dpr = 2 } = {}) {
     strokeStyles: [],
     fillStyles: [],
     lastFrame: null,
+    layoutReads: 0,
   };
 
   const ctx = {
@@ -42,8 +43,8 @@ function createDom({ language = "ro", reducedMotion = false, dpr = 2 } = {}) {
   const canvas = {
     width: 0,
     height: 0,
-    clientWidth: 280,
-    clientHeight: 16,
+    get clientWidth() { calls.layoutReads++; return 280; },
+    get clientHeight() { calls.layoutReads++; return 16; },
     getContext: () => ctx,
   };
   const attributes = new Map();
@@ -79,13 +80,17 @@ function createDom({ language = "ro", reducedMotion = false, dpr = 2 } = {}) {
     "update-area": area,
     "update-caption": caption,
   };
+  const documentEvents = {};
+  const windowEvents = {};
+  const mediaQueries = new Map();
   const window = {
     devicePixelRatio: dpr,
-    matchMedia: (query) => ({
-      matches: query.indexOf("reduced-motion") !== -1 ? reducedMotion : false,
-      addEventListener() {},
-    }),
-    addEventListener() {},
+    matchMedia: (query) => {
+      const media = {matches: query.includes("reduced-motion") ? reducedMotion : false, addEventListener(_event, callback) { this.change = callback; }};
+      mediaQueries.set(query, media);
+      return media;
+    },
+    addEventListener(event, callback) { windowEvents[event] = callback; },
     requestAnimationFrame(callback) {
       calls.frames += 1;
       calls.lastFrame = callback;
@@ -96,6 +101,8 @@ function createDom({ language = "ro", reducedMotion = false, dpr = 2 } = {}) {
     },
   };
   const document = {
+    hidden: false,
+    addEventListener(event, callback) { documentEvents[event] = callback; },
     getElementById: (id) => elements[id] || null,
     documentElement: {},
   };
@@ -108,7 +115,7 @@ function createDom({ language = "ro", reducedMotion = false, dpr = 2 } = {}) {
     }),
   });
 
-  return { context, window, bar, area, caption, calls, classes };
+  return { context, window, document, documentEvents, windowEvents, mediaQueries, bar, area, caption, calls, classes };
 }
 
 test("Startup Screen: update slot is reserved and hidden until Rust reveals it", () => {
@@ -283,4 +290,64 @@ test("Update bar: colors come from the loader design tokens", () => {
   assert.ok(dom.calls.strokeStyles.includes("#00105c"), "Active wave uses --on-primary-container");
   assert.ok(dom.calls.strokeStyles.includes("#dee0ff"), "Track uses --primary-container");
   assert.ok(dom.calls.fillStyles.includes("#00105c"), "End dot uses --on-primary-container");
+});
+
+
+test("Update bar: animation reads layout only when shown or resized", () => {
+  const dom = createDom();
+  vm.runInContext(read("update-bar.js"), dom.context);
+  dom.window.__simeUpdate.checking();
+  const reads = dom.calls.layoutReads;
+  assert.ok(reads > 0);
+  dom.calls.lastFrame(16);
+  dom.calls.lastFrame(32);
+  assert.equal(dom.calls.layoutReads, reads, "Animation frames must not query Canvas dimensions");
+  dom.windowEvents.resize();
+  assert.ok(dom.calls.layoutReads > reads, "Resize must update the backing resolution");
+});
+
+test("Update bar: hidden documents stop painting and resume the latest real progress", () => {
+  const dom = createDom();
+  vm.runInContext(read("update-bar.js"), dom.context);
+  dom.window.__simeUpdate.checking();
+  dom.document.hidden = true;
+  dom.documentEvents.visibilitychange?.();
+  const strokes = dom.calls.strokes;
+  const frames = dom.calls.frames;
+  dom.calls.lastFrame(16);
+  dom.window.__simeUpdate.progress(75, 100);
+  assert.equal(dom.calls.strokes, strokes);
+  assert.equal(dom.calls.frames, frames);
+  assert.equal(dom.bar.getAttribute("aria-valuenow"), "75");
+  dom.document.hidden = false;
+  dom.documentEvents.visibilitychange();
+  assert.ok(dom.calls.strokes > strokes);
+  assert.equal(dom.calls.frames, frames + 1);
+  dom.windowEvents.pagehide();
+  assert.ok(dom.calls.cancelled.length > 0);
+});
+
+test("Update bar: reduced motion can change while an update is running", () => {
+  const dom = createDom();
+  vm.runInContext(read("update-bar.js"), dom.context);
+  dom.window.__simeUpdate.checking();
+  const media = dom.mediaQueries.get("(prefers-reduced-motion: reduce)");
+  media.matches = true;
+  const frames = dom.calls.frames;
+  media.change?.();
+  assert.ok(dom.calls.cancelled.includes(frames), "Enabling reduced motion must cancel the pending animation");
+  assert.equal(dom.calls.frames, frames);
+  media.matches = false;
+  media.change();
+  assert.equal(dom.calls.frames, frames + 1);
+});
+
+test("Update bar: monitor scale changes update the Canvas backing resolution", () => {
+  const dom = createDom();
+  vm.runInContext(read("update-bar.js"), dom.context);
+  dom.window.__simeUpdate.checking();
+  const reads = dom.calls.layoutReads;
+  dom.window.devicePixelRatio = 1;
+  dom.calls.lastFrame(16);
+  assert.ok(dom.calls.layoutReads > reads, "Moving between monitor scales must resize the Canvas");
 });
