@@ -656,7 +656,7 @@ async function resumeSession() {
 async function api(path, options = {}) {
   const headers = { Accept: "application/json" };
   if (state.token && options.auth !== false) headers.Authorization = "Bearer " + state.token;
-  const init = { method: options.method || "GET", headers };
+  const init = { method: options.method || "GET", headers, ...(options.signal ? { signal: options.signal } : {}) };
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body);
@@ -1174,13 +1174,18 @@ function dayTrack(lessons, now) {
 function renderLive() {
   const host = $("home-live");
   const m = model();
-  if (!m) {
+  if (!m && !isDesktop()) {
     host.replaceChildren(pending(300));
     return;
   }
   const now = Date.now();
   const today = todayIso(now);
-  const lessons = lessonList(m.days[today], now);
+  const verified = isDesktop() ? desktopSchedule(today) : null;
+  if (isDesktop() && !verified?.data) {
+    host.replaceChildren(h("div", { class: "card-head" }, h("h2", { class: "card-title", text: t("todays_lessons") }), h("span", { text: longDate(today) })), desktopScheduleNotice(verified));
+    return;
+  }
+  const lessons = lessonList(isDesktop() ? verified.data.days[today] : m.days[today], now);
   const active = lessons.find((l) => l.state === "active");
   const next = lessons.find((l) => l.state === "upcoming");
   const anyPast = lessons.some((l) => l.state === "past");
@@ -1235,13 +1240,14 @@ function renderLive() {
       { class: "live-hero" },
       h("div", { class: "live-row" }, chip(weekend ? t("weekend_badge") : t("free_day_badge"), "neutral")),
       h("h3", { class: "live-title", text: t("no_lessons_today_title") }),
-      h("p", { class: "live-note", text: weekend ? t("schedule_resumes_monday") : t("no_lessons_today_sub") })
+      h("p", { class: "live-note", text: weekend && !isDesktop() ? t("schedule_resumes_monday") : t("no_lessons_today_sub") })
     );
   }
 
   const children = [
     h("div", { class: "card-head" }, h("h2", { class: "card-title", text: t("todays_lessons") }), h("span", { class: "card-sub", text: longDate(today) })),
     hero,
+    isDesktop() && verified.status !== "complete" ? desktopScheduleNotice(verified) : null,
     nextRow,
   ];
   if (lessons.length) {
@@ -1578,22 +1584,27 @@ function renderLessons() {
   const host = $("lesson-list");
   const heading = $("day-heading");
   const m = model();
-  if (!m) {
+  if (!m && !isDesktop()) {
     setChildren(heading);
     setChildren(host, pending(300));
     return;
   }
   const now = Date.now();
   const today = todayIso(now);
-  const lessons = lessonList(m.days[state.day], now);
+  const verified = isDesktop() ? desktopSchedule(state.day) : null;
+  const lessons = lessonList(isDesktop() ? verified?.data?.days[state.day] : m.days[state.day], now);
   setChildren(
     heading,
     h("h2", { class: "day-title", text: longDate(state.day) }),
     state.day === today ? chip(t("today"), "info") : null,
     lessons.length ? chip(tp(lessons.length, "lesson_count"), "neutral") : null
   );
+  if (isDesktop() && !verified?.data) {
+    setChildren(host, desktopScheduleNotice(verified));
+    return;
+  }
   if (!lessons.length) {
-    setChildren(host, emptyState(t("no_lessons_title"), t("no_lessons_sub")));
+    setChildren(host, isDesktop() && verified.status !== "complete" ? desktopScheduleNotice(verified) : null, emptyState(t("no_lessons_title"), t("no_lessons_sub")));
     return;
   }
   const nextIdx = state.day === today ? lessons.findIndex((l) => l.state === "upcoming") : -1;
@@ -1605,7 +1616,7 @@ function renderLessons() {
     }
     nodes.push(lessonCard(l, i === nextIdx));
   });
-  setChildren(host, h("ol", { class: "lesson-ol" }, nodes));
+  setChildren(host, isDesktop() && verified.status !== "complete" ? desktopScheduleNotice(verified) : null, h("ol", { class: "lesson-ol" }, nodes));
 }
 
 // rendering: absences
@@ -2144,7 +2155,13 @@ function tick() {
   if (state.today && today !== state.today) {
     state.today = today;
     state.day = null;
-    if (state.token) render();
+    if (state.token) {
+      render();
+      if (isDesktop()) {
+        loadTabData("home");
+        if (state.tab === "timetable") loadTabData("timetable");
+      }
+    }
     return;
   }
   state.today = today;
@@ -2228,6 +2245,75 @@ function buildNav() {
   bindNavKeyboard($("bottom-nav"), "horizontal");
 }
 
+// Only a dedicated full-week response can establish desktop timetable coverage.
+// Records stay in memory within one authorization/student-selection generation.
+const desktopSchedules = new Map();
+let desktopOverviewPending = false;
+const isDesktop = () => Boolean(window.__TAURI_INTERNALS__);
+const desktopScheduleKey = (day) => `${state.token}:${state.seq}:${state.studentKey}:${mondayOf(day)}`;
+const desktopSchedule = (day) => desktopSchedules.get(desktopScheduleKey(day)) ||
+  (state.error ? { status: "failed" } : state.data && !state.studentKey ? { status: "incomplete" } : null);
+
+function desktopScheduleNotice(record) {
+  return h("p", { class: "live-note", role: "status", text: t(
+    record?.data ? "schedule_cached" : record?.status === "failed" ? "schedule_failed" :
+      record?.status === "incomplete" ? "schedule_incomplete" : "schedule_loading"
+  ) });
+}
+
+async function loadDesktopSchedule(day, { force = false } = {}) {
+  if (!state.token || !state.studentKey || state.switching || desktopOverviewPending) return;
+  const key = desktopScheduleKey(day);
+  const previous = desktopSchedules.get(key);
+  if (previous?.promise) return previous.promise;
+  if (!force && previous?.loadedAt && Date.now() - previous.loadedAt < 60_000) return;
+  const seq = state.seq;
+  const student = state.studentKey;
+  const record = { data: previous?.data, status: "loading" };
+  desktopSchedules.set(key, record);
+  const repaint = () => {
+    renderLive();
+    if (state.tab === "timetable") renderLessons();
+  };
+  repaint();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 60_000);
+  record.promise = (async () => {
+    try {
+      const res = await api(`/api/schedule?date=${encodeURIComponent(day)}&student=${encodeURIComponent(student)}&desktop=1`, { signal: controller.signal });
+      if (seq !== state.seq || student !== state.studentKey) return;
+      const data = res?.data;
+      const valid = res?.studentKey && canonKey(res.studentKey) === canonKey(student) &&
+        data?.weekStart === mondayOf(day) && data.days && typeof data.days === "object" && !Array.isArray(data.days) &&
+        Object.entries(data.days).every(([date, lessons]) => validIso(date) && mondayOf(date) === data.weekStart &&
+          Array.isArray(lessons) && lessons.every(l => l && typeof l.subject === "string" && l.subject.trim() &&
+            Number.isFinite(Date.parse(l.start)) && Number.isFinite(Date.parse(l.end)) &&
+            Date.parse(l.end) > Date.parse(l.start) && todayIso(Date.parse(l.start)) === date));
+      if (!valid) { record.status = "incomplete"; return; }
+      record.data = data;
+      record.status = res.cache?.stale ? "cached" : "complete";
+      record.loadedAt = res.cache?.stale ? 0 : Date.now();
+    } catch (err) {
+      if (seq === state.seq && student === state.studentKey) {
+        record.status = err instanceof ApiError && err.code === "PORTAL_UNEXPECTED_PAGE" ? "incomplete" : "failed";
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      record.promise = null;
+      if (seq === state.seq && student === state.studentKey && state.token) {
+        // api() may have restored the same session with a rotated local token.
+        const restoredKey = desktopScheduleKey(day);
+        if (restoredKey !== key) {
+          if (!desktopSchedules.has(restoredKey)) desktopSchedules.set(restoredKey, record);
+          desktopSchedules.delete(key);
+        }
+        repaint();
+      }
+    }
+  })();
+  return record.promise;
+}
+
 const tabLoadedAt = new Map();
 const tabInFlight = new Map();
 
@@ -2240,6 +2326,10 @@ const TAB_TTLS = {
 };
 
 async function loadTabData(tabId, { force = false } = {}) {
+  if (isDesktop() && (desktopOverviewPending || state.switching)) return;
+  if (isDesktop() && (tabId === "home" || tabId === "timetable")) {
+    return loadDesktopSchedule(tabId === "home" ? todayIso() : state.day || todayIso(), { force });
+  }
   if (!state.token || !tabId || tabId === "home") return;
   const student = state.studentKey || (state.data && state.data.student && state.data.student.id) || "";
   if (!student) return;
@@ -2403,6 +2493,7 @@ function setTab(id) {
   if (tab.id === "timetable") renderLessons();
   window.scrollTo(0, 0);
   if (state.token) {
+    if (isDesktop()) loadTabData("home");
     loadTabData(tab.id);
   }
 }
@@ -2696,6 +2787,7 @@ function endSession(message) {
   store.del(KEYS.sync);
   tabLoadedAt.clear();
   tabInFlight.clear();
+  desktopSchedules.clear();
   window.clearTimeout(cooldownTimer);
   showAuth(message);
 }
@@ -2740,7 +2832,7 @@ async function refresh({ force = false, background = false } = {}) {
     render();
     if (force) {
       tabLoadedAt.clear();
-      if (state.tab && state.tab !== "home") loadTabData(state.tab, { force: true });
+      if (!isDesktop() && state.tab && state.tab !== "home") loadTabData(state.tab, { force: true });
     }
   } catch (err) {
     if (seq !== state.seq) return;
@@ -2757,6 +2849,11 @@ async function refresh({ force = false, background = false } = {}) {
       toast(describeError(err, "data"));
     }
   } finally {
+    desktopOverviewPending = false;
+    if (isDesktop() && seq === state.seq && state.token) {
+      await loadTabData("home", { force });
+      if (state.tab && state.tab !== "home" && state.tab !== "timetable") await loadTabData(state.tab, { force });
+    }
     state.syncing = false;
     scheduleCooldown();
   }
@@ -2794,6 +2891,7 @@ async function switchStudent(id) {
     if (Array.isArray(students)) state.students = students;
     setData(res.data, Date.now() - ageMs);
     render();
+    if (isDesktop()) loadTabData("home", { force: true });
     if (state.tab && state.tab !== "home") loadTabData(state.tab, { force: true });
   } catch (err) {
     if (seq !== state.seq) return;
@@ -2924,6 +3022,7 @@ function boot() {
 
   const token = store.get(KEYS.token);
   if (token) {
+    desktopOverviewPending = isDesktop();
     state.role = store.get(KEYS.role) || "student";
     state.token = token;
     const cached = loadCached();

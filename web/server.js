@@ -2436,7 +2436,7 @@ class SimeClient {
     return resp.text;
   }
 
-  async calendarRange(studentId, startIso, endIso) {
+  async calendarRange(studentId, startIso, endIso, { strict = false } = {}) {
     const page = await this.loadStudent(studentId, { assertCurrent: true });
     const ajaxId = findCalendarAjaxId(page.html);
     if (ajaxId === null) throw new SimeParseError("Calendar widget not found on the dashboard");
@@ -2455,7 +2455,14 @@ class SimeClient {
         throw new SimeParseError("Calendar response is not valid JSON");
       }
       if (!Array.isArray(events)) throw new SimeParseError("Calendar response has an unexpected shape");
-      entries.push(...parseCalendarEvents(events));
+      const parsed = parseCalendarEvents(events);
+      // Do not mistake discarded or out-of-period events for an empty desktop week.
+      if (strict && (parsed.length !== events.length || parsed.some(e =>
+        !e.subject || e.subject === "Unknown" || e.end <= e.start ||
+        chisinauDate(e.start) < from || chisinauDate(e.start) > to))) {
+        throw new SimeParseError("Calendar response is incomplete or outside the requested period");
+      }
+      entries.push(...parsed);
     }
     return entries;
   }
@@ -2500,10 +2507,10 @@ class SimeClient {
   }
 
   // Lessons for the Monday-Sunday week containing the given date, grouped by day
-  getWeek(studentId, isoDate) {
+  getWeek(studentId, isoDate, { strict = false } = {}) {
     return this.withRetry(async () => {
       const start = weekStart(isoDate);
-      const entries = await this.calendarRange(studentId, start, addDays(start, 6));
+      const entries = await this.calendarRange(studentId, start, addDays(start, 6), { strict });
       return { weekStart: start, days: groupByDay(entries) };
     });
   }
@@ -4086,8 +4093,8 @@ function createApp() {
     }
     return detailed;
   });
-  dataRoute(app, "schedule", TTL.schedule, (client, student, req) => client.getWeek(student.id, req.query.date || todayChisinau()), {
-    keyFor: (req) => weekStart(req.query.date || todayChisinau()),
+  dataRoute(app, "schedule", TTL.schedule, (client, student, req) => client.getWeek(student.id, req.query.date || todayChisinau(), { strict: req.query.desktop === "1" }), {
+    keyFor: (req) => `${weekStart(req.query.date || todayChisinau())}${req.query.desktop === "1" ? ":desktop" : ""}`,
     validate: (req) => {
       const d = req.query.date;
       if (d === undefined) return null;

@@ -1,5 +1,10 @@
 const STRINGS = {
   ro: {
+    schedule_loading: "Se încarcă orarul…",
+    schedule_failed: "Orarul nu a putut fi actualizat. Încearcă sincronizarea din nou.",
+    schedule_incomplete: "Orarul primit este incomplet sau nu poate fi verificat. Încearcă sincronizarea din nou.",
+    schedule_cached: "Orar verificat anterior. Actualizarea nu este încă disponibilă.",
+
     // Navigation
     tab_home: "Acasă",
     tab_marks: "Reușita",
@@ -255,6 +260,11 @@ const STRINGS = {
   },
 
   ru: {
+    schedule_loading: "Загрузка расписания…",
+    schedule_failed: "Не удалось обновить расписание. Повторите синхронизацию.",
+    schedule_incomplete: "Расписание неполное или не может быть проверено. Повторите синхронизацию.",
+    schedule_cached: "Ранее проверенное расписание. Обновление пока недоступно.",
+
     // Navigation
     tab_home: "Главная",
     tab_marks: "Успеваемость",
@@ -510,6 +520,11 @@ const STRINGS = {
   },
 
   en: {
+    schedule_loading: "Loading timetable…",
+    schedule_failed: "Timetable could not be refreshed. Try syncing again.",
+    schedule_incomplete: "The timetable is incomplete or cannot be verified. Try syncing again.",
+    schedule_cached: "Previously verified timetable. An update is not yet available.",
+
     // Navigation
     tab_home: "Home",
     tab_marks: "Grades",

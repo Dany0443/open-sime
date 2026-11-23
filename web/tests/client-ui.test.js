@@ -7,7 +7,7 @@ import vm from "node:vm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function loadClientContext() {
+function loadClientContext({ desktop = false } = {}) {
   const stringsCode = fs.readFileSync(path.join(__dirname, "../public/strings.js"), "utf8");
   const appCode = fs.readFileSync(path.join(__dirname, "../public/app.js"), "utf8");
 
@@ -196,6 +196,7 @@ function loadClientContext() {
     fetch: (...args) => (sandbox.mockFetch ? sandbox.mockFetch(...args) : Promise.reject(new Error("fetch not mocked: " + args[0]))),
     window: {
       location: { hash: "" },
+      ...(desktop ? { __TAURI_INTERNALS__: {} } : {}),
       matchMedia: (q) => ({ matches: q.includes("dark"), addEventListener: () => {} }),
       addEventListener: () => {},
       setTimeout: () => 1,
@@ -211,6 +212,7 @@ function loadClientContext() {
     },
     navigator: { serviceWorker: { register: () => Promise.resolve() } },
     URL,
+    AbortController,
     console,
     Node: MockNode,
   };
@@ -1426,4 +1428,248 @@ test("Auth Recovery: logout passes retryAuth: false and clears credentials", asy
   assert.ok(logoutOptions, "logout endpoint must be called");
   assert.equal(ctx.state.token, null);
   assert.equal(ctx.store.get(ctx.KEYS.token), null);
+});
+
+
+test("Desktop timetable: missing overview schedule is loading, never confirmed empty", async () => {
+  const ctx = loadClientContext({ desktop: true });
+  vm.runInContext(`state.token = "synthetic"; state.studentKey = "A"; state.data = {student: {id: "A"}, schedule: {days: {}}}; renderLive();`, ctx);
+  assert.ok(!ctx.elements.get("home-live").textContent.includes(ctx.getString("no_lessons_today_title")));
+  let complete;
+  ctx.mockFetch = () => new Promise(resolve => { complete = resolve; });
+  const loading = vm.runInContext('loadTabData("home")', ctx);
+  await Promise.resolve();
+  assert.equal(typeof complete, "function", "Home must fetch its timetable");
+  const day = ctx.todayIso();
+  const start = vm.runInContext('mondayOf(todayIso())', ctx);
+  complete({ok: true, status: 200, json: async () => ({studentKey: "A", data: {weekStart: start, days: {}}})});
+  await loading;
+  vm.runInContext('renderLive()', ctx);
+  assert.ok(ctx.elements.get("home-live").textContent.includes(ctx.getString("no_lessons_today_title")), day);
+});
+
+function desktopTimetableContext() {
+  const ctx = loadClientContext({ desktop: true });
+  vm.runInContext('state.token = "synthetic"; state.studentKey = "A"; state.data = {student: {id: "A"}};', ctx);
+  return ctx;
+}
+
+function scheduleResponse(ctx, subject = "Matematica", studentKey = "A", day = ctx.todayIso()) {
+  const weekStart = vm.runInContext(`mondayOf(${JSON.stringify(day)})`, ctx);
+  return { studentKey, data: { weekStart, days: { [day]: [{ subject, start: `${day}T08:00:00+02:00`, end: `${day}T08:45:00+02:00`, startLocal: "08:00", endLocal: "08:45" }] } } };
+}
+const jsonResponse = payload => ({ ok: true, status: 200, json: async () => payload });
+
+for (const [label, response] of [
+  ["failed request", () => Promise.reject(new Error("controlled timeout"))],
+  ["parser failure", () => ({ok: false, status: 502, json: async () => ({error: {code: "PORTAL_UNEXPECTED_PAGE", message: "Controlled parse failure"}})})],
+  ["missing timetable", () => jsonResponse({studentKey: "A"})],
+  ["unrecognized response", () => jsonResponse({studentKey: "A", data: {days: {}}})],
+  ["wrong period", () => jsonResponse({studentKey: "A", data: {weekStart: "2000-01-03", days: {}}})],
+  ["wrong student", ctx => jsonResponse(scheduleResponse(ctx, "Istorie", "B"))],
+]) {
+  test(`Desktop timetable: ${label} is unavailable and refresh recovers`, async () => {
+    const ctx = desktopTimetableContext();
+    ctx.mockFetch = () => response(ctx);
+    await vm.runInContext('loadTabData("home")', ctx);
+    assert.ok(!ctx.elements.get("home-live").textContent.includes(ctx.getString("no_lessons_today_title")));
+    assert.ok(ctx.elements.get("home-live").textContent.includes(ctx.getString(label === "failed request" ? "schedule_failed" : "schedule_incomplete")));
+    ctx.mockFetch = () => jsonResponse(scheduleResponse(ctx));
+    await vm.runInContext('loadTabData("home", {force: true})', ctx);
+    assert.match(ctx.elements.get("home-live").textContent, /Matematica/);
+  });
+}
+
+test("Desktop timetable: verified cached data survives overview and refresh failure", async () => {
+  const ctx = desktopTimetableContext();
+  let calls = 0;
+  ctx.mockFetch = () => { calls++; return jsonResponse(scheduleResponse(ctx)); };
+  await vm.runInContext('loadTabData("home")', ctx);
+  await vm.runInContext('loadTabData("home")', ctx);
+  assert.equal(calls, 1);
+  vm.runInContext('setData({studentKey: "A", student: {id: "A"}, schedule: {days: {}}});', ctx);
+  ctx.mockFetch = () => Promise.reject(new Error("temporary failure"));
+  await vm.runInContext('loadTabData("home", {force: true})', ctx);
+  const text = ctx.elements.get("home-live").textContent;
+  assert.match(text, /Matematica/);
+  assert.ok(text.includes(ctx.getString("schedule_cached")));
+});
+
+test("Desktop timetable: delayed A response cannot overwrite B or a new session", async () => {
+  const ctx = desktopTimetableContext();
+  let finishA;
+  ctx.mockFetch = () => new Promise(resolve => { finishA = resolve; });
+  const a = vm.runInContext('loadTabData("home")', ctx);
+  vm.runInContext('state.seq++; state.studentKey = "B"; state.data = {student: {id: "B"}};', ctx);
+  ctx.mockFetch = () => jsonResponse(scheduleResponse(ctx, "Istorie", "B"));
+  await vm.runInContext('loadTabData("home")', ctx);
+  finishA(jsonResponse(scheduleResponse(ctx, "Matematica")));
+  await a;
+  assert.match(ctx.elements.get("home-live").textContent, /Istorie/);
+  assert.ok(!ctx.elements.get("home-live").textContent.includes("Matematica"));
+  vm.runInContext('state.token = "new-session"; renderLive();', ctx);
+  assert.ok(!ctx.elements.get("home-live").textContent.includes("Istorie"));
+});
+
+test("Desktop timetable: restoration waits for overview before startup requests", async () => {
+  const ctx = loadClientContext({desktop: true});
+  const requests = [];
+  let finishOverview;
+  ctx.store.set(ctx.KEYS.token, "synthetic");
+  ctx.store.set(ctx.KEYS.student, "A");
+  ctx.store.set(`${ctx.KEYS.data}.A`, JSON.stringify({studentKey: "A", student: {id: "A"}, schedule: {days: {}}}));
+  ctx.mockFetch = path => {
+    requests.push(path);
+    if (path.includes("/api/overview")) return new Promise(resolve => { finishOverview = resolve; });
+    return Promise.resolve(jsonResponse(path.includes("/api/schedule") ? scheduleResponse(ctx) : {}));
+  };
+  ctx.boot();
+  assert.equal(requests.filter(p => p.includes("/api/schedule")).length, 0);
+  finishOverview(jsonResponse({studentKey: "A", data: {studentKey: "A", student: {id: "A"}}}));
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  assert.equal(requests.filter(p => p.includes("/api/schedule")).length, 1);
+  assert.match(ctx.elements.get("home-live").textContent, /Matematica/);
+});
+
+test("Desktop timetable: remembered session resumes before requesting its timetable", async () => {
+  const ctx = loadClientContext({desktop: true});
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  const requests = [];
+  ctx.mockFetch = path => {
+    requests.push(path);
+    return Promise.resolve(jsonResponse(path.includes("/api/auth/resume") ?
+      {token: "restored", data: {studentKey: "A", student: {id: "A"}}} :
+      path.includes("/api/schedule") ? scheduleResponse(ctx) : {}));
+  };
+  ctx.boot();
+  for (let i = 0; i < 25; i++) await Promise.resolve();
+  assert.ok(requests.findIndex(p => p.includes("/api/auth/resume")) < requests.findIndex(p => p.includes("/api/schedule")));
+  assert.match(ctx.elements.get("home-live").textContent, /Matematica/);
+});
+
+test("Desktop timetable: Chisinau day boundaries and requested week stay aligned", async () => {
+  const ctx = desktopTimetableContext();
+  assert.equal(ctx.todayIso(Date.parse("2026-11-22T21:59:59Z")), "2026-11-22");
+  assert.equal(ctx.todayIso(Date.parse("2026-11-22T22:00:00Z")), "2026-11-23");
+  assert.equal(ctx.todayIso(Date.parse("2026-07-05T21:00:00Z")), "2026-07-06");
+  vm.runInContext('state.day = "2026-11-30";', ctx);
+  let requested;
+  ctx.mockFetch = path => { requested = path; return jsonResponse(scheduleResponse(ctx, "Istorie", "A", "2026-11-30")); };
+  await vm.runInContext('loadTabData("timetable")', ctx);
+  assert.match(requested, /date=2026-11-30/);
+  vm.runInContext('renderLive()', ctx);
+  assert.ok(!ctx.elements.get("home-live").textContent.includes("Istorie"));
+});
+
+
+test("Desktop timetable: midnight rollover requests the new Chisinau week", async () => {
+  const ctx = desktopTimetableContext();
+  vm.runInContext(`globalThis.clockNow = Date.parse("2026-11-22T21:59:00Z");
+    globalThis.OriginalDate = Date;
+    globalThis.Date = class extends OriginalDate { static now() { return clockNow; } };
+    state.today = todayIso();`, ctx);
+  const requests = [];
+  ctx.mockFetch = path => {
+    requests.push(path);
+    return jsonResponse(scheduleResponse(ctx));
+  };
+  await vm.runInContext('loadTabData("home")', ctx);
+  assert.match(requests[0], /date=2026-11-22/);
+  vm.runInContext('clockNow = OriginalDate.parse("2026-11-22T22:00:00Z"); tick();', ctx);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.equal(ctx.state.today, "2026-11-23");
+  assert.match(requests[1], /date=2026-11-23/);
+  assert.match(ctx.elements.get("home-live").textContent, /Matematica/);
+});
+
+test("Desktop timetable: forced Home refresh recovers even when overview fails", async () => {
+  const ctx = desktopTimetableContext();
+  let scheduleCalls = 0;
+  ctx.mockFetch = path => {
+    if (path.includes("/api/overview")) return Promise.reject(new Error("controlled overview failure"));
+    scheduleCalls++;
+    return jsonResponse(scheduleResponse(ctx));
+  };
+  await vm.runInContext('refresh({force: true})', ctx);
+  assert.equal(scheduleCalls, 1);
+  assert.equal(ctx.state.syncing, false);
+  assert.match(ctx.elements.get("home-live").textContent, /Matematica/);
+});
+
+test("Desktop timetable: token rotation during automatic restoration finishes the load", async () => {
+  const ctx = desktopTimetableContext();
+  // Let the harness's initial unauthenticated boot settle before simulating restoration.
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  let scheduleCalls = 0;
+  ctx.mockFetch = path => {
+    if (path.includes("/api/auth/resume")) return jsonResponse({token: "restored", data: {studentKey: "A", student: {id: "A"}}});
+    scheduleCalls++;
+    if (scheduleCalls === 1) return {ok: false, status: 401, json: async () => ({error: {code: "APP_SESSION_INVALID", message: "Controlled expiry"}})};
+    return jsonResponse(scheduleResponse(ctx));
+  };
+  await vm.runInContext('loadTabData("home")', ctx);
+  assert.equal(ctx.state.token, "restored");
+  assert.equal(scheduleCalls, 2);
+  assert.match(ctx.elements.get("home-live").textContent, /Matematica/);
+});
+
+test("Desktop timetable: switch endpoint settles before B timetable, late A stays isolated", async () => {
+  const ctx = desktopTimetableContext();
+  let finishA;
+  let switchingComplete = false;
+  ctx.mockFetch = path => {
+    if (path.includes('/api/student/switch')) {
+      switchingComplete = true;
+      return jsonResponse({studentKey:'B',data:{studentKey:'B',student:{id:'B'}}});
+    }
+    if (path.includes('student=B')) {
+      assert.ok(switchingComplete);
+      return jsonResponse(scheduleResponse(ctx, 'Istorie', 'B'));
+    }
+    return new Promise(resolve => {finishA = resolve;});
+  };
+  const a = vm.runInContext('loadTabData("home")',ctx);
+  await vm.runInContext('switchStudent("B")',ctx);
+  for(let i=0;i<10;i++) await Promise.resolve();
+  finishA(jsonResponse(scheduleResponse(ctx)));
+  await a;
+  assert.equal(ctx.state.studentKey,'B');
+  assert.match(ctx.elements.get('home-live').textContent,/Istorie/);
+  assert.ok(!ctx.elements.get('home-live').textContent.includes('Matematica'));
+});
+
+test("Desktop timetable: bounded request timeout becomes unavailable and can retry", async () => {
+  const ctx = desktopTimetableContext();
+  let timeout;
+  ctx.window.setTimeout = (callback, delay) => { if (delay === 60_000) timeout = callback; return 1; };
+  ctx.mockFetch = (_path, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(new Error('Controlled abort')));
+  });
+  const loading = vm.runInContext('loadTabData("home")', ctx);
+  assert.equal(typeof timeout, 'function');
+  timeout();
+  await loading;
+  assert.ok(ctx.elements.get('home-live').textContent.includes(ctx.getString('schedule_failed')));
+  ctx.mockFetch = () => jsonResponse(scheduleResponse(ctx));
+  await vm.runInContext('loadTabData("home", {force: true})', ctx);
+  assert.match(ctx.elements.get('home-live').textContent, /Matematica/);
+});
+
+test("Desktop timetable: timetable tab shows empty only after full-week success", async () => {
+  const ctx = desktopTimetableContext();
+  vm.runInContext('renderLessons()', ctx);
+  assert.ok(!ctx.elements.get('lesson-list').textContent.includes(ctx.getString('no_lessons_title')));
+  const weekStart = vm.runInContext('mondayOf(state.day)', ctx);
+  ctx.mockFetch = () => jsonResponse({studentKey: 'A', data: {weekStart, days: {}}});
+  await vm.runInContext('loadTabData("timetable")', ctx);
+  vm.runInContext('renderLessons()', ctx);
+  assert.ok(ctx.elements.get('lesson-list').textContent.includes(ctx.getString('no_lessons_title')));
+});
+
+test("Desktop timetable: failed cold overview shows unavailable instead of endless loading", async () => {
+  const ctx = desktopTimetableContext();
+  vm.runInContext('state.data = null;', ctx);
+  ctx.mockFetch = () => Promise.reject(new Error('Controlled cold startup failure'));
+  await vm.runInContext('refresh({background: true})', ctx);
+  assert.ok(ctx.elements.get('home-live').textContent.includes(ctx.getString('schedule_failed')));
 });
