@@ -13,18 +13,10 @@
   </head>
   <body>
     <main class="shell" role="main" aria-live="polite">
-      <div class="indicator" id="loading-indicator" role="progressbar" aria-label="Se încarcă">
-        <canvas id="loading-canvas" aria-hidden="true"></canvas>
-      </div>
+      <div class="startup-brand">Open SIME</div>
       <div class="update" id="update-area">
-        <div
-          class="update-bar"
-          id="update-bar"
-          role="progressbar"
-          aria-valuemin="0"
-          aria-valuemax="100"
-        >
-          <canvas id="update-canvas" aria-hidden="true"></canvas>
+        <div class="update-bar" id="update-bar" role="progressbar" aria-label="Open SIME" aria-valuemin="0" aria-valuemax="100" data-mode="indeterminate">
+          <span class="update-fill" id="update-fill"></span>
         </div>
         <p class="update-caption" id="update-caption"></p>
       </div>
@@ -35,7 +27,6 @@
         <pre class="code" id="status-code" hidden></pre>
       </div>
     </main>
-    <script src="loading-indicator.js"></script>
     <script src="update-bar.js"></script>
     <script src="loader.js"></script>
   </body>

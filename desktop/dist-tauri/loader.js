@@ -5,7 +5,7 @@
     const detailEl = document.getElementById("status-detail");
     const codeEl = document.getElementById("status-code");
 
-    if (window.__simeLoadingIndicator) window.__simeLoadingIndicator.stop();
+    if (window.__simeUpdate) window.__simeUpdate.stop();
     if (card) {
       card.classList.add("is-error");
       card.hidden = false;

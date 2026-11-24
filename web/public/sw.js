@@ -4,6 +4,7 @@ const SHELL_ASSETS = [
   "/index.html",
   "/public/style.css",
   "/public/app.js",
+  "/public/desktop-startup.js",
   "/public/strings.js",
   "/public/manifest.json",
   "/public/assets/favicon.svg",

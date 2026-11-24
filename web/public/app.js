@@ -2156,6 +2156,7 @@ function render() {
   if (isDesktop()) {
     renderActiveView();
     renderHeaderState();
+    if (state.data || state.error) dismissStartup();
     return;
   }
   renderHome();
@@ -2726,18 +2727,23 @@ function lockLogin(seconds) {
   window.setTimeout(() => setAuthBusy(state.authBusy), seconds * 1000 + 50);
 }
 
+function dismissStartup() {
+  if (isDesktop() && window.__simeStartup) window.__simeStartup.reveal();
+  else $("splash").hidden = true;
+}
+
 function showAuth(message) {
-  $("splash").hidden = true;
   $("shell").hidden = true;
   $("auth-view").hidden = false;
   if (message) showAuthMessage(message, "info");
   else clearAuthMessage();
   document.title = t("auth_title") + " - Open SIME";
   setAuthBusy(false);
+  dismissStartup();
 }
 
 function showShell() {
-  $("splash").hidden = true;
+  if (!isDesktop() || !window.__simeStartup) $("splash").hidden = true;
   $("auth-view").hidden = true;
   $("shell").hidden = false;
 }
@@ -2838,7 +2844,9 @@ async function refresh({ force = false, background = false } = {}) {
   if (force) query.push("force=1");
   try {
     const res = await api("/api/overview" + (query.length ? "?" + query.join("&") : ""));
-    if (seq !== state.seq || !res || !res.data) return;
+    if (seq !== state.seq) return;
+    if (isDesktop() && (!res || !res.data)) throw new ApiError(t("err_server_generic"), 502, 0);
+    if (!res || !res.data) return;
     if (res.studentKey && state.studentKey && res.studentKey !== state.studentKey) return;
     if (res.role) {
       state.role = res.role;

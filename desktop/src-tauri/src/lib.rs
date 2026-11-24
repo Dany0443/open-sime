@@ -76,8 +76,8 @@ struct ErrorPayload {
 // never flashes white before the first page paints. Falls back to light when the theme is unknown.
 fn startup_background_rgb(theme: Option<Theme>) -> (u8, u8, u8) {
   match theme {
-    Some(Theme::Dark) => (0x10, 0x14, 0x1a),
-    _ => (0xf8, 0xf9, 0xff),
+    Some(Theme::Dark) => (0x12, 0x13, 0x18),
+    _ => (0xfb, 0xf8, 0xff),
   }
 }
 
@@ -784,9 +784,9 @@ mod tests {
 
   #[test]
   fn test_startup_background_matches_loader_theme() {
-    assert_eq!(startup_background_rgb(Some(Theme::Dark)), (0x10, 0x14, 0x1a));
-    assert_eq!(startup_background_rgb(Some(Theme::Light)), (0xf8, 0xf9, 0xff));
-    assert_eq!(startup_background_rgb(None), (0xf8, 0xf9, 0xff));
+    assert_eq!(startup_background_rgb(Some(Theme::Dark)), (0x12, 0x13, 0x18));
+    assert_eq!(startup_background_rgb(Some(Theme::Light)), (0xfb, 0xf8, 0xff));
+    assert_eq!(startup_background_rgb(None), (0xfb, 0xf8, 0xff));
   }
 
   #[test]

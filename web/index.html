@@ -8,6 +8,7 @@
   <title>Open SIME</title>
   <link rel="icon" href="/public/assets/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/public/manifest.json">
+  <script src="/public/desktop-startup.js"></script>
   <link rel="stylesheet" href="/public/style.css">
   <script type="module" src="/public/strings.js"></script>
   <script src="/public/app.js" defer></script>
@@ -15,6 +16,11 @@
 <body>
   <div id="splash" class="splash" role="status" aria-label="Se încarcă" data-aria-label="loading_aria">
     <span class="spinner spinner-lg" aria-hidden="true"></span>
+    <div class="desktop-startup" aria-hidden="true">
+      <div class="startup-brand">Open SIME</div>
+      <div class="startup-track"><span></span></div>
+      <div class="startup-caption"></div>
+    </div>
   </div>
 
   <main id="auth-view" class="auth" hidden>

@@ -1730,3 +1730,41 @@ test("Desktop rendering: hidden documents defer periodic visual work until visib
   vm.runInContext('tick()', ctx);
   assert.notEqual(live.children[0], sentinel);
 });
+
+
+test("Desktop startup: cold session stays covered until usable data or an honest failure is rendered", () => {
+  const ctx = loadClientContext({desktop: true});
+  const ready = [];
+  ctx.window.__simeStartup = {reveal() { ready.push(ctx.elements.get("home-live").textContent); }};
+  ctx.doc.getElementById("splash").hidden = false;
+  vm.runInContext('state.token = "synthetic"; showShell(); render();', ctx);
+  assert.equal(ready.length, 0, "A visible shell alone is not readiness");
+  assert.equal(ctx.elements.get("splash").hidden, false);
+  vm.runInContext('state.error = "Controlled failure"; render();', ctx);
+  assert.equal(ready.length, 1, "A rendered error must release startup even when offline");
+  assert.ok(ready[0].length > 0);
+});
+
+test("Desktop startup: verified cached data and the authentication view release startup", () => {
+  const ctx = loadClientContext({desktop: true});
+  let ready = 0;
+  ctx.window.__simeStartup = {reveal() { ready++; }};
+  vm.runInContext('state.data = {studentKey: "A", student: {id: "A"}}; showShell(); render();', ctx);
+  assert.equal(ready, 1);
+  assert.equal(ctx.elements.get("shell").hidden, false);
+  vm.runInContext('showAuth("")', ctx);
+  assert.equal(ready, 2);
+  assert.equal(ctx.elements.get("auth-view").hidden, false);
+  assert.equal(ctx.elements.get("shell").hidden, true);
+});
+
+test("Desktop startup: a missing overview payload releases loading into an unavailable state", async () => {
+  const ctx = desktopTimetableContext();
+  let ready = 0;
+  ctx.window.__simeStartup = {reveal() { ready++; }};
+  ctx.state.data = null;
+  ctx.mockFetch = () => jsonResponse({});
+  await vm.runInContext('refresh({background: true})', ctx);
+  assert.ok(ctx.state.error, "Malformed success must not leave startup waiting forever");
+  assert.ok(ready > 0);
+});

@@ -3316,3 +3316,40 @@ html[data-simple-mode="true"] .score-md {
   font-size: 0.8125rem;
   color: var(--on-surface-variant);
 }
+
+
+/* Desktop startup stays on the same surface across the sidecar navigation. */
+.desktop-startup { display: none; }
+html[data-desktop="true"] .splash > .spinner { display: none; }
+html[data-desktop="true"] .desktop-startup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: min(240px, 70vw);
+}
+html[data-desktop="true"] .splash {
+  transition: opacity 180ms var(--ease);
+  color: var(--on-surface);
+}
+html[data-desktop="true"] .splash.is-ready { opacity: 0; pointer-events: none; }
+.startup-brand { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.025em; }
+.startup-track { width: 100%; height: 3px; overflow: hidden; border-radius: 4px; background: var(--primary-container); }
+.startup-track > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--on-primary-container);
+  transform-origin: left;
+  animation: startup-progress 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.startup-caption { height: 1.25em; margin-top: -8px; font-size: 0.8125rem; }
+@keyframes startup-progress {
+  from { transform: translateX(-35%) scaleX(0.35); }
+  to { transform: translateX(100%) scaleX(0.35); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-desktop="true"] .splash { transition: none; }
+  .startup-track > span { animation: none; transform: translateX(32.5%) scaleX(0.35); }
+}
+html[data-reduce-motion="true"] .startup-track > span { animation: none; transform: translateX(32.5%) scaleX(0.35); }

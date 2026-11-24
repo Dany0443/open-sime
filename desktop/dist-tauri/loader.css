@@ -1,8 +1,8 @@
 :root {
   color-scheme: light dark;
-  --bg: #f8f9ff;
+  --bg: #fbf8ff;
   --surface: #ffffff;
-  --text: #181c22;
+  --text: #1b1b1f;
   --muted: #424750;
   --error: #ba1a1a;
   --error-bg: #ffdad6;
@@ -15,9 +15,9 @@
   :root {
     --primary-container: #293ca0;
     --on-primary-container: #dee0ff;
-    --bg: #10141a;
+    --bg: #121318;
     --surface: #1c2026;
-    --text: #e0e2ea;
+    --text: #e4e1e9;
     --muted: #c2c6d1;
     --error: #ffb4ab;
     --error-bg: #93000a;
@@ -37,7 +37,8 @@ body {
   justify-content: center;
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "SF Pro Text", "Avenir Next", Roboto, "Noto Sans", "Helvetica Neue", system-ui, sans-serif;
+  line-height: 1.5;
   padding: 24px;
 }
 
@@ -50,57 +51,61 @@ body {
   gap: 20px;
 }
 
-.indicator {
-  width: clamp(72px, 14vmin, 160px);
-  aspect-ratio: 1;
-  border-radius: 50%;
+.startup-brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.update {
+  width: min(240px, 70vw);
+  text-align: center;
+}
+
+.update[hidden], .card[hidden] { display: none; }
+
+.update-bar {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 4px;
   background: var(--primary-container);
 }
 
-.indicator[hidden],
-.card[hidden] {
-  display: none;
-}
-
-.indicator canvas {
+.update-fill {
   display: block;
   width: 100%;
   height: 100%;
+  background: var(--on-primary-container);
+  transform-origin: left;
+  transform: scaleX(var(--progress, 0));
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Update slot: reserved from the first paint (visibility, not display) so the
-   spinning indicator never jumps when Rust reveals the bar. */
-.update {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  visibility: hidden;
+.update-bar[data-mode="indeterminate"] .update-fill {
+  animation: startup-progress 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-.update.is-visible {
-  visibility: visible;
+@keyframes startup-progress {
+  from { transform: translateX(-35%) scaleX(0.35); }
+  to { transform: translateX(100%) scaleX(0.35); }
 }
 
-.update-bar {
-  width: min(280px, 70vw);
-  height: 16px;
-}
-
-.update-bar canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
+.update.is-paused .update-fill { animation-play-state: paused; }
 
 .update-caption {
-  margin: 0;
+  margin: 12px 0 0;
   min-height: 1.25em;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.8125rem;
   line-height: 1.25;
-  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-fill { transition: none; }
+  .update-bar[data-mode="indeterminate"] .update-fill {
+    animation: none;
+    transform: translateX(32.5%) scaleX(0.35);
+  }
 }
 
 .card {
