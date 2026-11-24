@@ -1,5 +1,18 @@
 const STRINGS = {
   ro: {
+    subject_close: "Închide detaliile",
+    subject_thesis: "Teză",
+    subject_known_absences: "Absențe din înregistrările disponibile",
+
+    subject_details: "Detalii despre disciplină",
+    subject_provisional: "Media provizorie",
+    subject_unknown_period: "Perioadă neidentificată",
+    subject_eligible: "{count} note numerice eligibile în semestrul curent",
+    subject_estimate_note: "Estimare din notele cunoscute ale semestrului curent, fără teze. Nu este o medie oficială.",
+    subject_coverage: "Sunt afișate doar datele disponibile. Rapoartele pot fi incomplete; lipsa înregistrărilor nu confirmă lipsa notelor, absențelor sau temelor.",
+    subject_unavailable: "Date indisponibile sau neconfirmate.",
+    subject_cached: "Date de la ultima sincronizare disponibilă.",
+
     schedule_loading: "Se încarcă orarul…",
     schedule_failed: "Orarul nu a putut fi actualizat. Încearcă sincronizarea din nou.",
     schedule_incomplete: "Orarul primit este incomplet sau nu poate fi verificat. Încearcă sincronizarea din nou.",
@@ -260,6 +273,19 @@ const STRINGS = {
   },
 
   ru: {
+    subject_close: "Закрыть подробности",
+    subject_thesis: "Экзамен",
+    subject_known_absences: "Пропуски из доступных записей",
+
+    subject_details: "Предмет подробно",
+    subject_provisional: "Предварительный средний балл",
+    subject_unknown_period: "Период не определён",
+    subject_eligible: "{count} подходящих числовых оценок за текущий семестр",
+    subject_estimate_note: "Расчёт по известным оценкам текущего семестра без экзаменов. Это не официальный средний балл.",
+    subject_coverage: "Показаны только доступные данные. Отчёты могут быть неполными; отсутствие записей не подтверждает отсутствие оценок, пропусков или заданий.",
+    subject_unavailable: "Данные недоступны или не подтверждены.",
+    subject_cached: "Данные последней доступной синхронизации.",
+
     schedule_loading: "Загрузка расписания…",
     schedule_failed: "Не удалось обновить расписание. Повторите синхронизацию.",
     schedule_incomplete: "Расписание неполное или не может быть проверено. Повторите синхронизацию.",
@@ -520,6 +546,19 @@ const STRINGS = {
   },
 
   en: {
+    subject_close: "Close subject details",
+    subject_thesis: "Thesis",
+    subject_known_absences: "Absences in available records",
+
+    subject_details: "Subject details",
+    subject_provisional: "Provisional average",
+    subject_unknown_period: "Unidentified period",
+    subject_eligible: "{count} eligible numeric grades in the current semester",
+    subject_estimate_note: "Estimate from known current-semester grades, excluding theses. This is not an official average.",
+    subject_coverage: "Only available data is shown. Reports may be incomplete; missing records do not confirm there are no grades, absences or assignments.",
+    subject_unavailable: "Data unavailable or unconfirmed.",
+    subject_cached: "Data from the last available synchronization.",
+
     schedule_loading: "Loading timetable…",
     schedule_failed: "Timetable could not be refreshed. Try syncing again.",
     schedule_incomplete: "The timetable is incomplete or cannot be verified. Try syncing again.",

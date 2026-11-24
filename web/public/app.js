@@ -1347,7 +1347,7 @@ function annualTile(value) {
 }
 
 function markGroupBlock(group) {
-  const title = group.semester === 1 ? t("semester_1") : group.semester === 2 ? t("semester_2") : t("marks_label");
+  const title = group.semester === 1 ? t("semester_1") : group.semester === 2 ? t("semester_2") : t(isDesktop() ? "subject_unknown_period" : "marks_label");
   return h(
     "section",
     { class: "mark-group" },
@@ -1381,7 +1381,7 @@ function subjectCard(s) {
       h(
         "div",
         { class: "subject-title-row" },
-        h("h3", { class: "subject-name", text: toTitleCase(s.subject || s.discipline || t("discipline")) }),
+        h("h3", { class: "subject-name" }, subjectLink(s)),
         scaleChip(scale)
       ),
       teacher ? h("p", { class: "subject-teacher", text: teacher }) : null
@@ -1421,7 +1421,8 @@ function renderMarks() {
       null,
       h("th", { scope: "col", text: t("discipline") }),
       h("th", { scope: "col", text: t("semester_1_marks") }),
-      h("th", { scope: "col", text: t("semester_2_marks") })
+      h("th", { scope: "col", text: t("semester_2_marks") }),
+      isDesktop() ? h("th", {scope: "col", text: t("subject_unknown_period")}) : null
     )
   );
 
@@ -1451,14 +1452,15 @@ function renderMarks() {
           h(
             "div",
             { class: "subject-title-row" },
-            h("strong", { class: "subject-name", text: toTitleCase(subject.subject || subject.discipline || t("discipline")) }),
+            h("strong", { class: "subject-name" }, subjectLink(subject)),
             scaleChip(scale)
           ),
           subject.teacher && subject.teacher !== "null" && subject.teacher !== "undefined" ? h("div", { class: "subject-teacher muted", text: subject.teacher }) : null
         )
       ),
       marksCell(pills(sem(1))),
-      marksCell(pills(sem(2)))
+      marksCell(pills(sem(2))),
+      isDesktop() ? marksCell(pills(sem(0))) : null
     );
   });
 
@@ -1475,6 +1477,132 @@ function renderMarks() {
   );
 
   setChildren(list, tableSurface, cardsSurface);
+}
+
+// Desktop subject details use the selected student's existing snapshot only.
+function subjectDetailsFor(student, label) {
+  const m = model();
+  if (!m || !student || student !== state.studentKey ||
+      state.data.studentKey !== student || (m.student.id && m.student.id !== student)) return null;
+  const matches = m.subjects.filter(s => (s.subject || s.discipline) === label);
+  if (matches.length !== 1) return null;
+  const subject = matches[0];
+  const groups = markGroups(subject);
+  const semester = num(m.metadata.currentSemester);
+  const marks = groups.find(g => g.semester === semester)?.marks || [];
+  const numeric = marks.filter(mk => mk.kind === "numeric" && !mk.isThesis && mk.value >= 1 && mk.value <= 10);
+  // Unknown periods prevent an estimate; never infer a semester from the date.
+  const periodKnown = (semester === 1 || semester === 2) && !groups.some(g => g.semester === 0);
+  const scale = subject.scale || getSubjectScale(label);
+  const average = periodKnown && scale === "numeric" && numeric.length
+    ? numeric.reduce((sum, mk) => sum + mk.value, 0) / numeric.length : null;
+  const ranks = {I: 1, S: 2, B: 3, FB: 4};
+  const regular = marks.filter(mk => !mk.isThesis);
+  const qualifier = periodKnown && scale === "qualifier" && regular.length &&
+    regular.every(mk => mk.kind === "qualifier" && ranks[mk.label])
+    ? ["", "I", "S", "B", "FB"][Math.round(regular.reduce((sum, mk) => sum + ranks[mk.label], 0) / regular.length)] : null;
+  const absences = Array.isArray(m.absences.records) ? m.absences.records.filter(r => r.subject === label) : [];
+  // Only the dedicated, verified timetable response establishes reliable coverage.
+  const schedule = desktopSchedule(state.day || todayIso());
+  const lessons = schedule?.data?.days ? Object.values(schedule.data.days).flat().filter(r => r.subject === label) : [];
+  return {subject, groups, semester, average, qualifier, eligible: numeric.length, absences,
+    homework: m.homework.filter(r => r.subject === label), lessons, schedule};
+}
+
+let subjectDetailsView = null;
+function closeSubjectDetails(immediate = false) {
+  const view = subjectDetailsView;
+  if (!view) return;
+  if (immediate && view.finish) { view.finish(true); return; }
+  if (view.closing) return;
+  view.closing = true;
+  let finished = false;
+  const finish = (skipFocus = immediate) => {
+    if (finished) return;
+    finished = true;
+    view.dialog.close();
+    view.dialog.remove();
+    if (subjectDetailsView === view) subjectDetailsView = null;
+    if (!skipFocus) {
+      const trigger = view.trigger?.isConnected === false
+        ? Array.from(document.querySelectorAll(".subject-link")).find(button => button.textContent === view.label) : view.trigger;
+      trigger?.focus();
+    }
+  };
+  view.finish = finish;
+  if (!immediate && !state.reduceMotion && view.panel.animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    view.panel.animate([{opacity: 1, transform: "translateX(0)"}, {opacity: 0, transform: "translateX(16px)"}],
+      {duration: 140, easing: "ease-in", fill: "forwards"}).finished.then(() => finish(), () => finish());
+  } else finish();
+}
+
+function openSubjectDetails(label) {
+  if (!isDesktop()) return;
+  const data = subjectDetailsFor(state.studentKey, label);
+  if (!data) return;
+  closeSubjectDetails(true);
+  const trigger = document.activeElement;
+  const section = (title, children) => h("section", {class: "subject-detail-section"}, h("h3", {text: title}), children);
+  const unavailable = () => h("p", {class: "muted", text: t("subject_unavailable")});
+  const summary = data.average != null ? fmtAvg(data.average) : data.qualifier;
+  const teacher = data.subject.teacher;
+  const close = h("button", {type: "button", class: "icon-btn subject-close", "aria-label": t("subject_close"),
+    on: {click: () => closeSubjectDetails()}}, icon("close"));
+  const panel = h("div", {class: "subject-detail-panel"},
+    h("header", {class: "subject-detail-header"}, h("div", null,
+      h("p", {class: "eyebrow", text: t("subject_details")}),
+      h("h2", {id: "subject-details-title", text: label}),
+      teacher && teacher !== "null" && teacher !== "undefined" ? h("p", {class: "muted", text: teacher}) : null), close),
+    h("div", {class: "subject-detail-content", tabindex: "0", role: "region", "aria-label": t("subject_details")},
+      h("p", {class: "muted subject-coverage", text: t("subject_coverage")}),
+      state.stale || state.offline ? h("p", {class: "live-note", text: t("subject_cached")}) : null,
+      section(t("subject_provisional"), h("div", null,
+        h("p", {class: "subject-detail-average", text: summary || "—"}),
+        h("p", {class: "muted", text: t("subject_eligible", {count: data.eligible})}),
+        h("p", {class: "muted", text: t("subject_estimate_note")}))),
+      ...[1, 2, 0].map(n => section(t(n ? "semester_" + n : "subject_unknown_period"),
+        data.groups.find(g => g.semester === n)?.marks.length
+          ? h("ul", {class: "subject-detail-grades"}, data.groups.find(g => g.semester === n).marks.map(mk => h("li", null,
+            score(mk, "md", mk.date, mk.isThesis),
+            h("div", null, h("p", {text: mk.raw || mk.label}),
+              mk.date ? h("time", {datetime: mk.date, text: longDate(mk.date)}) : null,
+              mk.isThesis ? chip(t("subject_thesis"), "neutral") : null)))) : unavailable())),
+      section(t("tab_absences"), data.absences.length
+        ? h("div", null, h("p", {class: "muted", text: t("subject_known_absences")}),
+          h("div", {class: "subject-absence-counts"}, ...["excused", "unexcused", "unknown"].map(status => {
+            const count = data.absences.filter(r => status === "excused" ? ["excused", "motivat"].includes(r.status) :
+              status === "unexcused" ? ["unexcused", "nemotivat"].includes(r.status) :
+              !["excused", "motivat", "unexcused", "nemotivat"].includes(r.status)).length;
+            return h("span", null, statusChip(status), " · " + count);
+          })), h("ul", {class: "abs-ul"}, data.absences.map(absenceRow))) : unavailable()),
+      section(t("tab_homework"), data.homework.length
+        ? h("ul", {class: "task-list"}, sortHomework(data.homework, todayIso()).map(task => taskRow(task, todayIso(), false))) : unavailable()),
+      section(t("tab_timetable"), data.lessons.length
+        ? h("ul", {class: "subject-detail-lessons"}, data.lessons.map(lesson => h("li", null,
+          h("p", {text: String(lesson.start || "").replace("T", " · ")}),
+          lesson.room ? h("p", {class: "muted", text: t("room_prefix", {room: lesson.room})}) : null))) : unavailable())
+    ));
+  const dialog = h("dialog", {class: "subject-details", "aria-labelledby": "subject-details-title",
+    on: {keydown: e => {
+      if (e.key !== "Tab") return;
+      const content = panel.querySelector(".subject-detail-content");
+      if (e.shiftKey && document.activeElement === close) { e.preventDefault(); content.focus(); }
+      else if (!e.shiftKey && document.activeElement === content) { e.preventDefault(); close.focus(); }
+    }, cancel: e => {e.preventDefault(); closeSubjectDetails();}, click: e => {
+      if (e.target !== dialog) return;
+      const rect = panel.getBoundingClientRect?.();
+      if (!rect || e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) closeSubjectDetails();
+    }}}, panel);
+  subjectDetailsView = {dialog, panel, trigger, label, student: state.studentKey, token: state.token, seq: state.seq, source: state.data};
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  close.focus();
+}
+
+function subjectLink(subject) {
+  const label = subject.subject || subject.discipline || t("discipline");
+  return isDesktop() ? h("button", {type: "button", class: "subject-link", "aria-haspopup": "dialog",
+    on: {click: () => openSubjectDetails(label)}}, label) : h("span", {text: toTitleCase(label)});
 }
 
 // rendering: timetable
@@ -1770,6 +1898,7 @@ function renderAbsences() {
     const subjectCards = sortedSubjects.map(([subj, records]) => {
       const motCount = records.filter(isExc).length;
       const nemotCount = records.filter(isUnexc).length;
+      const unknownCount = records.length - motCount - nemotCount;
       return h(
         "details",
         { class: "abs-subject-card" },
@@ -1779,13 +1908,15 @@ function renderAbsences() {
           h(
             "div",
             { class: "abs-subject-header" },
-            h("span", { class: "abs-subject-title", text: toTitleCase(subj) }),
+            h("span", { class: "abs-subject-title" }, isDesktop() && m.subjects.filter(s => (s.subject || s.discipline) === subj).length === 1
+              ? subjectLink({subject: subj}) : toTitleCase(subj)),
             h(
               "div",
               { class: "abs-subject-badges" },
               chip(tp(records.length, "abs_count"), "neutral"),
               nemotCount ? chip(t("abs_unexcused_badge", { count: nemotCount }), "error") : null,
-              motCount ? chip(t("abs_excused_badge", { count: motCount }), "success") : null
+              motCount ? chip(t("abs_excused_badge", { count: motCount }), "success") : null,
+              isDesktop() && unknownCount ? chip(t("abs_status_unknown") + " · " + unknownCount, "neutral") : null
             )
           )
         ),
@@ -2152,6 +2283,8 @@ function renderActiveView() {
 }
 
 function render() {
+  if (subjectDetailsView && (subjectDetailsView.student !== state.studentKey || subjectDetailsView.token !== state.token ||
+      subjectDetailsView.seq !== state.seq || subjectDetailsView.source !== state.data)) closeSubjectDetails(true);
   renderStudents();
   if (isDesktop()) {
     renderActiveView();
@@ -2733,6 +2866,7 @@ function dismissStartup() {
 }
 
 function showAuth(message) {
+  closeSubjectDetails(true);
   $("shell").hidden = true;
   $("auth-view").hidden = false;
   if (message) showAuthMessage(message, "info");

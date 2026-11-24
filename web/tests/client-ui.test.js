@@ -55,6 +55,9 @@ function loadClientContext({ desktop = false, compactMarks = false } = {}) {
       this.hidden = false;
       this.disabled = false;
     }
+    focus() { doc.activeElement = this; }
+    showModal() { this.open = true; }
+    close() { this.open = false; }
     get textContent() {
       if (this.nodeName === "#TEXT" || this.children.length === 0) {
         return this._textContent || "";
@@ -1767,4 +1770,187 @@ test("Desktop startup: a missing overview payload releases loading into an unava
   await vm.runInContext('refresh({background: true})', ctx);
   assert.ok(ctx.state.error, "Malformed success must not leave startup waiting forever");
   assert.ok(ready > 0);
+});
+
+
+function subjectContext(compactMarks = false) {
+  const ctx = loadClientContext({desktop: true, compactMarks});
+  vm.runInContext(`state.token = "synthetic-account"; state.studentKey = "A";
+    state.tab = "marks"; state.data = {studentKey: "A", student: {id: "A"},
+      metadata: {currentSemester: 1}, reusita: {subjects: [{subject: "Matematica", scale: "numeric",
+        markDetails: [{value: 7, kind: "numeric", semester: 1}, {value: 9, kind: "numeric", semester: 1},
+        {value: 10, kind: "numeric", semester: 2}, {value: 2, kind: "numeric", semester: 1, isThesis: true}]}]},
+      absences: {records: [{subject: "Matematica", status: "unknown", semester: 1}]},
+      homework: [{subject: "Matematica", taskDescription: "Synthetic exercise"},
+        {subject: "matematica", taskDescription: "Other subject"}]};`, ctx);
+  return ctx;
+}
+
+test("Subject details: exact ownership, semesters and provisional numeric rules", () => {
+  const ctx = subjectContext();
+  const data = vm.runInContext('subjectDetailsFor("A", "Matematica")', ctx);
+  assert.equal(data.average, 8);
+  assert.equal(data.eligible, 2);
+  assert.equal(data.groups.find(g => g.semester === 2).marks.length, 1);
+  assert.equal(data.homework.length, 1);
+  assert.equal(data.absences[0].status, "unknown");
+  assert.equal(vm.runInContext('subjectDetailsFor("B", "Matematica")', ctx), null);
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "matematica")', ctx), null);
+  vm.runInContext('state.data.reusita.subjects[0].markDetails.push({value: 6, semester: 0});', ctx);
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica").average', ctx), null);
+});
+
+test("Subject details: Grades buttons open, close and restore focus in both layouts", () => {
+  for (const compact of [false, true]) {
+    const ctx = subjectContext(compact);
+    ctx.renderMarks();
+    const trigger = ctx.elements.get("marks-list").querySelector(".subject-link");
+    assert.ok(trigger);
+    trigger.focus();
+    trigger._eventListeners.get("click")[0]();
+    const dialog = ctx.doc.body.querySelector("dialog");
+    assert.equal(dialog.open, true);
+    assert.ok(dialog.textContent.includes("Synthetic exercise"));
+    assert.ok(!dialog.textContent.includes("Other subject"));
+    dialog._eventListeners.get("cancel")[0]({preventDefault() {}});
+    assert.equal(dialog.open, false);
+    assert.equal(ctx.doc.activeElement, trigger);
+    trigger._eventListeners.get("click")[0]();
+    dialog.querySelector(".subject-close")._eventListeners.get("click")[0]();
+    assert.equal(dialog.open, false);
+    trigger._eventListeners.get("click")[0]();
+    dialog._eventListeners.get("click")[0]({target: dialog, clientX: -1, clientY: -1});
+    assert.equal(dialog.open, false);
+  }
+});
+
+test("Subject details: partial reports never claim final averages or confirmed empty related records", () => {
+  const ctx = subjectContext();
+  vm.runInContext('state.data.metadata = {}; state.data.absences = {}; state.data.homework = []; openSubjectDetails("Matematica");', ctx);
+  const dialog = ctx.doc.body.querySelector("dialog");
+  assert.ok(dialog.textContent.includes(ctx.STRINGS.ro.subject_coverage));
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica").average', ctx), null);
+  vm.runInContext('state.studentKey = "B"; state.data = {studentKey: "B", student: {id: "B"}}; render();', ctx);
+  assert.equal(dialog.open, false);
+});
+
+test("Subject details: qualifiers remain qualitative and never enter numeric estimates", () => {
+  const ctx = subjectContext();
+  vm.runInContext(`state.data.reusita.subjects[0] = {subject: "Matematica", scale: "qualifier", markDetails: [
+    {label: "FB", raw: "Foarte bine", kind: "qualifier", semester: 1},
+    {label: "B", raw: "Bine", kind: "qualifier", semester: 1}]};`, ctx);
+  const data = vm.runInContext('subjectDetailsFor("A", "Matematica")', ctx);
+  assert.equal(data.average, null);
+  assert.equal(data.qualifier, "FB", "Midpoint rounds upward like Android");
+  assert.equal(data.eligible, 0);
+  vm.runInContext('openSubjectDetails("Matematica")', ctx);
+  assert.ok(ctx.doc.body.querySelector("dialog").textContent.includes("Foarte bine"));
+  vm.runInContext('state.data.reusita.subjects[0].markDetails.push({label: "B", kind: "qualifier", semester: 0});', ctx);
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica").qualifier', ctx), null);
+});
+
+test("Subject details: ambiguous subjects and mismatched snapshot ownership fail closed", () => {
+  const ctx = subjectContext();
+  vm.runInContext('state.data.reusita.subjects.push({...state.data.reusita.subjects[0]})', ctx);
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica")', ctx), null);
+  vm.runInContext('state.data.reusita.subjects.pop(); state.data.studentKey = "B";', ctx);
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica")', ctx), null);
+});
+
+test("Subject details: absence statuses, optional data and long labels survive rendering", () => {
+  const ctx = subjectContext(true);
+  vm.runInContext(`state.data.absences.records.push(
+    {subject: "Matematica", status: "excused", semester: 1},
+    {subject: "Matematica", status: "unexcused", semester: 2},
+    {subject: "Matematica extra", status: "unexcused"});
+    state.data.reusita.subjects[0].teacher = "null";
+    openSubjectDetails("Matematica");`, ctx);
+  let dialog = ctx.doc.body.querySelector("dialog");
+  for (const key of ["abs_status_excused", "abs_status_unexcused", "abs_status_unknown"]) {
+    assert.ok(dialog.textContent.includes(ctx.STRINGS.ro[key]));
+  }
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica").absences.length', ctx), 3);
+  assert.ok(!dialog.textContent.includes("null"));
+  const label = "Synthetic subject with a deliberately long name ".repeat(4);
+  ctx.longLabel = label;
+  vm.runInContext('state.data.reusita.subjects[0].subject = longLabel; openSubjectDetails(longLabel);', ctx);
+  dialog = ctx.doc.body.querySelector("dialog");
+  assert.ok(dialog.textContent.includes(label));
+});
+
+test("Subject details: a delayed student switch closes immediately and late prior data cannot reopen", async () => {
+  const ctx = subjectContext();
+  vm.runInContext('openSubjectDetails("Matematica")', ctx);
+  const dialog = ctx.doc.body.querySelector("dialog");
+  let resolve;
+  ctx.mockFetch = () => new Promise(r => {resolve = r;});
+  const pending = vm.runInContext('switchStudent("B")', ctx);
+  assert.equal(dialog.open, false);
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica")', ctx), null);
+  resolve(jsonResponse({studentKey: "B", data: {studentKey: "B", student: {id: "B"}, reusita: {subjects: [{subject: "Istorie"}]}}}));
+  await pending;
+  vm.runInContext('openSubjectDetails("Matematica")', ctx);
+  assert.equal(ctx.doc.body.querySelector("dialog"), null);
+});
+
+test("Subject details: reduced motion bypasses closing animation and CSS supports narrow sheets", () => {
+  const ctx = subjectContext();
+  vm.runInContext('openSubjectDetails("Matematica")', ctx);
+  const dialog = ctx.doc.body.querySelector("dialog");
+  dialog.querySelector(".subject-detail-panel").animate = () => {throw new Error("Motion must be disabled");};
+  const matchMedia = ctx.window.matchMedia;
+  ctx.window.matchMedia = q => q.includes("prefers-reduced-motion") ? {matches: true} : matchMedia(q);
+  vm.runInContext('closeSubjectDetails()', ctx);
+  assert.equal(dialog.open, false);
+  const css = fs.readFileSync(path.join(__dirname, "../public/style.css"), "utf8");
+  assert.match(css, /width: min\(560px, 100%\)/);
+  assert.match(css, /\.subject-detail-content\s*\{[^}]*overflow-y: auto/);
+  assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.subject-details\[open\] \.subject-detail-panel\s*\{ animation: none/);
+});
+
+test("Subject details: verified timetable matches exact subject labels only", () => {
+  const ctx = subjectContext();
+  vm.runInContext(`desktopSchedules.set(desktopScheduleKey(todayIso()), {status: "complete", data: {days: {
+    [todayIso()]: [{subject: "Matematica", start: "2026-11-24T08:00:00", room: "Synthetic room"},
+      {subject: "matematica", start: "2026-11-24T09:00:00"}]
+  }}});`, ctx);
+  assert.equal(vm.runInContext('subjectDetailsFor("A", "Matematica").lessons.length', ctx), 1);
+  vm.runInContext('openSubjectDetails("Matematica")', ctx);
+  assert.ok(ctx.doc.body.querySelector("dialog").textContent.includes("Synthetic room"));
+});
+
+test("Subject details: Absences navigates exact subjects and labels unknown status counts", () => {
+  const ctx = subjectContext();
+  ctx.renderAbsences();
+  const list = ctx.elements.get("abs-list");
+  assert.ok(list.textContent.includes(ctx.STRINGS.ro.abs_status_unknown));
+  const button = list.querySelector(".subject-link");
+  assert.ok(button);
+  button._eventListeners.get("click")[0]();
+  assert.equal(ctx.doc.body.querySelector("dialog").open, true);
+});
+
+test("Subject details: session invalidation interrupts an in-progress closing animation", () => {
+  const ctx = subjectContext();
+  vm.runInContext('openSubjectDetails("Matematica")', ctx);
+  const dialog = ctx.doc.body.querySelector("dialog");
+  dialog.querySelector(".subject-detail-panel").animate = () => ({finished: new Promise(() => {})});
+  vm.runInContext('closeSubjectDetails(); state.seq++; render();', ctx);
+  assert.equal(dialog.open, false);
+});
+
+test("Subject details: Tab cycles between the close button and keyboard-scrollable content", () => {
+  const ctx = subjectContext();
+  vm.runInContext('openSubjectDetails("Matematica")', ctx);
+  const dialog = ctx.doc.body.querySelector("dialog");
+  const close = dialog.querySelector(".subject-close");
+  const content = dialog.querySelector(".subject-detail-content");
+  assert.equal(content.getAttribute("tabindex"), "0");
+  content.focus();
+  let prevented = false;
+  dialog._eventListeners.get("keydown")[0]({key: "Tab", shiftKey: false, preventDefault() {prevented = true;}});
+  assert.equal(ctx.doc.activeElement, close);
+  assert.equal(prevented, true);
+  dialog._eventListeners.get("keydown")[0]({key: "Tab", shiftKey: true, preventDefault() {}});
+  assert.equal(ctx.doc.activeElement, content);
 });
