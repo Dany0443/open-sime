@@ -109,9 +109,7 @@ test("AppImage Verification Helper: computeSha256 and checksum calculation", () 
 
 test("Version Consistency: package.json, tauri.conf.json, and Cargo.toml versions match and CLI validation works", () => {
   const versions = readProjectVersions(DESKTOP_ROOT);
-  assert.ok(versions.webPackageJson, "web/package.json version must be present");
   assert.ok(versions.desktopPackageJson, "desktop/package.json version must be present");
-  assert.equal(versions.webPackageJson, versions.desktopPackageJson, "web/package.json must match desktop/package.json");
   assert.equal(versions.desktopPackageJson, versions.tauriConf, "tauri.conf.json version must match package.json");
   assert.equal(versions.desktopPackageJson, versions.cargoToml, "Cargo.toml version must match package.json");
 

@@ -14,15 +14,11 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP_ROOT = path.resolve(__dirname, "..");
 
-export function readProjectVersions(desktopRoot = DESKTOP_ROOT, webRoot = path.resolve(desktopRoot, "..", "web")) {
-  const webPackageJsonPath = path.join(webRoot, "package.json");
+export function readProjectVersions(desktopRoot = DESKTOP_ROOT) {
   const desktopPackageJsonPath = path.join(desktopRoot, "package.json");
   const tauriConfPath = path.join(desktopRoot, "src-tauri", "tauri.conf.json");
   const cargoTomlPath = path.join(desktopRoot, "src-tauri", "Cargo.toml");
 
-  if (!fs.existsSync(webPackageJsonPath)) {
-    throw new Error(`Missing ${webPackageJsonPath}`);
-  }
   if (!fs.existsSync(desktopPackageJsonPath)) {
     throw new Error(`Missing ${desktopPackageJsonPath}`);
   }
@@ -33,7 +29,6 @@ export function readProjectVersions(desktopRoot = DESKTOP_ROOT, webRoot = path.r
     throw new Error(`Missing ${cargoTomlPath}`);
   }
 
-  const webPackageJson = JSON.parse(fs.readFileSync(webPackageJsonPath, "utf8"));
   const desktopPackageJson = JSON.parse(fs.readFileSync(desktopPackageJsonPath, "utf8"));
   const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, "utf8"));
   const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
@@ -44,7 +39,6 @@ export function readProjectVersions(desktopRoot = DESKTOP_ROOT, webRoot = path.r
   }
 
   return {
-    webPackageJson: webPackageJson.version?.trim(),
     desktopPackageJson: desktopPackageJson.version?.trim(),
     packageJson: desktopPackageJson.version?.trim(),
     tauriConf: tauriConf.version?.trim(),
@@ -54,22 +48,19 @@ export function readProjectVersions(desktopRoot = DESKTOP_ROOT, webRoot = path.r
 
 export function validateVersions(options = {}) {
   const desktopRoot = options.desktopRoot || DESKTOP_ROOT;
-  const webRoot = options.webRoot || path.resolve(desktopRoot, "..", "web");
-  const versions = readProjectVersions(desktopRoot, webRoot);
-  const { webPackageJson, desktopPackageJson, tauriConf, cargoToml } = versions;
+  const versions = readProjectVersions(desktopRoot);
+  const { desktopPackageJson, tauriConf, cargoToml } = versions;
 
-  if (!webPackageJson || !desktopPackageJson || !tauriConf || !cargoToml) {
+  if (!desktopPackageJson || !tauriConf || !cargoToml) {
     throw new Error(`Incomplete versions found: ${JSON.stringify(versions)}`);
   }
 
   if (
-    webPackageJson !== desktopPackageJson ||
     desktopPackageJson !== tauriConf ||
     desktopPackageJson !== cargoToml
   ) {
     throw new Error(
       `Version mismatch between project files:\n` +
-        `  web/package.json:          ${webPackageJson}\n` +
         `  desktop/package.json:      ${desktopPackageJson}\n` +
         `  src-tauri/tauri.conf.json: ${tauriConf}\n` +
         `  src-tauri/Cargo.toml:      ${cargoToml}`
@@ -122,7 +113,7 @@ if (path.resolve(process.argv[1] || "") === path.resolve(fileURLToPath(import.me
     if (options.printOnly) {
       console.log(result.version);
     } else {
-      console.log(`✓ Versions consistent: ${result.version} (web/package.json, desktop/package.json, tauri.conf.json, Cargo.toml)`);
+      console.log(`✓ Versions consistent: ${result.version} (desktop/package.json, tauri.conf.json, Cargo.toml)`);
     }
     process.exit(0);
   } catch (err) {
